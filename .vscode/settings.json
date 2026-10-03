@@ -1,0 +1,13 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "Push-Location": true,
+        "ForEach-Object": true,
+        "Pop-Location": true,
+        "cargo check": true,
+        "ConvertTo-Json": true,
+        "Set-Item": true,
+        "cargo fmt": true,
+        "Get-Process": true,
+        "cargo build": true
+    }
+}

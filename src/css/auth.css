@@ -1,0 +1,455 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-dark: #020f1e;
+  --blue: #2563eb;
+  --blue-dark: #16307a;
+  --orange: #f48430;
+  --text: #020f1e;
+  --muted: rgba(2, 15, 30, 0.5);
+  --line: #020f1e;
+  --white: #ffffff;
+  --font: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--white);
+}
+
+/* ============================================================
+   Vista ajustada a pantalla: el alto queda fijo a la ventana
+   (100dvh) y todo lo vertical (tipografía, gaps, paddings) usa
+   clamp() en vh para achicarse de forma continua según el alto
+   disponible — sin depender de breakpoints discretos y sin scroll.
+   ============================================================ */
+
+.auth-screen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  overflow: hidden;
+  background: var(--white);
+}
+
+.auth-side {
+  position: relative;
+  min-width: min(42vw, 848px);
+  height: 100%;
+  overflow: hidden;
+  background: linear-gradient(
+    360deg,
+    var(--bg-dark) 54%,
+    var(--blue-dark) 100%
+  );
+  color: var(--white);
+  padding-block: clamp(16px, 7vh, 80px);
+  padding-inline: 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: clamp(12px, 4vh, 40px);
+}
+
+.auth-side::before {
+  opacity: 0.1;
+  content: "";
+  width: 100%;
+  height: 65%;
+  position: absolute;
+  left: 0;
+  bottom: 10%;
+  background-image: url(../img/Logo.svg);
+  background-size: cover;
+  background-position: center;
+}
+
+.brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-logo {
+  width: clamp(120px, 22vh, 257px);
+  height: clamp(90px, 17vh, 194px);
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.brand-title {
+  font-size: clamp(20px, 4.5vh, 40px);
+  font-weight: 600;
+  line-height: 0.5;
+  color: var(--white);
+}
+
+.brand-subtitle {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.brand-slogan {
+  color: var(--white);
+  font-size: clamp(13px, 2.2vh, 20px);
+}
+
+.blue-line {
+  color: var(--blue);
+  font-size: clamp(18px, 3.6vh, 35px);
+  font-weight: 600;
+}
+
+.message-line {
+  color: var(--white);
+}
+
+.brand-geo {
+  min-height: clamp(70px, 20vh, 250px);
+  position: relative;
+}
+
+.auth-main {
+  flex: 1;
+  min-width: 420px;
+  height: 100%;
+  overflow: hidden;
+  background: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-block: clamp(10px, 5vh, 60px);
+  padding-inline: 90px;
+}
+
+.mobile-logo {
+  display: none;
+}
+
+.mobile-logo img {
+  display: block;
+  width: clamp(40px, 9vh, 96px);
+  height: auto;
+}
+
+.auth-panel {
+  width: min(720px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(8px, 3.5vh, 36px);
+  align-items: center;
+}
+
+.auth-header {
+  text-align: center;
+}
+
+.auth-header h1 {
+  margin: 0 0 clamp(2px, 1.2vh, 12px);
+  color: var(--text);
+  font-size: clamp(16px, 4vh, 35px);
+  font-weight: 600;
+}
+
+.auth-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(11px, 2vh, 20px);
+}
+
+.auth-form {
+  width: min(872px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 2.2vh, 24px);
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(2px, 0.8vh, 10px);
+}
+
+.field-group label {
+  font-size: clamp(11px, 1.8vh, 20px);
+  color: var(--text);
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.input-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  padding-block: clamp(6px, 1.6vh, 18px);
+  padding-inline: 20px;
+  background: var(--white);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.input-box:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.input-box input {
+  width: 100%;
+  color: var(--text);
+  font-size: clamp(12px, 1.8vh, 20px);
+  border: 0;
+  outline: none;
+  background: transparent;
+}
+
+.input-box input::placeholder {
+  color: var(--muted);
+}
+
+.input-icon {
+  width: clamp(16px, 2.2vh, 22px);
+  height: clamp(16px, 2.2vh, 22px);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.input-box:focus-within .input-icon {
+  color: var(--blue);
+}
+
+.field-view {
+  width: clamp(16px, 2.2vh, 22px);
+  height: clamp(16px, 2.2vh, 22px);
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  transition: color 150ms ease;
+}
+
+.field-view:hover {
+  color: var(--blue);
+}
+
+.form-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  row-gap: clamp(4px, 1.2vh, 14px);
+  flex-wrap: wrap;
+}
+
+.checkline {
+  gap: 10px;
+  display: flex;
+  align-items: center;
+  font-size: clamp(11px, 1.4vh, 15px);
+  color: var(--muted);
+}
+
+.checkline input {
+  accent-color: var(--blue);
+}
+
+.action-link,
+.create-user {
+  color: var(--blue);
+  font-size: clamp(12px, 1.8vh, 20px);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.action-link:hover,
+.create-user:hover {
+  text-decoration: underline;
+}
+
+.primary-button {
+  width: fit-content;
+  min-width: 250px;
+  padding-block: clamp(8px, 1.6vh, 18px);
+  padding-inline: 34px;
+  background: var(--bg-dark);
+  color: var(--white);
+  font-size: clamp(12px, 1.8vh, 20px);
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.primary-button:hover {
+  background: var(--blue);
+}
+
+.step-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.feedback {
+  min-height: clamp(0px, 1.6vh, 24px);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--orange);
+  width: 100%;
+  background-color: #2563eb0f;
+  padding: 20px;
+  border-left: 4px solid;
+  border-radius: 10px;
+}
+
+.help-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border-radius: 5px;
+  outline: 1px solid var(--line);
+  padding-block: clamp(8px, 1.6vh, 18px);
+  padding-inline: 22px;
+  color: var(--muted);
+  font-size: clamp(11px, 1.8vh, 20px);
+}
+
+.help-icon {
+  color: var(--blue);
+}
+
+.create-user {
+  margin-top: 8px;
+}
+
+.step-hidden {
+  display: none;
+}
+
+.recovery-panel {
+  align-items: stretch;
+}
+
+.recovery-form {
+  gap: clamp(8px, 2.4vh, 30px);
+}
+
+/* ============================================================
+   Layout horizontal — breakpoints propios de auth (1024/768/480).
+   Solo controlan ancho/columnas; el alto ya es fluido (clamp+vh)
+   ============================================================ */
+
+/* Laptops (1025–1366px aprox.): el panel de marca ya es visible pero
+   angosto (42vw puede bajar de ~460px); se reduce el ancho inline
+   para que el logo y el texto no se aprieten */
+@media (min-width: 1025px) and (max-width: 1366px) {
+  .auth-side {
+    padding-inline: 36px;
+  }
+
+  .auth-main {
+    padding-inline: 56px;
+  }
+}
+
+/* Tablet y móvil: se oculta el panel de marca, solo queda el formulario */
+@media (max-width: 1024px) {
+  .auth-screen {
+    flex-direction: column;
+  }
+
+  .auth-side {
+    display: none;
+  }
+
+  .auth-main {
+    min-width: 100%;
+    width: 100%;
+    padding-inline: 48px;
+  }
+
+  .auth-panel {
+    width: 100%;
+  }
+
+  .mobile-logo {
+    display: flex;
+    justify-content: center;
+  }
+}
+
+/* Tablet chica / móvil grande: el formulario reduce el padding lateral */
+@media (max-width: 768px) {
+  .auth-main {
+    padding-inline: 24px;
+  }
+
+  .input-box {
+    padding-inline: 16px;
+    gap: 12px;
+  }
+
+  .primary-button {
+    min-width: 200px;
+    padding-inline: 28px;
+  }
+
+  .help-block {
+    padding-inline: 18px;
+  }
+}
+
+/* Móvil: ajustes adicionales para pantallas muy pequeñas (desde 320px) */
+@media (max-width: 480px) {
+  .auth-main {
+    padding-inline: 20px;
+  }
+
+  .input-box {
+    padding-inline: 14px;
+  }
+
+  .form-options .checkline,
+  .form-options .action-link {
+    flex-basis: 100%;
+  }
+
+  .primary-button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 20px;
+  }
+}
+
+/* Alturas muy bajas (celular en horizontal): se oculta el logo móvil,
+   que es puramente decorativo, para ganar espacio vertical extra */
+@media (max-height: 420px) {
+  .mobile-logo {
+    display: none;
+  }
+}
