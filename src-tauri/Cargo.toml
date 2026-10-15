@@ -25,3 +25,4 @@ tauri-plugin-dialog = "2"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 bcrypt = "0.17"
 chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }

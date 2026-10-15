@@ -1,13 +1,15 @@
-const moneyFormatter = new Intl.NumberFormat("es-ES", {
-  style: "currency",
-  currency: "USD",
+const numberFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
+const quantityFormatter = new Intl.NumberFormat("es-ES", {
+  maximumFractionDigits: 3,
+});
+
 export function formatMoney(cents) {
   if (!Number.isSafeInteger(cents)) return "—";
-  return moneyFormatter.format(cents / 100);
+  return `${numberFormatter.format(cents / 100)} USD`;
 }
 
 export function formatId(id) {
@@ -15,7 +17,7 @@ export function formatId(id) {
   return `#${String(id).padStart(5, "0")}`;
 }
 
-export function formatCalendarDate(dateText) {
+export function formatDate(dateText) {
   if (typeof dateText !== "string") return "—";
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText);
   if (!match) return "—";
@@ -23,13 +25,26 @@ export function formatCalendarDate(dateText) {
   return `${day}/${month}/${year}`;
 }
 
-export function formatLocalTimestamp(timestamp) {
+export function formatCalendarDate(dateText) {
+  return formatDate(dateText);
+}
+
+export function formatQuantity(milli) {
+  if (!Number.isSafeInteger(milli)) return "—";
+  return quantityFormatter.format(milli / 1000);
+}
+
+export function formatTimestamp(timestamp) {
   if (typeof timestamp !== "string") return "—";
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "—";
 
   const twoDigits = (value) => String(value).padStart(2, "0");
   return `${twoDigits(date.getDate())}/${twoDigits(date.getMonth() + 1)}/${date.getFullYear()} ${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+}
+
+export function formatLocalTimestamp(timestamp) {
+  return formatTimestamp(timestamp);
 }
 
 export function formatRemainingDays(days) {

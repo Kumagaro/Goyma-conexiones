@@ -7,6 +7,7 @@ pub struct CategoryListItem {
     pub name: String,
     pub description: Option<String>,
     pub product_count: i64,
+    pub ingresos_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -40,6 +41,7 @@ pub struct CategoryDetail {
     pub name: String,
     pub description: Option<String>,
     pub product_count: i64,
+    pub ingresos_cents: i64,
     pub products: Vec<ProductBrief>,
     pub expired_cleanup_warning: Option<String>,
 }
@@ -67,10 +69,11 @@ mod tests {
             name: "Café".to_owned(),
             description: None,
             product_count: 2,
+            ingresos_cents: 4500,
         };
         assert_eq!(
             serde_json::to_value(&item).unwrap(),
-            json!({"id": 3, "name": "Café", "description": null, "productCount": 2})
+            json!({"id": 3, "name": "Café", "description": null, "productCount": 2, "ingresosCents": 4500})
         );
 
         let list = CategoryList {
@@ -79,7 +82,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_value(&list).unwrap(),
-            json!({"items": [{"id": 3, "name": "Café", "description": null, "productCount": 2}], "expiredCleanupWarning": null})
+            json!({"items": [{"id": 3, "name": "Café", "description": null, "productCount": 2, "ingresosCents": 4500}], "expiredCleanupWarning": null})
         );
         let list_with_warning = CategoryList {
             items: Vec::new(),
@@ -105,6 +108,7 @@ mod tests {
             name: "Café".to_owned(),
             description: Some("Molido".to_owned()),
             product_count: 1,
+            ingresos_cents: 4500,
             products: vec![ProductBrief {
                 id: 8,
                 name: "Café molido".to_owned(),
@@ -115,13 +119,14 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_value(detail).unwrap(),
-            json!({"id": 3, "name": "Café", "description": "Molido", "productCount": 1, "products": [{"id": 8, "name": "Café molido", "isOutOfStock": false, "isDiscontinued": true}], "expiredCleanupWarning": "aviso"})
+            json!({"id": 3, "name": "Café", "description": "Molido", "productCount": 1, "ingresosCents": 4500, "products": [{"id": 8, "name": "Café molido", "isOutOfStock": false, "isDiscontinued": true}], "expiredCleanupWarning": "aviso"})
         );
         let detail_without_warning = CategoryDetail {
             id: 3,
             name: "Café".to_owned(),
             description: None,
             product_count: 0,
+            ingresos_cents: 0,
             products: Vec::new(),
             expired_cleanup_warning: None,
         };

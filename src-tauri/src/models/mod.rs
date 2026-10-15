@@ -1,6 +1,13 @@
 pub mod category;
+pub mod client;
+pub mod consumption;
 pub mod conversion;
+pub mod invoice;
+pub mod invoice_line;
+pub mod lot;
 pub mod product;
+pub mod product_movement;
 pub mod session;
+pub mod supplier;
 pub mod unit;
 pub mod user;

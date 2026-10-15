@@ -1,7 +1,14 @@
+pub mod attachments;
 pub mod commands;
 pub mod db;
 pub mod errors;
+pub mod inventory;
+pub mod invoice_counter;
+pub mod invoice_snapshot;
 pub mod models;
+pub mod pricing;
+pub mod search;
+pub mod state;
 pub mod text;
 pub mod timestamps;
 pub mod validators;
@@ -43,7 +50,63 @@ pub fn run() {
             commands::auth::verify_recovery_identity,
             commands::auth::recover_password,
             commands::categories::create_category,
+            commands::categories::update_category,
+            commands::categories::get_category,
+            commands::categories::delete_category,
+            commands::categories::list_categories,
             commands::categories::search_categories,
+            commands::clients::create_client,
+            commands::clients::update_client,
+            commands::clients::delete_client,
+            commands::clients::get_client_detail,
+            commands::clients::list_clients,
+            commands::clients::search_clients,
+            commands::suppliers::create_supplier,
+            commands::suppliers::update_supplier,
+            commands::suppliers::delete_supplier,
+            commands::suppliers::get_supplier_detail,
+            commands::suppliers::list_suppliers,
+            commands::suppliers::search_suppliers,
+            commands::units::create_unit,
+            commands::units::update_unit,
+            commands::units::delete_unit,
+            commands::units::list_units,
+            commands::units::search_units,
+            commands::conversions::list_conversions,
+            commands::conversions::create_conversion,
+            commands::conversions::update_conversion_factor,
+            commands::conversions::delete_conversion,
+            commands::conversions::convert_quantity,
+            commands::products::create_product,
+            commands::products::list_products,
+            commands::products::search_products_for_invoice,
+            commands::products::get_product_associated_invoices,
+            commands::products::list_out_of_stock_and_discontinued,
+            commands::products::get_product,
+            commands::products::update_product,
+            commands::products::preview_selling_price,
+            commands::products::discontinue_product,
+            commands::products::activate_product,
+            commands::products::delete_product,
+            commands::history::get_product_history,
+            commands::history::list_history_products,
+            commands::dashboard::get_dashboard_summary,
+            commands::invoices::list_invoices,
+            commands::invoices::get_invoice,
+            commands::invoices::create_entry_invoice,
+            commands::invoices::create_sale_invoice,
+            commands::invoices::create_service_invoice,
+            commands::invoices::create_guarantee_invoice,
+            commands::invoices::create_installation_invoice,
+            commands::invoices::create_loss_invoice,
+            commands::invoices::update_sale_invoice,
+            commands::invoices::update_service_invoice,
+            commands::invoices::update_guarantee_invoice,
+            commands::invoices::update_installation_invoice,
+            commands::invoices::save_invoice_attachment,
+            commands::invoices::download_invoice_attachment,
+            commands::invoices::change_invoice_status,
+            commands::invoices::delete_invoice,
             commands::users::create_user,
             commands::users::list_users,
             commands::users::get_user_profile,

@@ -86,28 +86,99 @@ pub fn validate_not_reserved(candidate: &str, current_value: &str) -> Result<(),
 }
 
 fn has_forbidden_format_chars(value: &str) -> bool {
-    value.chars().any(|ch| (ch.is_control() && !ch.is_whitespace()) || matches!(ch,
-        '\u{00AD}' |
-        '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{200E}' | '\u{200F}' |
-        '\u{202A}' | '\u{202B}' | '\u{202C}' | '\u{202D}' | '\u{202E}' |
-        '\u{2060}' | '\u{2061}' | '\u{2062}' | '\u{2063}' | '\u{2064}' |
-        '\u{2066}' | '\u{2067}' | '\u{2068}' | '\u{2069}' | '\u{206A}' |
-        '\u{206B}' | '\u{206C}' | '\u{206D}' | '\u{206E}' | '\u{206F}' |
-        '\u{FEFF}'
-    ))
+    value.chars().any(|ch| {
+        (ch.is_control() && !ch.is_whitespace())
+            || matches!(
+                ch,
+                '\u{00AD}'
+                    | '\u{200B}'
+                    | '\u{200C}'
+                    | '\u{200D}'
+                    | '\u{200E}'
+                    | '\u{200F}'
+                    | '\u{202A}'
+                    | '\u{202B}'
+                    | '\u{202C}'
+                    | '\u{202D}'
+                    | '\u{202E}'
+                    | '\u{2060}'
+                    | '\u{2061}'
+                    | '\u{2062}'
+                    | '\u{2063}'
+                    | '\u{2064}'
+                    | '\u{2066}'
+                    | '\u{2067}'
+                    | '\u{2068}'
+                    | '\u{2069}'
+                    | '\u{206A}'
+                    | '\u{206B}'
+                    | '\u{206C}'
+                    | '\u{206D}'
+                    | '\u{206E}'
+                    | '\u{206F}'
+                    | '\u{FEFF}'
+            )
+    })
 }
 
-pub fn validate_name(raw: &str, min: usize, max: usize, message: &str) -> Result<(String, String), AppError> {
+pub fn validate_name(
+    raw: &str,
+    min: usize,
+    max: usize,
+    message: &str,
+) -> Result<(String, String), AppError> {
+    validate_name_with_messages(raw, min, max, message, message, message)
+}
+
+pub fn validate_name_with_messages(
+    raw: &str,
+    min: usize,
+    max: usize,
+    required_message: &str,
+    too_long_message: &str,
+    forbidden_message: &str,
+) -> Result<(String, String), AppError> {
     let cleaned = clean_name(raw);
-    if cleaned.is_empty() || cleaned.chars().count() < min || cleaned.chars().count() > max || has_forbidden_format_chars(&cleaned) {
-        return Err(validation_error(message));
+    if has_forbidden_format_chars(&cleaned) {
+        return Err(validation_error(forbidden_message));
+    }
+    let length = cleaned.chars().count();
+    if length < min {
+        return Err(validation_error(required_message));
+    }
+    if length > max {
+        return Err(validation_error(too_long_message));
     }
 
     let normalized = normalize_text(&cleaned);
     Ok((cleaned, normalized))
 }
 
-pub fn validate_description(raw: &str, max: usize, message: &str) -> Result<(String, String), AppError> {
+pub fn validate_optional_description(
+    raw: Option<&str>,
+    max: usize,
+    too_long_message: &str,
+    forbidden_message: &str,
+) -> Result<Option<String>, AppError> {
+    let Some(cleaned) = raw.and_then(clean_description) else {
+        return Ok(None);
+    };
+
+    if has_forbidden_format_chars(&cleaned) {
+        return Err(validation_error(forbidden_message));
+    }
+    if cleaned.chars().count() > max {
+        return Err(validation_error(too_long_message));
+    }
+
+    Ok(Some(cleaned))
+}
+
+pub fn validate_description(
+    raw: &str,
+    max: usize,
+    message: &str,
+) -> Result<(String, String), AppError> {
     let Some(cleaned) = clean_description(raw) else {
         return Err(validation_error(message));
     };
@@ -120,6 +191,163 @@ pub fn validate_description(raw: &str, max: usize, message: &str) -> Result<(Str
     Ok((cleaned, normalized))
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ContactInput<'a> {
+    pub first_name: &'a str,
+    pub last_name: &'a str,
+    pub national_id: &'a str,
+    pub phone: &'a str,
+    pub company: Option<&'a str>,
+    pub position: Option<&'a str>,
+    pub email: Option<&'a str>,
+    pub address: Option<&'a str>,
+    pub invoice_info: Option<&'a str>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ValidatedContactInput {
+    pub first_name: String,
+    pub first_name_normalized: String,
+    pub last_name: String,
+    pub last_name_normalized: String,
+    pub national_id: String,
+    pub phone: String,
+    pub company: Option<String>,
+    pub company_normalized: Option<String>,
+    pub position: Option<String>,
+    pub email: Option<String>,
+    pub address: Option<String>,
+    pub invoice_info: Option<String>,
+}
+
+pub fn validate_client_input(input: ContactInput<'_>) -> Result<ValidatedContactInput, AppError> {
+    validate_contact_input(input, true)
+}
+
+pub fn validate_supplier_input(input: ContactInput<'_>) -> Result<ValidatedContactInput, AppError> {
+    validate_contact_input(input, false)
+}
+
+fn validate_contact_input(
+    input: ContactInput<'_>,
+    include_invoice_info: bool,
+) -> Result<ValidatedContactInput, AppError> {
+    let (first_name, first_name_normalized) = validate_name_with_messages(
+        input.first_name,
+        2,
+        50,
+        "El nombre debe tener al menos 2 caracteres",
+        "El nombre no puede tener más de 50 caracteres",
+        "El nombre contiene caracteres no permitidos",
+    )?;
+    let (last_name, last_name_normalized) = validate_name_with_messages(
+        input.last_name,
+        2,
+        50,
+        "Los apellidos deben tener al menos 2 caracteres",
+        "Los apellidos no pueden tener más de 50 caracteres",
+        "Los apellidos contienen caracteres no permitidos",
+    )?;
+    validate_national_id(input.national_id)?;
+    validate_phone(input.phone)?;
+
+    let (company, company_normalized) =
+        validate_optional_contact_text(input.company, 100, "La empresa")?;
+    let (position, _) = validate_optional_contact_text(input.position, 100, "El cargo")?;
+    let email = validate_optional_email(input.email)?;
+    let (address, _) = validate_optional_contact_text(input.address, 200, "La dirección")?;
+    let (invoice_info, _) = if include_invoice_info {
+        validate_optional_contact_text(input.invoice_info, 200, "La información de factura")?
+    } else {
+        (None, None)
+    };
+
+    Ok(ValidatedContactInput {
+        first_name,
+        first_name_normalized,
+        last_name,
+        last_name_normalized,
+        national_id: input.national_id.to_owned(),
+        phone: input.phone.to_owned(),
+        company,
+        company_normalized,
+        position,
+        email,
+        address,
+        invoice_info,
+    })
+}
+
+fn validate_optional_contact_text(
+    raw: Option<&str>,
+    max: usize,
+    label: &str,
+) -> Result<(Option<String>, Option<String>), AppError> {
+    let Some(cleaned) = raw.map(clean_name) else {
+        return Ok((None, None));
+    };
+    if cleaned.is_empty() {
+        return Ok((None, None));
+    }
+    if has_forbidden_format_chars(&cleaned) {
+        return Err(validation_error(&format!(
+            "{label} contiene caracteres no permitidos"
+        )));
+    }
+    if cleaned.chars().count() > max {
+        return Err(validation_error(&format!(
+            "{label} no puede tener más de {max} caracteres"
+        )));
+    }
+
+    let normalized = normalize_text(&cleaned);
+    Ok((Some(cleaned), Some(normalized)))
+}
+
+fn validate_optional_email(raw: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(cleaned) = raw.map(clean_name) else {
+        return Ok(None);
+    };
+    if cleaned.is_empty() {
+        return Ok(None);
+    }
+    if !crate::text::is_valid_email(&cleaned) {
+        return Err(validation_error("El correo no tiene un formato válido"));
+    }
+    Ok(Some(cleaned))
+}
+
+pub fn validate_invoice_notes(raw: &str) -> Result<Option<String>, AppError> {
+    let Some(cleaned) = clean_description(raw) else {
+        return Ok(None);
+    };
+    if has_forbidden_format_chars(&cleaned) {
+        return Err(validation_error(
+            "Las observaciones contienen caracteres no permitidos",
+        ));
+    }
+    if cleaned.chars().count() > 500 {
+        return Err(validation_error(
+            "Las observaciones no pueden tener más de 500 caracteres",
+        ));
+    }
+    Ok(Some(cleaned))
+}
+
+pub fn validate_attachment_original_name(raw: &str) -> Result<String, AppError> {
+    let cleaned = clean_name(raw);
+    if cleaned.is_empty()
+        || cleaned.chars().count() > 100
+        || cleaned.contains(['/', '\\'])
+        || has_forbidden_format_chars(&cleaned)
+    {
+        return Err(validation_error(
+            "El nombre del archivo adjunto no es válido",
+        ));
+    }
+    Ok(cleaned)
+}
+
 fn parse_decimal_parts(raw: &str) -> Result<(String, Option<String>), AppError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed.bytes().any(|byte| byte.is_ascii_whitespace()) {
@@ -128,15 +356,13 @@ fn parse_decimal_parts(raw: &str) -> Result<(String, Option<String>), AppError> 
 
     let has_comma = trimmed.contains(',');
     let has_dot = trimmed.contains('.');
-    if has_comma && has_dot {
+    if (has_comma && has_dot) || trimmed.matches(',').count() + trimmed.matches('.').count() > 1 {
         return Err(validation_error("El valor ingresado no es válido"));
     }
 
     let mut normalized = String::new();
     for ch in trimmed.chars() {
-        if ch.is_ascii_digit() {
-            normalized.push(ch);
-        } else if ch == '.' || ch == ',' {
+        if ch.is_ascii_digit() || ch == '.' || ch == ',' {
             normalized.push(ch);
         } else {
             return Err(validation_error("El valor ingresado no es válido"));
@@ -179,18 +405,20 @@ pub fn parse_scaled(
     };
 
     let whole_digits = whole.chars().filter(|ch| ch.is_ascii_digit()).count();
-    if whole_digits > max_integer_digits {
-        return Err(validation_error("El valor está fuera de rango"));
-    }
 
     if let Some(frac) = fraction_part {
         let frac_digits = frac.chars().filter(|ch| ch.is_ascii_digit()).count();
+        let whole_is_nonzero = !whole.trim_start_matches('0').is_empty();
+        if normalized.contains('.') && frac_digits == 3 && whole_is_nonzero {
+            return Err(validation_error("El valor tiene un formato ambiguo"));
+        }
         if frac_digits > decimal_places {
             return Err(validation_error("El valor tiene demasiados decimales"));
         }
-        if normalized.contains('.') && frac_digits == 3 && whole_digits > 0 && whole != "0" {
-            return Err(validation_error("El valor tiene un formato ambiguo"));
-        }
+    }
+
+    if whole_digits > max_integer_digits {
+        return Err(validation_error("El valor está fuera de rango"));
     }
 
     let scaled = if let Some(frac) = fraction_part {
@@ -199,18 +427,21 @@ pub fn parse_scaled(
             digits.push('0');
         }
         let whole_part = if whole.is_empty() { "0" } else { whole };
-        let value = if whole_part == "0" && digits == "0".repeat(decimal_places) {
+        if whole_part == "0" && digits == "0".repeat(decimal_places) {
             0
         } else {
             let mut integer_value = whole_part.parse::<i128>().unwrap_or(0);
-            integer_value = integer_value * (10_i128.pow(decimal_places as u32));
+            integer_value *= 10_i128.pow(decimal_places as u32);
             let fraction_value = digits.parse::<i128>().unwrap_or(0);
             integer_value + fraction_value
-        };
-        value
+        }
     } else {
         let whole_part = if whole.is_empty() { "0" } else { whole };
-        whole_part.parse::<i128>().unwrap_or(0)
+        whole_part
+            .parse::<i128>()
+            .unwrap_or(0)
+            .checked_mul(10_i128.pow(decimal_places as u32))
+            .ok_or_else(|| validation_error("El valor está fuera de rango"))?
     };
 
     if scaled < min || scaled > max {
@@ -261,11 +492,15 @@ pub fn validate_expiry_date(
     };
 
     if parsed.year() > 2100 {
-        return Err(validation_error("La fecha de caducidad no es válida"));
+        return Err(validation_error(
+            "La fecha de caducidad no puede ser posterior al año 2100",
+        ));
     }
 
     if parsed < today && actual != Some(cleaned) {
-        return Err(validation_error("La fecha de caducidad no es válida"));
+        return Err(validation_error(
+            "La fecha de caducidad no puede ser anterior a hoy",
+        ));
     }
 
     Ok(cleaned.to_owned())
@@ -279,9 +514,10 @@ fn validation_error(message: &str) -> AppError {
 mod tests {
     use super::{
         normalize_username, parse_cost_cents, parse_factor_micro, parse_percent_hundredths,
-        parse_quantity_milli, parse_quantity_micro, validate_description, validate_expiry_date,
+        parse_quantity_micro, parse_quantity_milli, validate_attachment_original_name,
+        validate_client_input, validate_description, validate_expiry_date, validate_invoice_notes,
         validate_name, validate_national_id, validate_not_reserved, validate_password,
-        validate_phone, validate_role, validate_username,
+        validate_phone, validate_role, validate_supplier_input, validate_username, ContactInput,
     };
 
     fn assert_validation_error<T: std::fmt::Debug>(
@@ -383,11 +619,13 @@ mod tests {
 
     #[test]
     fn inventory_text_validation_cleans_and_normalizes_names_and_descriptions() {
-        let (clean_name, normalized_name) = validate_name("  Café   con  ñ  ", 2, 50, "Nombre inválido").unwrap();
+        let (clean_name, normalized_name) =
+            validate_name("  Café   con  ñ  ", 2, 50, "Nombre inválido").unwrap();
         assert_eq!(clean_name, "Café con ñ");
         assert_eq!(normalized_name, "cafe con ñ");
 
-        let (clean_desc, normalized_desc) = validate_description("  Dos\n\t líneas  ", 200, "Descripción inválida").unwrap();
+        let (clean_desc, normalized_desc) =
+            validate_description("  Dos\n\t líneas  ", 200, "Descripción inválida").unwrap();
         assert_eq!(clean_desc, "Dos\nlíneas");
         assert_eq!(normalized_desc, "dos lineas");
 
@@ -416,14 +654,207 @@ mod tests {
     fn inventory_expiry_validation_accepts_valid_dates_and_keeps_unchanged_expired_values() {
         let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 3).unwrap();
 
-        assert_eq!(validate_expiry_date("2026-10-03", today, None).unwrap(), "2026-10-03");
+        assert_eq!(
+            validate_expiry_date("2026-10-03", today, None).unwrap(),
+            "2026-10-03"
+        );
         assert!(validate_expiry_date("2026-10-02", today, None).is_err());
         assert!(validate_expiry_date("2026-02-30", today, None).is_err());
         assert!(validate_expiry_date("2026-2-3", today, None).is_err());
         assert!(validate_expiry_date("2101-01-01", today, None).is_err());
-        assert_eq!(validate_expiry_date("2100-12-31", today, None).unwrap(), "2100-12-31");
+        assert_eq!(
+            validate_expiry_date("2100-12-31", today, None).unwrap(),
+            "2100-12-31"
+        );
 
         let expired = "2026-10-02";
-        assert_eq!(validate_expiry_date(expired, today, Some(expired)).unwrap(), expired);
+        assert_eq!(
+            validate_expiry_date(expired, today, Some(expired)).unwrap(),
+            expired
+        );
+    }
+
+    #[test]
+    fn contact_validators_clean_fields_normalize_search_values_and_validate_optional_data() {
+        let valid_input = ContactInput {
+            first_name: "  Ana   María ",
+            last_name: " Pérez  ",
+            national_id: "12345678901",
+            phone: "+5355551234",
+            company: Some("  Servicios   Norte  "),
+            position: Some("  Técnica  "),
+            email: Some(" ana@example.com "),
+            address: Some("  Calle   10  "),
+            invoice_info: Some("  Nombre fiscal  "),
+        };
+        let validated = validate_client_input(valid_input).unwrap();
+        assert_eq!(validated.first_name, "Ana María");
+        assert_eq!(validated.first_name_normalized, "ana maria");
+        assert_eq!(validated.last_name, "Pérez");
+        assert_eq!(validated.last_name_normalized, "perez");
+        assert_eq!(validated.national_id, "12345678901");
+        assert_eq!(validated.phone, "+5355551234");
+        assert_eq!(validated.company.as_deref(), Some("Servicios Norte"));
+        assert_eq!(
+            validated.company_normalized.as_deref(),
+            Some("servicios norte")
+        );
+        assert_eq!(validated.position.as_deref(), Some("Técnica"));
+        assert_eq!(validated.email.as_deref(), Some("ana@example.com"));
+        assert_eq!(validated.address.as_deref(), Some("Calle 10"));
+        assert_eq!(validated.invoice_info.as_deref(), Some("Nombre fiscal"));
+
+        let empty_optional_fields = ContactInput {
+            first_name: "Ana",
+            last_name: "Pérez",
+            national_id: "12345678901",
+            phone: "+5355551234",
+            company: Some("  "),
+            position: None,
+            email: None,
+            address: Some(""),
+            invoice_info: Some("\t"),
+        };
+        let validated = validate_client_input(empty_optional_fields).unwrap();
+        assert_eq!(validated.company, None);
+        assert_eq!(validated.position, None);
+        assert_eq!(validated.email, None);
+        assert_eq!(validated.address, None);
+        assert_eq!(validated.invoice_info, None);
+
+        let supplier = validate_supplier_input(ContactInput {
+            first_name: "Ana",
+            last_name: "Pérez",
+            national_id: "12345678901",
+            phone: "+5355551234",
+            company: None,
+            position: None,
+            email: None,
+            address: None,
+            invoice_info: None,
+        })
+        .unwrap();
+        assert_eq!(supplier.first_name_normalized, "ana");
+        assert_eq!(supplier.invoice_info, None);
+
+        assert_eq!(
+            validate_invoice_notes("  Nota   breve\nsegunda  ")
+                .unwrap()
+                .as_deref(),
+            Some("Nota breve\nsegunda")
+        );
+        assert_eq!(validate_invoice_notes("  \n ").unwrap(), None);
+        assert_eq!(
+            validate_attachment_original_name("  factura.pdf  ").unwrap(),
+            "factura.pdf"
+        );
+    }
+
+    #[test]
+    fn contact_validators_reject_invalid_lengths_formats_and_control_characters() {
+        for invalid_name in ["A", &"a".repeat(51)] {
+            assert_eq!(
+                validate_client_input(ContactInput {
+                    first_name: invalid_name,
+                    last_name: "Pérez",
+                    national_id: "12345678901",
+                    phone: "+5355551234",
+                    company: None,
+                    position: None,
+                    email: None,
+                    address: None,
+                    invoice_info: None,
+                })
+                .unwrap_err()
+                .code,
+                "validationFailed"
+            );
+        }
+
+        for (field, value) in [
+            ("last_name", "P"),
+            ("national_id", "1234567890x"),
+            ("phone", "+535555123"),
+            ("company", &"c".repeat(101)),
+            ("position", &"p".repeat(101)),
+            ("address", &"d".repeat(201)),
+            ("invoice_info", &"i".repeat(201)),
+        ] {
+            let mut input = ContactInput {
+                first_name: "Ana",
+                last_name: "Pérez",
+                national_id: "12345678901",
+                phone: "+5355551234",
+                company: None,
+                position: None,
+                email: None,
+                address: None,
+                invoice_info: None,
+            };
+            match field {
+                "last_name" => input.last_name = value,
+                "national_id" => input.national_id = value,
+                "phone" => input.phone = value,
+                "company" => input.company = Some(value),
+                "position" => input.position = Some(value),
+                "address" => input.address = Some(value),
+                "invoice_info" => input.invoice_info = Some(value),
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                validate_client_input(input).unwrap_err().code,
+                "validationFailed"
+            );
+        }
+
+        let invalid_email = ContactInput {
+            first_name: "Ana",
+            last_name: "Pérez",
+            national_id: "12345678901",
+            phone: "+5355551234",
+            company: None,
+            position: None,
+            email: Some("ana@dominio"),
+            address: None,
+            invoice_info: None,
+        };
+        assert_validation_error(
+            validate_client_input(invalid_email),
+            "El correo no tiene un formato válido",
+        );
+
+        let forbidden_format = ContactInput {
+            first_name: "Ana\u{202e}",
+            last_name: "Pérez",
+            national_id: "12345678901",
+            phone: "+5355551234",
+            company: None,
+            position: None,
+            email: None,
+            address: None,
+            invoice_info: None,
+        };
+        assert_eq!(
+            validate_supplier_input(forbidden_format).unwrap_err().code,
+            "validationFailed"
+        );
+
+        assert_eq!(
+            validate_invoice_notes(&"n".repeat(501)).unwrap_err().code,
+            "validationFailed"
+        );
+        for invalid_name in [
+            "folder/factura.pdf",
+            "folder\\factura.pdf",
+            "",
+            &"f".repeat(101),
+        ] {
+            assert_eq!(
+                validate_attachment_original_name(invalid_name)
+                    .unwrap_err()
+                    .code,
+                "validationFailed"
+            );
+        }
     }
 }

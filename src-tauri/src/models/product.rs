@@ -12,11 +12,35 @@ pub struct ProductListItem {
     pub unit_abbreviation: Option<String>,
     pub quantity: String,
     pub cost_cents: i64,
+    pub valor_total_cents: i64,
     pub selling_price_cents: i64,
     pub profit_percent: String,
     pub expires_on: Option<String>,
     pub is_out_of_stock: bool,
     pub is_low_stock: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductMatch {
+    pub id: i64,
+    pub name: String,
+    pub category_name: Option<String>,
+    pub unit_abbreviation: Option<String>,
+    pub stock: String,
+    pub is_out_of_stock: bool,
+    pub is_discontinued: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductAssociatedInvoice {
+    pub invoice_id: i64,
+    pub invoice_number: String,
+    pub invoice_type: String,
+    pub invoice_date: String,
+    pub status: Option<String>,
+    pub quantity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,6 +62,15 @@ pub struct ProductConditionItem {
 pub struct ProductConditionList {
     pub items: Vec<ProductConditionItem>,
     pub expired_cleanup_warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProductConditionFilter {
+    #[default]
+    All,
+    OutOfStock,
+    Discontinued,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -210,8 +243,8 @@ mod tests {
 
     use super::{
         DashboardSummary, ExpiryFilter, OutOfStockCategory, PriceQuote, ProductActionResult,
-        ProductConditionItem, ProductConditionList, ProductDetail, ProductFilters, ProductListItem,
-        StockFilter, UpdateProductResult,
+        ProductConditionFilter, ProductConditionItem, ProductConditionList, ProductDetail,
+        ProductFilters, ProductListItem, StockFilter, UpdateProductResult,
     };
 
     #[test]
@@ -226,6 +259,7 @@ mod tests {
             unit_abbreviation: Some("kg".to_owned()),
             quantity: "1,25".to_owned(),
             cost_cents: 1250,
+            valor_total_cents: 1563,
             selling_price_cents: 1500,
             profit_percent: "20,00".to_owned(),
             expires_on: None,
@@ -235,7 +269,7 @@ mod tests {
         let item_json = serde_json::to_value(&item).unwrap();
         assert_eq!(
             item_json,
-            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true})
+            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true})
         );
         assert!(item_json["quantity"].is_string());
         assert!(item_json["profitPercent"].is_string());
@@ -309,7 +343,7 @@ mod tests {
         let detail_json = serde_json::to_value(detail).unwrap();
         assert_eq!(
             detail_json,
-            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null})
+            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null})
         );
         assert_eq!(detail_json["isDiscontinued"], true);
         assert_eq!(detail_json["discontinuedAt"], "2026-10-03T12:00:00Z");
@@ -376,6 +410,20 @@ mod tests {
         assert_eq!(filters.expiry, ExpiryFilter::All);
         assert!(serde_json::from_value::<ProductFilters>(json!({"unexpected": true})).is_err());
 
+        assert_eq!(
+            serde_json::from_value::<ProductConditionFilter>(json!("all")).unwrap(),
+            ProductConditionFilter::All
+        );
+        assert_eq!(
+            serde_json::from_value::<ProductConditionFilter>(json!("outOfStock")).unwrap(),
+            ProductConditionFilter::OutOfStock
+        );
+        assert_eq!(
+            serde_json::from_value::<ProductConditionFilter>(json!("discontinued")).unwrap(),
+            ProductConditionFilter::Discontinued
+        );
+        assert!(serde_json::from_value::<ProductConditionFilter>(json!("unknown")).is_err());
+
         assert!(serde_json::from_value::<super::CreateProductInput>(json!({
             "name": "Café",
             "cost": "1,00",
@@ -393,6 +441,12 @@ mod tests {
         .unwrap();
         assert_eq!(create_input.cost, "1,00");
         assert_eq!(create_input.quantity, "1");
+        assert!(serde_json::from_value::<super::CreateProductInput>(json!({
+            "name": "Café",
+            "cost": "1,00",
+            "profitPercent": "20,00"
+        }))
+        .is_err());
         assert!(serde_json::from_value::<super::UpdateProductInput>(json!({
             "productId": 1,
             "name": "Café",

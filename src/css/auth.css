@@ -271,7 +271,7 @@ body {
   gap: 10px;
   display: flex;
   align-items: center;
-  font-size: clamp(11px, 1.4vh, 15px);
+  font-size: 14px;
   color: var(--muted);
 }
 

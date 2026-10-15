@@ -1,4 +1,11 @@
 pub mod auth;
 pub mod categories;
+pub mod clients;
+pub mod conversions;
+pub mod dashboard;
+pub mod history;
+pub mod invoices;
 pub mod products;
+pub mod suppliers;
+pub mod units;
 pub mod users;

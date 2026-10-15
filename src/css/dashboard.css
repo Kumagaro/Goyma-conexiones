@@ -437,6 +437,10 @@ svg.icon {
 }
 
 /* ===== SPA page switching ===== */
+[hidden] {
+  display: none !important;
+}
+
 .page {
   display: none;
   animation: fadeIn 320ms ease;
@@ -1633,6 +1637,12 @@ svg.icon {
   max-width: 713px;
 }
 
+#producto-search-bar {
+  display: flex;
+  width: 50%;
+  gap: 10px;
+}
+
 .search-bar input {
   border: none;
   outline: none;
@@ -1740,21 +1750,29 @@ svg.icon {
   border-color: #ef4444;
 }
 
+#producto-categoria-listbox {
+  margin-top: 5px;
+}
+
 .action-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   background: none;
-  border: none;
-  color: #2563eb80;
+  border: 1px solid #2563eb;
+  color: #2563eb;
+  margin-right: 5px;
   font: inherit;
   font-size: 15px;
   padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
-  transition:
-    background-color 180ms ease,
-    color 180ms ease;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.action-link.danger {
+  border: 1px solid #ef4444;
+  color: #ef4444;
 }
 
 .action-link:hover {
@@ -2048,7 +2066,8 @@ svg.icon {
 
 .field input,
 .field select,
-.field textarea {
+.field textarea,
+#producto-search-bar select {
   border: 1px solid #020f1e40;
   border-radius: 5px;
   padding: 14px 16px;
@@ -2064,7 +2083,8 @@ svg.icon {
 
 .field input:focus,
 .field select:focus,
-.field textarea:focus {
+.field textarea:focus,
+#producto-search-bar select:focus {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 3px #2563eb26;
@@ -3601,7 +3621,8 @@ svg.icon {
 /* --- Select nativo con la misma piel que inputs/campos --- */
 .field select,
 .product-picker .picker-row select,
-.line-items select {
+.line-items select,
+#producto-search-bar select {
   appearance: none;
   -webkit-appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polyline points='6 9 12 15 18 9' fill='none' stroke='%23020f1e80' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");

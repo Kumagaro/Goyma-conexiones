@@ -1,7 +1,7 @@
 # Spec: Categorías, Unidades de Medida y Productos
 
 - **Feature:** `inventario-productos`
-- **Estado:** **Confirmada.** Las decisiones del dueño están incorporadas y los supuestos S-1 a S-12 (sección 11) están confirmados. La revisión de la interfaz (PEN-03) está resuelta en `frontend-cambios.md` (sección 9).
+- **Estado:** **Confirmada y alineada con la implementación del módulo.** Las decisiones del dueño están incorporadas, los supuestos S-1 a S-12 (sección 11) están confirmados y la especificación cubre los resultados ya implementados en `tasks-02.md`: categorías, unidades, conversiones, productos, dashboard, vista previa del precio, purga best-effort, protección de los elementos heredados de la spec 1 y cierre del módulo.
 - **Basada en:** `Requisitos_del_sistema.docx` (RF-010 a RF-031), `Constitution.md` v1.2.0, `Agents.md`, `specs/autenticacion-y-usuarios/spec.md`, `frontend-cambios.md`
 - **Siguiente paso:** `plan.md` → `tasks.md`
 - **Revisión posterior (auditoría de `conversacion.md` y revisión QA):** incorpora la cantidad inicial obligatoria al crear un producto, el rechazo de caracteres de control y de formato en los textos (7.3), un mensaje propio para el desborde del cálculo del Conversor (UM-07), las reglas de interfaz de la sección 9 (salida segura, pausa en búsquedas y bloqueo del doble envío), la purga best-effort con aviso visible, las columnas de auditoría (`createdAt`/`updatedAt`) y los pendientes PEN-11 a PEN-14. Una segunda revisión QA (Q-01 a Q-12) añadió el plegado parcial de acentos como límite documentado, la regla de doble coincidencia exacta en unidades, el aviso de purga sin cifra y las reglas de teclado de la interfaz. Las decisiones nuevas están confirmadas por el dueño (las de la segunda revisión, por delegación suya).
@@ -19,7 +19,7 @@ Esta spec cubre tres módulos que se implementan juntos porque Producto depende 
 Incluye además:
 
 - Una tabla mínima de notificaciones, solo para registrar los avisos que producen las eliminaciones de categorías y unidades (sección 3.2).
-- La tarjeta de productos agotados del dashboard con datos reales (DASH-01).
+- La tarjeta de productos agotados del dashboard con datos reales (DASH-01), el flujo de la pestaña de agotados/descontinuados y la protección de los elementos heredados de la spec 1 en `dashboard-unificado.html` (C-09 / FE-D-04).
 
 ## 2. Objetivo / Por qué
 
@@ -51,6 +51,7 @@ El negocio necesita saber qué productos tiene, cuánto le cuestan y a qué prec
 - Facturas, historial y su forma de conservar la información de un producto eliminado.
 - Historial de producto y sección "Facturas Asociadas": quedan ocultos hasta que existan sus specs (PEN-09).
 - Columnas "Valor Total" (productos) e "Ingresos" (categorías), KPIs, "Mejor Vendidos" y "Lento Movimiento" del dashboard: ocultas o en estado vacío y sin datos hasta la spec de Facturas de venta (PEN-10).
+- La protección de los elementos de la spec 1 en el dashboard unificado queda fuera del alcance de venta y se mantiene solo como guardia visual/estructural del módulo actual (C-09 / FE-D-04).
 
 ## 4. Roles y actores
 

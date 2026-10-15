@@ -41,6 +41,7 @@ pub enum SessionValidation {
 pub struct Actor {
     id: i64,
     role: String,
+    username: String,
 }
 
 impl Actor {
@@ -50,6 +51,10 @@ impl Actor {
 
     pub fn role(&self) -> &str {
         &self.role
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
     }
 }
 
@@ -138,16 +143,17 @@ pub fn require_session(connection: &Connection, now: DateTime<Utc>) -> Result<Ac
         ));
     };
 
-    let role: String = connection
+    let (username, role): (String, String) = connection
         .query_row(
-            "SELECT role FROM users WHERE id = ?1",
+            "SELECT username, role FROM users WHERE id = ?1",
             [session.user_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|error| internal_error("require_session", error))?;
     Ok(Actor {
         id: session.user_id,
         role,
+        username,
     })
 }
 
@@ -995,6 +1001,7 @@ mod tests {
         let actor = require_session(&connection, current_time).unwrap();
         assert_eq!(actor.id(), user_id);
         assert_eq!(actor.role(), "contador");
+        assert_eq!(actor.username(), "tester");
         let stored_activity: String = connection
             .query_row("SELECT lastActivityAt FROM sessions", [], |row| row.get(0))
             .unwrap();

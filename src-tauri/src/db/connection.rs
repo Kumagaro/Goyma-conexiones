@@ -8,6 +8,7 @@ use rusqlite::Connection;
 use tauri::{Manager, State};
 
 use super::schema::{clear_non_persistent_sessions, init_schema, purge_error_logs};
+use crate::attachments::sweep_orphans;
 use crate::errors::append_error_log;
 
 static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -32,6 +33,7 @@ pub fn initialize_database(app_data_dir: &Path, now: DateTime<Utc>) -> Result<Co
         init_schema(&conn, now)?;
         clear_non_persistent_sessions(&conn)?;
         purge_error_logs(&conn, now)?;
+        let _ = sweep_orphans(app_data_dir, &conn);
         Ok(conn)
     })();
 
@@ -108,6 +110,57 @@ mod tests {
         assert_eq!(error, "No se pudo abrir la base de datos");
         let log = fs::read_to_string(app_data_dir.join("errors.log")).unwrap();
         assert!(log.contains("goyma.sqlite3"));
+        fs::remove_dir_all(app_data_dir).unwrap();
+    }
+
+    #[test]
+    fn initialize_database_sweeps_uuid_attachment_orphans_best_effort() {
+        let app_data_dir = unique_path();
+        let attachment_dir = app_data_dir.join("attachments");
+        fs::create_dir_all(&attachment_dir).unwrap();
+        let now = Utc::now();
+        let timestamp = crate::timestamps::format_utc_timestamp(now);
+        let connection = open_database(&app_data_dir).unwrap();
+        crate::db::schema::init_schema(&connection, now).unwrap();
+        for (number, file_name) in [("E-00001", "one.pdf"), ("E-00002", "two.pdf")] {
+            connection
+                .execute(
+                    "INSERT INTO invoices (type, number, invoiceDate, status, contactFullName,
+                        contactFullNameNormalized, contactNationalId, contactPhone, createdByName,
+                        attachmentFileName, attachmentOriginalName, attachmentSizeBytes,
+                        attachmentUploadedAt, createdAt, updatedAt)
+                     VALUES ('E', ?1, '2026-10-04', 'pending', 'Ana Pérez', 'ana perez',
+                        '12345678901', '+5350000000', 'admin', ?2, 'factura.pdf', 8, ?3, ?3, ?3)",
+                    (number, file_name, &timestamp),
+                )
+                .unwrap();
+            fs::write(attachment_dir.join(file_name), b"%PDF-ref").unwrap();
+        }
+        let orphan = attachment_dir.join("550e8400-e29b-41d4-a716-446655440000.pdf");
+        fs::write(&orphan, b"%PDF-orphan").unwrap();
+        drop(connection);
+
+        let connection = initialize_database(&app_data_dir, now).unwrap();
+
+        assert!(attachment_dir.join("one.pdf").exists());
+        assert!(attachment_dir.join("two.pdf").exists());
+        assert!(!orphan.exists());
+        drop(connection);
+        fs::remove_dir_all(app_data_dir).unwrap();
+    }
+
+    #[test]
+    fn initialize_database_continues_and_logs_when_attachment_sweep_cannot_list() {
+        let app_data_dir = unique_path();
+        fs::create_dir_all(&app_data_dir).unwrap();
+        fs::write(app_data_dir.join("attachments"), b"not a directory").unwrap();
+
+        let connection = initialize_database(&app_data_dir, Utc::now()).unwrap();
+
+        assert!(connection.is_autocommit());
+        let log = fs::read_to_string(app_data_dir.join("errors.log")).unwrap();
+        assert!(log.contains("attachment sweep listing failed"));
+        drop(connection);
         fs::remove_dir_all(app_data_dir).unwrap();
     }
 

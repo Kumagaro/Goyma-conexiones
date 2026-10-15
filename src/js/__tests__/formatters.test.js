@@ -3,18 +3,18 @@ import { describe, expect, it } from "vitest";
 import {
   formatCalendarDate,
   formatDecimalText,
+  formatDate,
   formatId,
   formatLocalTimestamp,
   formatMoney,
+  formatQuantity,
   formatRemainingDays,
+  formatTimestamp,
 } from "../utils/formatters.js";
 
 describe("formatters de inventario", () => {
   it("formatea centavos como USD con dos decimales en es-ES", () => {
-    const formatted = formatMoney(1250);
-
-    expect(formatted).toContain("12,50");
-    expect(formatted).toContain("US$");
+    expect(formatMoney(1500)).toBe("15,00 USD");
     expect(formatMoney(1)).toContain("0,01");
   });
 
@@ -28,6 +28,16 @@ describe("formatters de inventario", () => {
     expect(formatCalendarDate(null)).toBe("—");
   });
 
+  it("expone formatDate sin conversión por zona horaria", () => {
+    expect(formatDate("2026-01-15")).toBe("15/01/2026");
+    expect(formatDate(null)).toBe("—");
+  });
+
+  it("formatea cantidades en unidades con coma decimal", () => {
+    expect(formatQuantity(1500)).toBe("1,5");
+    expect(formatQuantity(null)).toBe("—");
+  });
+
   it("convierte timestamps UTC a los componentes de hora local", () => {
     const timestamp = "2026-03-01T00:30:00Z";
     const localDate = new Date(timestamp);
@@ -36,6 +46,16 @@ describe("formatters de inventario", () => {
 
     expect(formatLocalTimestamp(timestamp)).toBe(expected);
     expect(formatLocalTimestamp(null)).toBe("—");
+  });
+
+  it("expone formatTimestamp como formato local del timestamp UTC", () => {
+    const timestamp = "2026-01-15T14:30:00Z";
+    const localDate = new Date(timestamp);
+    const twoDigits = (value) => String(value).padStart(2, "0");
+    const expected = `${twoDigits(localDate.getDate())}/${twoDigits(localDate.getMonth() + 1)}/${localDate.getFullYear()} ${twoDigits(localDate.getHours())}:${twoDigits(localDate.getMinutes())}`;
+
+    expect(formatTimestamp(timestamp)).toBe(expected);
+    expect(formatTimestamp(null)).toBe("—");
   });
 
   it("muestra los días restantes en singular, plural o guion", () => {

@@ -1043,7 +1043,7 @@
             <span class="text">Proveedores</span>
           </a>
         </li>
-        <li>
+        <li id="sidebar-facturas" hidden>
           <button onclick="toggleSubMenu(this)" class="dropsown-button">
             <svg class="icon"><use href="#icon-receipt"></use></svg>
             <span class="text">Facturas</span>
@@ -1735,31 +1735,37 @@
               <button
                 class="tab active"
                 id="tab-producto-list"
-                onclick="showProductoTab('list', this)"
+                data-product-tab="list"
               >
                 Productos
               </button>
               <button
                 class="tab"
+                id="tab-producto-agotados"
+                data-product-tab="agotados"
+              >
+                Agotados y Descontinuados
+              </button>
+              <button
+                class="tab"
                 id="tab-producto-create"
-                onclick="showProductoTab('create', this)"
+                data-product-tab="create"
               >
                 Crear Nuevo Producto
               </button>
               <button
                 class="tab"
                 id="tab-producto-historial"
-                onclick="showProductoTab('historial', this)"
+                data-product-tab="historial"
               >
                 Historial
               </button>
             </div>
-            <div class="search-bar" id="producto-search-bar">
+            <div class="search-bar">
               <input
                 type="text"
                 id="producto-search"
-                placeholder="Buscar producto o categoría..."
-                oninput="renderProductos()"
+                placeholder="Buscar producto…"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -1769,8 +1775,35 @@
             </div>
           </div>
 
+          <div id="producto-search-bar">
+            <select
+              id="producto-filtro-categoria"
+              aria-label="Filtrar por categoría"
+            >
+              <option value="">Todas las categorías</option>
+              <option value="withoutCategory">Sin categoría</option>
+            </select>
+            <select id="producto-filtro-stock" aria-label="Filtrar por stock">
+              <option value="all">Todo el stock</option>
+              <option value="available">Disponibles</option>
+              <option value="outOfStock">Agotados</option>
+              <option value="low">Stock bajo</option>
+            </select>
+            <select
+              id="producto-filtro-caducidad"
+              aria-label="Filtrar por caducidad"
+            >
+              <option value="all">Todas las caducidades</option>
+              <option value="withExpiry">Con caducidad</option>
+              <option value="withoutExpiry">Sin caducidad</option>
+              <option value="expired">Vencidos</option>
+              <option value="expiringSoon">Próximos a vencer</option>
+            </select>
+          </div>
+
           <!-- Vista: listado -->
           <div id="producto-list" class="config-subview active">
+            <div id="productos-feedback" role="status" hidden></div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -1781,16 +1814,54 @@
                   <th style="text-align: right">Precio de Venta</th>
                   <th style="text-align: right">Precio de Entrada</th>
                   <th style="text-align: center">Disponible en Stock</th>
-                  <th style="text-align: right">Valor Total</th>
+                  <th id="productos-valor-total" style="text-align: right">
+                    Valor Total
+                  </th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="productos-body"></tbody>
             </table>
           </div>
 
+          <div id="producto-agotados" class="config-subview">
+            <div id="producto-condiciones-toolbar" hidden>
+              <input
+                type="text"
+                id="producto-condiciones-search"
+                placeholder="Buscar producto…"
+                aria-label="Buscar en agotados y descontinuados"
+              />
+              <select
+                id="producto-condiciones-filter"
+                aria-label="Filtrar por condición"
+              >
+                <option value="all">Todos</option>
+                <option value="outOfStock">Agotados</option>
+                <option value="discontinued">Descontinuados</option>
+              </select>
+            </div>
+            <div id="producto-condiciones-feedback" role="status" hidden></div>
+            <table class="list-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Nombre</th>
+                  <th>Categoría</th>
+                  <th>Unidad</th>
+                  <th>Cantidad</th>
+                  <th>Condición</th>
+                  <th>Días restantes</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="productos-condiciones-body"></tbody>
+            </table>
+          </div>
+
           <!-- Vista: crear / editar producto -->
           <div id="producto-create" class="config-subview">
-            <form class="form-card" onsubmit="return guardarProducto(event);">
+            <form class="form-card" id="producto-form">
               <div>
                 <h3 id="producto-form-title">Crear Nuevo Producto</h3>
               </div>
@@ -1804,6 +1875,7 @@
                     type="text"
                     id="producto-nombre"
                     placeholder="Ej. Laptop HP 15"
+                    maxlength="100"
                     required
                   />
                 </div>
@@ -1823,99 +1895,89 @@
                 <textarea
                   id="producto-descripcion"
                   rows="3"
+                  maxlength="500"
                   placeholder="Detalles del producto..."
                 ></textarea>
               </div>
 
               <div class="form-grid">
                 <div class="field">
-                  <label>Categoría <span class="required">*</span></label>
-                  <div class="autocomplete-row">
-                    <select id="producto-categoria" required></select>
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      title="¿No la encuentras? Registrar categoría nueva"
-                      onclick="irCrearCategoria()"
-                    >
-                      <svg class="icon" style="width: 20px; height: 20px">
-                        <use href="#icon-plus"></use>
-                      </svg>
-                    </button>
-                  </div>
+                  <label for="producto-categoria-input">Categoría</label>
+                  <div id="producto-categoria-combobox"></div>
+                  <input type="hidden" id="producto-categoria" />
                 </div>
                 <div class="field">
-                  <label
-                    >Unidad de Medida <span class="required">*</span></label
-                  >
-                  <div class="autocomplete-row">
-                    <select id="producto-unidad" required></select>
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      title="Agregar nueva unidad de medida"
-                      onclick="agregarUnidadRapida()"
-                    >
-                      <svg class="icon" style="width: 20px; height: 20px">
-                        <use href="#icon-plus"></use>
-                      </svg>
-                    </button>
-                  </div>
+                  <label for="producto-unidad-input">Unidad de Medida</label>
+                  <div id="producto-unidad-combobox"></div>
+                  <input type="hidden" id="producto-unidad" />
                 </div>
               </div>
 
               <div class="form-grid">
                 <div class="field">
-                  <label>Precio de Entrada Promedio Ponderado</label>
-                  <input
-                    type="number"
-                    id="producto-precio-entrada"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    oninput="actualizarGananciaProducto()"
-                  />
-                </div>
-                <div class="field">
-                  <label>Precio de Venta <span class="required">*</span></label>
-                  <input
-                    type="number"
-                    id="producto-precio-venta"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    required
-                    oninput="actualizarGananciaProducto()"
-                  />
-                </div>
-                <div class="field">
-                  <label>% de Ganancia</label>
+                  <label for="producto-precio-entrada"
+                    >Precio de Entrada Promedio Ponderado
+                    <span class="required">*</span></label
+                  >
                   <input
                     type="text"
-                    id="producto-ganancia"
+                    inputmode="decimal"
+                    id="producto-precio-entrada"
+                    placeholder="0,00"
+                    aria-describedby="producto-decimal-ayuda"
+                    required
+                  />
+                  <small id="producto-decimal-ayuda">
+                    Usa coma para los decimales; 1.234 puede ser ambiguo como
+                    separador de miles.
+                  </small>
+                </div>
+                <div class="field">
+                  <label for="producto-precio-venta">Precio de Venta</label>
+                  <input
+                    type="text"
+                    id="producto-precio-venta"
                     placeholder="—"
                     readonly
                   />
+                  <div
+                    id="producto-precio-venta-feedback"
+                    role="status"
+                    hidden
+                  ></div>
+                </div>
+                <div class="field">
+                  <label for="producto-ganancia"
+                    >% de Ganancia <span class="required">*</span></label
+                  >
+                  <input
+                    type="text"
+                    id="producto-ganancia"
+                    inputmode="decimal"
+                    placeholder="20,00"
+                    aria-describedby="producto-decimal-ayuda"
+                    required
+                  />
                 </div>
               </div>
 
               <div class="form-grid">
                 <div class="field">
-                  <label>Disponible en Stock</label>
+                  <label for="producto-stock"
+                    >Cantidad inicial <span class="required">*</span></label
+                  >
                   <input
-                    type="number"
+                    type="text"
+                    inputmode="decimal"
                     id="producto-stock"
-                    min="0"
-                    step="1"
-                    placeholder="0"
+                    placeholder="0,000"
+                    aria-describedby="producto-decimal-ayuda"
+                    required
                   />
                 </div>
                 <div class="field">
                   <label>Caducidad</label>
-                  <select
-                    id="producto-caducidad-tipo"
-                    onchange="toggleCaducidadProducto()"
-                  >
+                  <select id="producto-caducidad-tipo">
                     <option value="no-aplica">No Aplica</option>
                     <option value="fecha">Tiene fecha de caducidad</option>
                   </select>
@@ -1931,7 +1993,7 @@
                 <input type="date" id="producto-caducidad-fecha" />
               </div>
 
-              <div>
+              <div id="producto-facturas-asociadas" hidden>
                 <h3 style="margin-bottom: 15px">Facturas Asociadas</h3>
                 <div class="form-grid">
                   <div class="field">
@@ -1955,11 +2017,12 @@
                 </div>
               </div>
 
+              <div id="producto-feedback" role="status" hidden></div>
               <div class="form-actions">
                 <button
                   type="button"
                   class="btn-secondary"
-                  onclick="cancelarProductoForm()"
+                  id="producto-cancelar"
                 >
                   Cancelar
                 </button>
@@ -1979,10 +2042,7 @@
             <div class="historial-toolbar">
               <div class="field field-select-item">
                 <label>Producto</label>
-                <select
-                  id="historial-producto-select"
-                  onchange="renderHistorialProducto()"
-                ></select>
+                <select id="historial-producto-select"></select>
               </div>
               <div class="field">
                 <label
@@ -1994,11 +2054,7 @@
                   </svg>
                   Fecha Inicial</label
                 >
-                <input
-                  type="date"
-                  id="historial-producto-desde"
-                  onchange="renderHistorialProducto()"
-                />
+                <input type="date" id="historial-producto-desde" />
               </div>
               <div class="field">
                 <label
@@ -2010,11 +2066,7 @@
                   </svg>
                   Fecha Final</label
                 >
-                <input
-                  type="date"
-                  id="historial-producto-hasta"
-                  onchange="renderHistorialProducto()"
-                />
+                <input type="date" id="historial-producto-hasta" />
               </div>
               <div class="field">
                 <label
@@ -2026,30 +2078,29 @@
                   </svg>
                   Tipo de Movimiento</label
                 >
-                <select
-                  id="historial-producto-tipo"
-                  onchange="renderHistorialProducto()"
-                >
-                  <option value="">Todos</option>
-                  <option value="Entrada">Entrada</option>
-                  <option value="Salida (Venta)">Salida (Venta)</option>
-                  <option value="Pérdida">Pérdida</option>
+                <select id="historial-producto-tipo" multiple>
+                  <optgroup label="Entradas">
+                    <option value="initial">Inicial</option>
+                    <option value="entry">Entrada</option>
+                  </optgroup>
+                  <optgroup label="Salidas">
+                    <option value="saleOut">Salida Venta</option>
+                    <option value="serviceOut">Salida Servicio</option>
+                    <option value="warrantyOut">Salida Garantía</option>
+                    <option value="supplyOut">Salida Insumos</option>
+                    <option value="loss">Pérdida</option>
+                  </optgroup>
+                  <optgroup label="Ajustes">
+                    <option value="adjustment">Ajuste</option>
+                    <option value="reversal">Reversión</option>
+                  </optgroup>
                 </select>
               </div>
             </div>
             <table class="list-table" id="historial-producto-list">
               <thead>
                 <tr>
-                  <th
-                    id="th-fecha-historial-producto"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha(
-                        'historialProducto',
-                        renderHistorialProducto,
-                      )
-                    "
-                  >
+                  <th id="th-fecha-historial-producto" class="th-sortable">
                     Fecha
                   </th>
                   <th>Tipo de Movimiento</th>
@@ -2071,12 +2122,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showProductoTab(
-                    'list',
-                    document.getElementById('tab-producto-list'),
-                  )
-                "
+                id="producto-ver-volver"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Productos
@@ -2095,9 +2141,23 @@
                   <span class="kpi-tag" id="producto-ver-stock-tag"
                     ><span id="producto-ver-stock-tag-txt"></span
                   ></span>
+                  <span
+                    class="kpi-tag"
+                    id="producto-ver-condicion-tag"
+                    hidden
+                  ></span>
                 </div>
               </div>
             </div>
+            <div id="producto-ver-estado" hidden></div>
+            <p id="producto-ver-fecha-wrap" hidden>
+              Descontinuado el
+              <span id="producto-ver-fecha-descontinuacion"></span>
+            </p>
+            <p id="producto-ver-dias-wrap" hidden>
+              Días restantes: <span id="producto-ver-dias-restantes"></span>
+            </p>
+            <div id="producto-detalle-feedback" role="status" hidden></div>
 
             <!-- Resumen ejecutivo: lo que más importa, arriba y grande -->
             <div class="kpi-hero-grid pv-hero-grid">
@@ -2128,6 +2188,18 @@
 
             <!-- Datos de apoyo: stock, caducidad, entrada, unidad -->
             <div class="kpi-secondary-grid pv-secondary-grid">
+              <div class="kpi-secondary">
+                <div class="kpi-sec-top">
+                  <div class="kpi-sec-label">
+                    <span class="kpi-icon"
+                      ><svg class="icon">
+                        <use href="#icon-dollar-circle"></use></svg
+                    ></span>
+                    <span class="txt">Valor Total</span>
+                  </div>
+                </div>
+                <div class="kpi-sec-value" id="producto-ver-valor-total"></div>
+              </div>
               <div
                 class="kpi-secondary tone-orange"
                 id="producto-ver-stock-card"
@@ -2200,7 +2272,7 @@
             </details>
 
             <!-- Facturas asociadas: colapsable -->
-            <details class="pv-section">
+            <details class="pv-section" id="producto-ver-facturas" hidden>
               <summary>
                 <h3 class="cat-view-section-title">Facturas Asociadas</h3>
                 <svg class="icon pv-chevron">
@@ -2243,7 +2315,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="historialProductoDesdeVer()"
+                id="producto-ver-historial"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-history"></use>
@@ -2253,7 +2325,7 @@
               <button
                 type="button"
                 class="btn-danger"
-                onclick="eliminarProductoDesdeVer()"
+                data-product-detail-action="delete"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
@@ -2263,12 +2335,27 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="editarProductoDesdeVer()"
+                data-product-detail-action="edit"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
+                data-product-detail-action="discontinue"
+              >
+                Descontinuar
+              </button>
+              <button
+                type="button"
+                class="btn-primary"
+                data-product-detail-action="activate"
+                hidden
+              >
+                Activar
               </button>
             </div>
           </div>
@@ -2277,18 +2364,10 @@
         <div id="page-categorias" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-categoria-list"
-                onclick="showCategoriaTab('list', this)"
-              >
+              <button class="tab active" id="tab-categoria-list">
                 Categorías
               </button>
-              <button
-                class="tab"
-                id="tab-categoria-create"
-                onclick="showCategoriaTab('create', this)"
-              >
+              <button class="tab" id="tab-categoria-create">
                 Crear Nueva Categoría
               </button>
             </div>
@@ -2297,7 +2376,6 @@
                 type="text"
                 id="categoria-search"
                 placeholder="Buscar categoría..."
-                oninput="renderCategorias()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -2315,7 +2393,9 @@
                   <th>Nombre</th>
                   <th>Descripción</th>
                   <th style="text-align: center">Cantidad de Productos</th>
-                  <th style="text-align: center">Ingresos</th>
+                  <th id="categorias-ingresos" style="text-align: right">
+                    Ingresos
+                  </th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -2325,7 +2405,7 @@
 
           <!-- Vista: crear / editar categoría -->
           <div id="categoria-create" class="config-subview">
-            <form class="form-card" onsubmit="return guardarCategoria(event);">
+            <form class="form-card" id="categoria-form">
               <div>
                 <h3 id="categoria-form-title">Datos de Categoría</h3>
               </div>
@@ -2340,40 +2420,26 @@
                   />
                 </div>
                 <div class="field">
-                  <label>Descripción <span class="required">*</span></label>
+                  <label>Descripción</label>
                   <input
                     type="text"
                     id="categoria-descripcion"
                     placeholder="Ej. Portátiles y accesorios"
-                    required
                   />
                 </div>
               </div>
-              <div class="field">
-                <label
-                  >Listado de Productos <span class="required">*</span></label
-                >
-                <div
-                  class="product-picker"
-                  id="categoria-productos-picker"
-                ></div>
-                <button
-                  type="button"
-                  class="add-product-row"
-                  onclick="agregarProductoPicker()"
-                >
-                  <svg class="icon" style="width: 16px; height: 16px">
-                    <use href="#icon-plus"></use>
-                  </svg>
-                  Añadir producto
-                </button>
-              </div>
+              <div
+                id="categoria-feedback"
+                class="feedback-message"
+                role="status"
+                hidden
+              ></div>
               <div class="form-actions">
                 <button
                   type="button"
                   class="btn-secondary"
                   style="margin-right: 10px"
-                  onclick="cancelarCategoriaForm()"
+                  data-categoria-action="cancel"
                 >
                   Cancelar
                 </button>
@@ -2390,12 +2456,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showCategoriaTab(
-                    'list',
-                    document.getElementById('tab-categoria-list'),
-                  )
-                "
+                data-categoria-detail-action="back"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Categorías
@@ -2449,7 +2510,7 @@
               <button
                 type="button"
                 class="btn-danger"
-                onclick="eliminarCategoriaDesdeVer()"
+                data-categoria-detail-action="delete"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
@@ -2459,7 +2520,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="editarCategoriaDesdeVer()"
+                data-categoria-detail-action="edit"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
@@ -2474,18 +2535,8 @@
         <div id="page-clientes" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-cliente-list"
-                onclick="showClienteTab('list', this)"
-              >
-                Clientes
-              </button>
-              <button
-                class="tab"
-                id="tab-cliente-create"
-                onclick="showClienteTab('create', this)"
-              >
+              <button class="tab active" id="tab-cliente-list">Clientes</button>
+              <button class="tab" id="tab-cliente-create">
                 Crear Nuevo Cliente
               </button>
             </div>
@@ -2494,7 +2545,6 @@
                 type="text"
                 id="cliente-search"
                 placeholder="Buscar cliente..."
-                oninput="renderClientes()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -2521,7 +2571,7 @@
 
           <!-- Vista: crear / editar cliente -->
           <div id="cliente-create" class="config-subview">
-            <form class="form-card" onsubmit="return guardarCliente(event);">
+            <form class="form-card">
               <div>
                 <h3 id="cliente-form-title">Datos de Cliente</h3>
               </div>
@@ -2635,13 +2685,7 @@
               </div>
 
               <div class="form-actions">
-                <button
-                  type="button"
-                  class="btn-secondary"
-                  onclick="cancelarClienteForm()"
-                >
-                  Cancelar
-                </button>
+                <button type="button" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-primary">
                   Guardar Cambios
                 </button>
@@ -2652,16 +2696,7 @@
           <!-- Vista: ver información del cliente -->
           <div id="cliente-ver" class="config-subview">
             <div class="cat-view-crumb">
-              <button
-                type="button"
-                class="cat-view-back"
-                onclick="
-                  showClienteTab(
-                    'list',
-                    document.getElementById('tab-cliente-list'),
-                  )
-                "
-              >
+              <button type="button" class="cat-view-back">
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Clientes
               </button>
@@ -2858,21 +2893,13 @@
             </details>
 
             <div class="form-actions">
-              <button
-                type="button"
-                class="btn-danger"
-                onclick="eliminarClienteDesdeVer()"
-              >
+              <button type="button" class="btn-danger">
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Cliente
               </button>
-              <button
-                type="button"
-                class="btn-primary"
-                onclick="editarClienteDesdeVer()"
-              >
+              <button type="button" class="btn-primary">
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
                 </svg>
@@ -2886,25 +2913,13 @@
         <div id="page-proveedores" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-proveedor-list"
-                onclick="showProveedorTab('list', this)"
-              >
+              <button class="tab active" id="tab-proveedor-list">
                 Proveedores
               </button>
-              <button
-                class="tab"
-                id="tab-proveedor-create"
-                onclick="showProveedorTab('create', this)"
-              >
+              <button class="tab" id="tab-proveedor-create">
                 Crear Nuevo Proveedor
               </button>
-              <button
-                class="tab"
-                id="tab-proveedor-historial"
-                onclick="showProveedorTab('historial', this)"
-              >
+              <button class="tab" id="tab-proveedor-historial">
                 Historial de Compras
               </button>
             </div>
@@ -2913,7 +2928,6 @@
                 type="text"
                 id="proveedor-search"
                 placeholder="Buscar proveedor..."
-                oninput="renderProveedores()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -2940,7 +2954,7 @@
 
           <!-- Vista: crear / editar proveedor -->
           <div id="proveedor-create" class="config-subview">
-            <form class="form-card" onsubmit="return guardarProveedor(event);">
+            <form class="form-card">
               <div>
                 <h3 id="proveedor-form-title">Datos de Proveedor</h3>
               </div>
@@ -3036,13 +3050,7 @@
               </div>
 
               <div class="form-actions">
-                <button
-                  type="button"
-                  class="btn-secondary"
-                  onclick="cancelarProveedorForm()"
-                >
-                  Cancelar
-                </button>
+                <button type="button" class="btn-secondary">Cancelar</button>
                 <button type="submit" class="btn-primary">
                   Guardar Cambios
                 </button>
@@ -3059,10 +3067,7 @@
             <div class="historial-toolbar">
               <div class="field field-select-item">
                 <label>Proveedor</label>
-                <select
-                  id="historial-proveedor-select"
-                  onchange="renderHistorialProveedor()"
-                ></select>
+                <select id="historial-proveedor-select"></select>
               </div>
               <div class="field">
                 <label
@@ -3074,11 +3079,7 @@
                   </svg>
                   Fecha Inicial</label
                 >
-                <input
-                  type="date"
-                  id="historial-proveedor-desde"
-                  onchange="renderHistorialProveedor()"
-                />
+                <input type="date" id="historial-proveedor-desde" />
               </div>
               <div class="field">
                 <label
@@ -3090,11 +3091,7 @@
                   </svg>
                   Fecha Final</label
                 >
-                <input
-                  type="date"
-                  id="historial-proveedor-hasta"
-                  onchange="renderHistorialProveedor()"
-                />
+                <input type="date" id="historial-proveedor-hasta" />
               </div>
             </div>
             <table class="list-table" id="historial-proveedor-list">
@@ -3127,16 +3124,7 @@
           <!-- Vista: ver información del proveedor -->
           <div id="proveedor-ver" class="config-subview">
             <div class="cat-view-crumb">
-              <button
-                type="button"
-                class="cat-view-back"
-                onclick="
-                  showProveedorTab(
-                    'list',
-                    document.getElementById('tab-proveedor-list'),
-                  )
-                "
-              >
+              <button type="button" class="cat-view-back">
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Proveedores
               </button>
@@ -3323,21 +3311,13 @@
             </details>
 
             <div class="form-actions">
-              <button
-                type="button"
-                class="btn-danger"
-                onclick="eliminarProveedorDesdeVer()"
-              >
+              <button type="button" class="btn-danger">
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Proveedor
               </button>
-              <button
-                type="button"
-                class="btn-primary"
-                onclick="editarProveedorDesdeVer()"
-              >
+              <button type="button" class="btn-primary">
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
                 </svg>
@@ -3362,10 +3342,6 @@
                 type="text"
                 id="unidad-search"
                 placeholder="Buscar unidad o conversión..."
-                oninput="
-                  renderUnidades();
-                  renderConversiones();
-                "
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -3387,35 +3363,26 @@
               <div class="field conversor-cantidad">
                 <label>Cantidad</label>
                 <input
-                  type="number"
+                  type="text"
                   id="conversor-cantidad"
                   value="1"
-                  min="0"
-                  step="any"
-                  oninput="actualizarConversorRapido()"
+                  inputmode="decimal"
                 />
               </div>
               <div class="field conversor-unidad">
                 <label>De</label>
-                <select
-                  id="conversor-origen"
-                  onchange="actualizarConversorRapido()"
-                ></select>
+                <select id="conversor-origen"></select>
               </div>
               <button
                 type="button"
                 class="conversor-swap"
                 title="Invertir unidades"
-                onclick="invertirConversorRapido()"
               >
                 <svg class="icon"><use href="#icon-swap"></use></svg>
               </button>
               <div class="field conversor-unidad">
                 <label>A</label>
-                <select
-                  id="conversor-destino"
-                  onchange="actualizarConversorRapido()"
-                ></select>
+                <select id="conversor-destino"></select>
               </div>
               <div class="conversor-resultado" id="conversor-resultado">—</div>
             </div>
@@ -3428,7 +3395,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="abrirModalUnidad()"
+                data-unit-action="create"
               >
                 <svg class="icon" style="width: 18px; height: 18px">
                   <use href="#icon-plus"></use>
@@ -3436,6 +3403,12 @@
                 Nueva Unidad
               </button>
             </div>
+            <div
+              id="unidad-feedback"
+              class="feedback-message"
+              role="status"
+              hidden
+            ></div>
             <table class="list-table" id="unidad-list">
               <thead>
                 <tr>
@@ -3457,7 +3430,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="abrirModalConversion()"
+                data-conversion-action="create"
               >
                 <svg class="icon" style="width: 18px; height: 18px">
                   <use href="#icon-plus"></use>
@@ -3481,21 +3454,13 @@
         </div>
 
         <!-- ===================== FACTURAS DE ENTRADA ===================== -->
-        <div id="page-facturas-entrada" class="page">
+        <div id="page-facturas-entrada" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-factura-entrada-list"
-                onclick="showFacturaEntradaTab('list', this)"
-              >
+              <button class="tab active" id="tab-factura-entrada-list">
                 Lista de Facturas
               </button>
-              <button
-                class="tab"
-                id="tab-factura-entrada-create"
-                onclick="showFacturaEntradaTab('create', this)"
-              >
+              <button class="tab" id="tab-factura-entrada-create">
                 Nueva Factura de Entrada
               </button>
             </div>
@@ -3504,7 +3469,6 @@
                 type="text"
                 id="factura-entrada-search"
                 placeholder="Buscar por proveedor o No. de factura..."
-                oninput="renderFacturasEntrada()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -3521,13 +3485,7 @@
                 <tr>
                   <th>No. Factura</th>
                   <th>Proveedor</th>
-                  <th
-                    id="th-fecha-facturas-entrada"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha('facturasEntrada', renderFacturasEntrada)
-                    "
-                  >
+                  <th id="th-fecha-facturas-entrada" class="th-sortable">
                     Emisión
                   </th>
                   <th style="text-align: right">Total</th>
@@ -3543,7 +3501,7 @@
           <div id="factura-entrada-create" class="config-subview">
             <form
               class="form-card"
-              onsubmit="return guardarFactura(event);"
+              id="factura-entrada-form"
               style="max-width: 100%"
             >
               <div>
@@ -3559,16 +3517,18 @@
                     <input
                       type="text"
                       id="factura-proveedor"
-                      list="proveedores-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Escribe para buscar un proveedor..."
                       required
                     />
-                    <datalist id="proveedores-datalist"></datalist>
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-proveedor-add"
                       title="¿No lo encuentras? Registrar proveedor nuevo"
-                      onclick="irCrearProveedor()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
@@ -3592,18 +3552,18 @@
                 <div class="field">
                   <label>Estado</label>
                   <select id="factura-estado">
-                    <option value="Por Pagar">Por Pagar</option>
-                    <option value="Pagada">Pagada</option>
+                    <option value="pending">Por Pagar</option>
+                    <option value="completed">Pagada</option>
+                    <option value="cancelled">Cancelada</option>
                   </select>
                 </div>
                 <div class="field">
                   <label>Método de Pago</label>
                   <select id="factura-metodo-pago">
-                    <option>Efectivo USD</option>
-                    <option>Efectivo CUP</option>
-                    <option>Transferencia USD</option>
-                    <option>Tarjeta</option>
-                    <option>Zelle</option>
+                    <option value="cash">Efectivo</option>
+                    <option value="transfer">Transferencia</option>
+                    <option value="card">Tarjeta</option>
+                    <option value="zelle">Zelle</option>
                   </select>
                 </div>
               </div>
@@ -3632,31 +3592,23 @@
                     <input
                       type="text"
                       id="factura-buscar-producto"
-                      list="productos-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Buscar producto para agregar a la factura..."
                     />
-                    <datalist id="productos-datalist"></datalist>
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-producto-add"
                       title="Agregar producto encontrado"
-                      onclick="agregarLineaDesdeBusqueda()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    class="btn-secondary"
-                    onclick="crearProductoRapido()"
-                  >
-                    <svg class="icon" style="width: 16px; height: 16px">
-                      <use href="#icon-plus"></use>
-                    </svg>
-                    Crear Nuevo Producto
-                  </button>
                 </div>
 
                 <div class="line-items">
@@ -3675,8 +3627,8 @@
                 <button
                   type="button"
                   class="add-product-row"
+                  id="factura-agregar-fila"
                   style="margin-top: 15px"
-                  onclick="agregarLineaFactura()"
                 >
                   <svg class="icon" style="width: 16px; height: 16px">
                     <use href="#icon-plus"></use>
@@ -3686,24 +3638,12 @@
               </div>
 
               <div class="factura-form-row" style="align-items: flex-start">
-                <div
-                  class="dropzone"
-                  id="factura-dropzone"
-                  onclick="
-                    document.getElementById('factura-archivo-input').click()
-                  "
-                  ondragover="
-                    event.preventDefault();
-                    this.classList.add('dragover');
-                  "
-                  ondragleave="this.classList.remove('dragover')"
-                  ondrop="manejarDropArchivo(event)"
-                >
+                <div class="dropzone" id="factura-dropzone">
                   <input
                     type="file"
                     id="factura-archivo-input"
                     style="display: none"
-                    onchange="manejarArchivoFactura(this.files[0])"
+                    accept="application/pdf"
                   />
                   <div class="dropzone-default">
                     <svg class="icon icon-xl">
@@ -3719,13 +3659,7 @@
                       <use href="#icon-paperclip"></use>
                     </svg>
                     <span id="factura-archivo-nombre"></span>
-                    <button
-                      type="button"
-                      onclick="
-                        event.stopPropagation();
-                        quitarArchivoFactura();
-                      "
-                    >
+                    <button type="button" id="factura-archivo-quitar">
                       <svg class="icon" style="width: 14px; height: 14px">
                         <use href="#icon-close"></use>
                       </svg>
@@ -3739,28 +3673,6 @@
                     <span class="summary-value" id="factura-subtotal"
                       >0.00 USD</span
                     >
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Descuento (%)</span>
-                    <input
-                      type="number"
-                      id="factura-descuento"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesFactura()"
-                    />
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Impuestos (%)</span>
-                    <input
-                      type="number"
-                      id="factura-impuesto"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesFactura()"
-                    />
                   </div>
                   <div class="factura-summary-total">
                     <span>Total</span>
@@ -3784,7 +3696,7 @@
                 <button
                   type="button"
                   class="btn-secondary"
-                  onclick="cancelarFacturaEntradaForm()"
+                  id="factura-entrada-cancelar"
                 >
                   Cancelar
                 </button>
@@ -3801,12 +3713,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showFacturaEntradaTab(
-                    'list',
-                    document.getElementById('tab-factura-entrada-list'),
-                  )
-                "
+                id="factura-entrada-volver"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Facturas de Entrada
@@ -3948,14 +3855,6 @@
                     id="factura-ver-subtotal-resumen"
                   ></span>
                 </div>
-                <div class="factura-summary-row">
-                  <span>Descuento</span>
-                  <span class="summary-value" id="factura-ver-descuento"></span>
-                </div>
-                <div class="factura-summary-row">
-                  <span>Impuestos</span>
-                  <span class="summary-value" id="factura-ver-impuestos"></span>
-                </div>
                 <div class="factura-summary-total">
                   <span>Total</span>
                   <span
@@ -3992,7 +3891,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="exportarFacturaPDF(facturaVerNumero)"
+                id="factura-entrada-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
@@ -4001,8 +3900,18 @@
               </button>
               <button
                 type="button"
+                class="btn-secondary"
+                id="factura-entrada-guardar-equipo"
+              >
+                <svg class="icon" style="width: 16px; height: 16px">
+                  <use href="#icon-export"></use>
+                </svg>
+                Guardar en el equipo
+              </button>
+              <button
+                type="button"
                 class="btn-danger"
-                onclick="eliminarFacturaDesdeVer()"
+                id="factura-entrada-eliminar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
@@ -4012,11 +3921,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="
-                  alert(
-                    'La edición de facturas ya guardadas estará disponible próximamente.',
-                  )
-                "
+                id="factura-entrada-editar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
@@ -4028,21 +3933,13 @@
         </div>
 
         <!-- ===================== FACTURAS DE VENTA ===================== -->
-        <div id="page-facturas-venta" class="page">
+        <div id="page-facturas-venta" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-factura-venta-list"
-                onclick="showFacturaVentaTab('list', this)"
-              >
+              <button class="tab active" id="tab-factura-venta-list">
                 Lista de Facturas
               </button>
-              <button
-                class="tab"
-                id="tab-factura-venta-create"
-                onclick="showFacturaVentaTab('create', this)"
-              >
+              <button class="tab" id="tab-factura-venta-create">
                 Nueva Factura de Venta
               </button>
             </div>
@@ -4051,7 +3948,6 @@
                 type="text"
                 id="factura-venta-search"
                 placeholder="Buscar por cliente o No. de factura..."
-                oninput="renderFacturasVenta()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -4068,13 +3964,7 @@
                 <tr>
                   <th>No. Factura</th>
                   <th>Cliente</th>
-                  <th
-                    id="th-fecha-facturas-venta"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha('facturasVenta', renderFacturasVenta)
-                    "
-                  >
+                  <th id="th-fecha-facturas-venta" class="th-sortable">
                     Emisión
                   </th>
                   <th style="text-align: right">Total</th>
@@ -4090,7 +3980,7 @@
           <div id="factura-venta-create" class="config-subview">
             <form
               class="form-card"
-              onsubmit="return guardarFacturaVenta(event);"
+              id="factura-venta-form"
               style="max-width: 100%"
             >
               <div>
@@ -4104,15 +3994,18 @@
                     <input
                       type="text"
                       id="factura-venta-cliente"
-                      list="clientes-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Escribe para buscar un cliente..."
                       required
                     />
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-venta-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
-                      onclick="irCrearCliente()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
@@ -4140,19 +4033,18 @@
                 <div class="field">
                   <label>Estado</label>
                   <select id="factura-venta-estado">
-                    <option value="Por Pagar">Por Pagar</option>
-                    <option value="Pagada">Pagada</option>
-                    <option value="Vencida">Vencida</option>
+                    <option value="pending">Por Cobrar</option>
+                    <option value="completed">Cobrada</option>
+                    <option value="cancelled">Cancelada</option>
                   </select>
                 </div>
                 <div class="field">
                   <label>Método de Pago</label>
                   <select id="factura-venta-metodo-pago">
-                    <option>Efectivo USD</option>
-                    <option>Efectivo CUP</option>
-                    <option>Transferencia USD</option>
-                    <option>Tarjeta</option>
-                    <option>Zelle</option>
+                    <option value="cash">Efectivo</option>
+                    <option value="transfer">Transferencia</option>
+                    <option value="card">Tarjeta</option>
+                    <option value="zelle">Zelle</option>
                   </select>
                 </div>
               </div>
@@ -4172,30 +4064,23 @@
                     <input
                       type="text"
                       id="factura-venta-buscar-producto"
-                      list="productos-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Buscar producto para agregar a la venta..."
                     />
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-venta-producto-add"
                       title="Agregar producto encontrado"
-                      onclick="agregarLineaDesdeBusquedaVenta()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    class="btn-secondary"
-                    onclick="crearProductoVentaRapido()"
-                  >
-                    <svg class="icon" style="width: 16px; height: 16px">
-                      <use href="#icon-plus"></use>
-                    </svg>
-                    Crear Nuevo Producto
-                  </button>
                 </div>
 
                 <div class="line-items">
@@ -4214,8 +4099,8 @@
                 <button
                   type="button"
                   class="add-product-row"
+                  id="factura-venta-agregar-fila"
                   style="margin-top: 15px"
-                  onclick="agregarLineaVenta()"
                 >
                   <svg class="icon" style="width: 16px; height: 16px">
                     <use href="#icon-plus"></use>
@@ -4231,28 +4116,6 @@
                     <span class="summary-value" id="factura-venta-subtotal"
                       >0.00 USD</span
                     >
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Descuento (%)</span>
-                    <input
-                      type="number"
-                      id="factura-venta-descuento"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesVenta()"
-                    />
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Impuestos (%)</span>
-                    <input
-                      type="number"
-                      id="factura-venta-impuesto"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesVenta()"
-                    />
                   </div>
                   <div class="factura-summary-total">
                     <span>Total</span>
@@ -4276,7 +4139,7 @@
                 <button
                   type="button"
                   class="btn-secondary"
-                  onclick="cancelarFacturaVentaForm()"
+                  id="factura-venta-cancelar"
                 >
                   Cancelar
                 </button>
@@ -4293,12 +4156,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showFacturaVentaTab(
-                    'list',
-                    document.getElementById('tab-factura-venta-list'),
-                  )
-                "
+                id="factura-venta-volver"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Facturas de Venta
@@ -4436,20 +4294,6 @@
                     id="factura-venta-ver-subtotal-resumen"
                   ></span>
                 </div>
-                <div class="factura-summary-row">
-                  <span>Descuento</span>
-                  <span
-                    class="summary-value"
-                    id="factura-venta-ver-descuento"
-                  ></span>
-                </div>
-                <div class="factura-summary-row">
-                  <span>Impuestos</span>
-                  <span
-                    class="summary-value"
-                    id="factura-venta-ver-impuestos"
-                  ></span>
-                </div>
                 <div class="factura-summary-total">
                   <span>Total</span>
                   <span
@@ -4476,7 +4320,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="exportarFacturaVentaPDF(facturaVentaVerNumero)"
+                id="factura-venta-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
@@ -4486,7 +4330,7 @@
               <button
                 type="button"
                 class="btn-danger"
-                onclick="eliminarFacturaVentaDesdeVer()"
+                id="factura-venta-eliminar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
@@ -4496,11 +4340,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="
-                  alert(
-                    'La edición de facturas ya guardadas estará disponible próximamente.',
-                  )
-                "
+                id="factura-venta-editar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
@@ -4512,7 +4352,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE SERVICIOS ===================== -->
-        <div id="page-facturas-servicios" class="page">
+        <div id="page-facturas-servicios" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button
@@ -5010,7 +4850,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE INSUMOS ===================== -->
-        <div id="page-facturas-insumos" class="page">
+        <div id="page-facturas-insumos" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button
@@ -5549,7 +5389,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE GARANTÍA ===================== -->
-        <div id="page-facturas-garantia" class="page">
+        <div id="page-facturas-garantia" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button
@@ -6099,7 +5939,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE PÉRDIDAS ===================== -->
-        <div id="page-facturas-perdidas" class="page">
+        <div id="page-facturas-perdidas" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button
@@ -6408,7 +6248,7 @@
         </div>
 
         <!-- ===================== FACTURAS - VISTA GENERAL ===================== -->
-        <div id="page-facturas-general" class="page">
+        <div id="page-facturas-general" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active">Todas las Facturas</button>
@@ -7249,24 +7089,20 @@
       </div>
 
       <!-- ===================== MODAL: UNIDAD DE MEDIDA ===================== -->
-      <div
-        class="modal-overlay"
-        id="modal-unidad"
-        onclick="if (event.target === this) cerrarModalUnidad();"
-      >
+      <div class="modal-overlay" id="modal-unidad">
         <div class="modal-card">
           <div class="modal-header">
             <h3 id="modal-unidad-title">Nueva Unidad de Medida</h3>
             <button
               type="button"
               class="modal-close"
-              onclick="cerrarModalUnidad()"
+              id="modal-unidad-cerrar"
               aria-label="Cerrar"
             >
               <svg class="icon"><use href="#icon-close"></use></svg>
             </button>
           </div>
-          <form onsubmit="return guardarUnidad(event);">
+          <form id="unidad-form">
             <div class="form-grid">
               <div class="field">
                 <label
@@ -7275,8 +7111,10 @@
                 <input
                   type="text"
                   id="modal-unidad-nombre"
+                  name="nombre"
                   placeholder="Ej. Metro, Galón, Docena"
                   required
+                  maxlength="30"
                 />
               </div>
               <div class="field">
@@ -7284,9 +7122,10 @@
                 <input
                   type="text"
                   id="modal-unidad-abreviacion"
+                  name="abreviacion"
                   placeholder="Ej. m, gal, doc"
                   required
-                  maxlength="8"
+                  maxlength="10"
                 />
               </div>
             </div>
@@ -7294,7 +7133,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="cerrarModalUnidad()"
+                id="modal-unidad-cancelar"
               >
                 Cancelar
               </button>
@@ -7305,45 +7144,34 @@
       </div>
 
       <!-- ===================== MODAL: CONVERSIÓN ===================== -->
-      <div
-        class="modal-overlay"
-        id="modal-conversion"
-        onclick="if (event.target === this) cerrarModalConversion();"
-      >
+      <div class="modal-overlay" id="modal-conversion">
         <div class="modal-card">
           <div class="modal-header">
             <h3 id="modal-conversion-title">Nueva Conversión</h3>
             <button
               type="button"
               class="modal-close"
-              onclick="cerrarModalConversion()"
+              id="modal-conversion-cancelar"
               aria-label="Cerrar"
             >
               <svg class="icon"><use href="#icon-close"></use></svg>
             </button>
           </div>
-          <form onsubmit="return guardarConversion(event);">
+          <form id="conversion-form">
             <p style="color: #020f1e80; font-size: 14px; margin-top: -10px">
               Define cuántas unidades de destino equivalen a 1 unidad de origen.
-              El sistema podrá encadenar esta conversión con otras ya
-              existentes.
+              Entre dos unidades solo puede haber un camino de conversiones
+              (directo o a través de otras). Si ya existe A↔B↔C, no puedes crear
+              A↔C.
             </p>
             <div class="form-grid">
               <div class="field">
                 <label>Unidad de Origen <span class="required">*</span></label>
-                <select
-                  id="modal-conversion-origen"
-                  required
-                  onchange="actualizarPreviaConversion()"
-                ></select>
+                <select id="modal-conversion-origen" required></select>
               </div>
               <div class="field">
                 <label>Unidad de Destino <span class="required">*</span></label>
-                <select
-                  id="modal-conversion-destino"
-                  required
-                  onchange="actualizarPreviaConversion()"
-                ></select>
+                <select id="modal-conversion-destino" required></select>
               </div>
             </div>
             <div class="field">
@@ -7351,26 +7179,18 @@
                 >Factor de Conversión <span class="required">*</span></label
               >
               <input
-                type="number"
+                type="text"
                 id="modal-conversion-factor"
                 placeholder="Ej. 12"
-                min="0"
-                step="any"
+                inputmode="decimal"
                 required
-                oninput="actualizarPreviaConversion()"
               />
             </div>
             <div class="conversion-preview" id="modal-conversion-preview">
               1 unidad de origen = — unidad de destino
             </div>
             <div class="form-actions">
-              <button
-                type="button"
-                class="btn-secondary"
-                onclick="cerrarModalConversion()"
-              >
-                Cancelar
-              </button>
+              <button type="button" class="btn-secondary">Cancelar</button>
               <button type="submit" class="btn-primary">
                 Guardar Conversión
               </button>
@@ -7448,6 +7268,14 @@
     <!-- Módulos de usuarios -->
     <script type="module" src="./js/views/usuarios.js"></script>
     <script type="module" src="./js/views/perfil.js"></script>
+    <script type="module" src="./js/views/categoriasView.js"></script>
+    <script type="module" src="./js/views/unidadesView.js"></script>
+    <script type="module" src="./js/views/productosView.js"></script>
+    <script type="module" src="./js/views/dashboardView.js"></script>
+    <script type="module" src="./js/views/clientesView.js"></script>
+    <script type="module" src="./js/views/proveedoresView.js"></script>
+    <script type="module" src="./js/views/facturasView.js"></script>
+    <script type="module" src="./js/views/historialView.js"></script>
     <!-- Dashboard principal -->
     <script src="./js/libs/chart.umd.min.js"></script>
     <script src="./js/dashboard.js"></script>
