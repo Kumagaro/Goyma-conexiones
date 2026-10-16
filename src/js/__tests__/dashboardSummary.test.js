@@ -54,7 +54,10 @@ describe("dashboard resumen de productos agotados", () => {
     vi.doMock("../services/dashboardService.js", () => ({
       getDashboardSummary: vi.fn().mockResolvedValue({
         outOfStockTotal: 3,
-        topCategories: [{ name: "Abarrotes", count: 2 }, { name: "Bebidas", count: 1 }],
+        topCategories: [
+          { name: "Abarrotes", count: 2 },
+          { name: "Bebidas", count: 1 },
+        ],
         withoutCategoryCount: 1,
       }),
     }));
@@ -63,18 +66,31 @@ describe("dashboard resumen de productos agotados", () => {
     await view.initDashboardView();
     await flushPromises();
 
-    expect(document.getElementById("dash-agotados-total").textContent).toBe("3");
-    expect(document.getElementById("dash-agotados-sin-categoria").textContent).toBe("1");
-    expect(document.getElementById("dash-agotados-categorias").textContent).toContain("Abarrotes");
-    expect(document.getElementById("dash-agotados-categorias").textContent).toContain("Bebidas");
+    expect(document.getElementById("dash-agotados-total").textContent).toBe(
+      "3",
+    );
+    expect(
+      document.getElementById("dash-agotados-sin-categoria").textContent,
+    ).toBe("1");
+    expect(
+      document.getElementById("dash-agotados-categorias").textContent,
+    ).toContain("Abarrotes");
+    expect(
+      document.getElementById("dash-agotados-categorias").textContent,
+    ).toContain("Bebidas");
 
-    const agotadosButton = document.getElementById("dash-agotados-ver-agotados");
+    const agotadosButton = document.getElementById(
+      "dash-agotados-ver-agotados",
+    );
     agotadosButton.click();
     expect(window.showPage).toHaveBeenCalledWith(
       "productos",
       document.querySelector('#sidebar a[data-page="productos"]'),
     );
-    expect(window.showProductoTab).toHaveBeenCalledWith("agotados", expect.anything());
+    expect(window.showProductoTab).toHaveBeenCalledWith(
+      "agotados",
+      expect.anything(),
+    );
 
     const filter = document.getElementById("producto-condiciones-filter");
     expect(filter.value).toBe("outOfStock");

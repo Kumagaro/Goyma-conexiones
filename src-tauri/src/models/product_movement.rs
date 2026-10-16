@@ -20,6 +20,28 @@ pub struct ProductMovement {
     pub user_name: String,
 }
 
+/// Exportación del historial (HP-03): los mismos filtros de la pantalla más la
+/// ruta elegida en el diálogo "Guardar como".
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ExportHistoryInput {
+    pub product_id: i64,
+    #[serde(default)]
+    pub from_date: Option<String>,
+    #[serde(default)]
+    pub to_date: Option<String>,
+    #[serde(default)]
+    pub types: Vec<String>,
+    pub destination_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportHistoryResult {
+    pub exported_count: usize,
+    pub expired_cleanup_warning: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ProductHistoryFilters {

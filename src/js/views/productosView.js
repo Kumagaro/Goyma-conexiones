@@ -255,6 +255,11 @@ function scheduleProductListReload() {
   productSearchTimer = setTimeout(() => void loadActiveProducts(), 300);
 }
 
+// Mensaje de error que puso la propia carga del listado. Al cargar bien solo se
+// limpia ese: una carga que termina tarde no debe borrar el aviso de otra
+// acción (p. ej. "El producto ya no existe").
+let activeListLoadError = "";
+
 async function loadActiveProducts() {
   const body = document.getElementById("productos-body");
   if (!body) return;
@@ -263,13 +268,16 @@ async function loadActiveProducts() {
     const result = await listProducts(readProductFilters());
     productList = Array.isArray(result) ? result : [];
     renderProductList(productList);
-    showStatus("productos-feedback", "");
+    const feedback = document.getElementById("productos-feedback");
+    if (activeListLoadError && feedback?.textContent === activeListLoadError) {
+      showStatus("productos-feedback", "");
+    }
+    activeListLoadError = "";
   } catch (error) {
     renderLoadingRow(body, 9, "No se pudieron cargar los productos.");
-    showStatus(
-      "productos-feedback",
-      error?.message || "No se pudieron cargar los productos.",
-    );
+    activeListLoadError =
+      error?.message || "No se pudieron cargar los productos.";
+    showStatus("productos-feedback", activeListLoadError);
   }
 }
 

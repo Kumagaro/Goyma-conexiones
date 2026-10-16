@@ -2096,6 +2096,46 @@
                   </optgroup>
                 </select>
               </div>
+              <div
+                class="historial-export"
+                style="
+                  margin-left: auto;
+                  display: flex;
+                  gap: 8px;
+                  align-items: center;
+                  flex-wrap: wrap;
+                "
+              >
+                <span
+                  id="historial-exportar-estado"
+                  aria-live="polite"
+                  style="font-size: 13px"
+                ></span>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  id="historial-exportar-excel"
+                  disabled
+                  title="No hay movimientos para exportar"
+                >
+                  <svg class="icon" style="width: 16px; height: 16px">
+                    <use href="#icon-export"></use>
+                  </svg>
+                  Exportar a Excel
+                </button>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  id="historial-exportar-pdf"
+                  disabled
+                  title="No hay movimientos para exportar"
+                >
+                  <svg class="icon" style="width: 16px; height: 16px">
+                    <use href="#icon-export"></use>
+                  </svg>
+                  Exportar a PDF
+                </button>
+              </div>
             </div>
             <table class="list-table" id="historial-producto-list">
               <thead>
@@ -3097,16 +3137,7 @@
             <table class="list-table" id="historial-proveedor-list">
               <thead>
                 <tr>
-                  <th
-                    id="th-fecha-historial-proveedor"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha(
-                        'historialProveedor',
-                        renderHistorialProveedor,
-                      )
-                    "
-                  >
+                  <th id="th-fecha-historial-proveedor" class="th-sortable">
                     Fecha
                   </th>
                   <th>Estado</th>
@@ -4355,18 +4386,10 @@
         <div id="page-facturas-servicios" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-factura-servicios-list"
-                onclick="showFacturaServiciosTab('list', this)"
-              >
+              <button class="tab active" id="tab-factura-servicios-list">
                 Lista de Facturas
               </button>
-              <button
-                class="tab"
-                id="tab-factura-servicios-create"
-                onclick="showFacturaServiciosTab('create', this)"
-              >
+              <button class="tab" id="tab-factura-servicios-create">
                 Nueva Factura de Servicios
               </button>
             </div>
@@ -4375,7 +4398,6 @@
                 type="text"
                 id="factura-servicios-search"
                 placeholder="Buscar por cliente o No. de factura..."
-                oninput="renderFacturasServicios()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -4392,16 +4414,7 @@
                 <tr>
                   <th>No. Factura</th>
                   <th>Cliente</th>
-                  <th
-                    id="th-fecha-facturas-servicios"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha(
-                        'facturasServicios',
-                        renderFacturasServicios,
-                      )
-                    "
-                  >
+                  <th id="th-fecha-facturas-servicios" class="th-sortable">
                     Emisión
                   </th>
                   <th style="text-align: right">Total</th>
@@ -4417,7 +4430,7 @@
           <div id="factura-servicios-create" class="config-subview">
             <form
               class="form-card"
-              onsubmit="return guardarFacturaServicio(event);"
+              id="factura-servicios-form"
               style="max-width: 100%"
             >
               <div>
@@ -4433,15 +4446,18 @@
                     <input
                       type="text"
                       id="factura-servicio-cliente"
-                      list="clientes-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Escribe para buscar un cliente..."
                       required
                     />
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-servicio-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
-                      onclick="irCrearCliente()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
@@ -4469,19 +4485,18 @@
                 <div class="field">
                   <label>Estado</label>
                   <select id="factura-servicio-estado">
-                    <option value="Por Pagar">Por Pagar</option>
-                    <option value="Pagada">Pagada</option>
-                    <option value="Vencida">Vencida</option>
+                    <option value="pending">Por Cobrar</option>
+                    <option value="completed">Cobrada</option>
+                    <option value="cancelled">Cancelada</option>
                   </select>
                 </div>
                 <div class="field">
                   <label>Método de Pago</label>
                   <select id="factura-servicio-metodo-pago">
-                    <option>Efectivo USD</option>
-                    <option>Efectivo CUP</option>
-                    <option>Transferencia USD</option>
-                    <option>Tarjeta</option>
-                    <option>Zelle</option>
+                    <option value="cash">Efectivo</option>
+                    <option value="transfer">Transferencia</option>
+                    <option value="card">Tarjeta</option>
+                    <option value="zelle">Zelle</option>
                   </select>
                 </div>
               </div>
@@ -4501,30 +4516,23 @@
                     <input
                       type="text"
                       id="factura-servicio-buscar"
-                      list="insumos-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Buscar insumo para agregar a la factura..."
                     />
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-servicio-producto-add"
                       title="Agregar insumo encontrado"
-                      onclick="agregarLineaDesdeBusquedaServicio()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    class="btn-secondary"
-                    onclick="crearInsumoServicioRapido()"
-                  >
-                    <svg class="icon" style="width: 16px; height: 16px">
-                      <use href="#icon-plus"></use>
-                    </svg>
-                    Crear Nuevo Insumo
-                  </button>
                 </div>
 
                 <div class="line-items">
@@ -4533,7 +4541,7 @@
                     <div>Producto / Insumo</div>
                     <div>Cantidad</div>
                     <div>Unidad</div>
-                    <div>Costo Unitario</div>
+                    <div>Precio Unitario</div>
                     <div>Subtotal</div>
                     <div>Acciones</div>
                   </div>
@@ -4543,8 +4551,8 @@
                 <button
                   type="button"
                   class="add-product-row"
+                  id="factura-servicio-agregar-fila"
                   style="margin-top: 15px"
-                  onclick="agregarLineaServicio()"
                 >
                   <svg class="icon" style="width: 16px; height: 16px">
                     <use href="#icon-plus"></use>
@@ -4560,28 +4568,6 @@
                     <span class="summary-value" id="factura-servicio-subtotal"
                       >0.00 USD</span
                     >
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Descuento (%)</span>
-                    <input
-                      type="number"
-                      id="factura-servicio-descuento"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesServicio()"
-                    />
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Impuestos (%)</span>
-                    <input
-                      type="number"
-                      id="factura-servicio-impuesto"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesServicio()"
-                    />
                   </div>
                   <div class="factura-summary-total">
                     <span>Total</span>
@@ -4605,7 +4591,7 @@
                 <button
                   type="button"
                   class="btn-secondary"
-                  onclick="cancelarFacturaServiciosForm()"
+                  id="factura-servicio-cancelar"
                 >
                   Cancelar
                 </button>
@@ -4622,12 +4608,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showFacturaServiciosTab(
-                    'list',
-                    document.getElementById('tab-factura-servicios-list'),
-                  )
-                "
+                id="factura-servicio-volver"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Facturas de Servicios
@@ -4753,7 +4734,7 @@
                 <div>Producto / Insumo</div>
                 <div>Cantidad</div>
                 <div>Unidad</div>
-                <div>Costo Unitario</div>
+                <div>Precio Unitario</div>
                 <div>Subtotal</div>
               </div>
               <div id="factura-servicio-ver-productos"></div>
@@ -4769,20 +4750,6 @@
                   <span
                     class="summary-value"
                     id="factura-servicio-ver-subtotal-resumen"
-                  ></span>
-                </div>
-                <div class="factura-summary-row">
-                  <span>Descuento</span>
-                  <span
-                    class="summary-value"
-                    id="factura-servicio-ver-descuento"
-                  ></span>
-                </div>
-                <div class="factura-summary-row">
-                  <span>Impuestos</span>
-                  <span
-                    class="summary-value"
-                    id="factura-servicio-ver-impuestos"
                   ></span>
                 </div>
                 <div class="factura-summary-total">
@@ -4814,7 +4781,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="exportarFacturaServicioPDF(facturaServicioVerNumero)"
+                id="factura-servicio-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
@@ -4824,7 +4791,7 @@
               <button
                 type="button"
                 class="btn-danger"
-                onclick="eliminarFacturaServicioDesdeVer()"
+                id="factura-servicio-eliminar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
@@ -4834,11 +4801,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="
-                  alert(
-                    'La edición de facturas ya guardadas estará disponible próximamente.',
-                  )
-                "
+                id="factura-servicio-editar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
@@ -4853,18 +4816,10 @@
         <div id="page-facturas-insumos" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-factura-insumos-list"
-                onclick="showFacturaInsumosTab('list', this)"
-              >
+              <button class="tab active" id="tab-factura-insumos-list">
                 Lista de Facturas
               </button>
-              <button
-                class="tab"
-                id="tab-factura-insumos-create"
-                onclick="showFacturaInsumosTab('create', this)"
-              >
+              <button class="tab" id="tab-factura-insumos-create">
                 Nueva Factura de Insumos
               </button>
             </div>
@@ -4873,7 +4828,6 @@
                 type="text"
                 id="factura-insumos-search"
                 placeholder="Buscar por cliente o No. de factura..."
-                oninput="renderFacturasInsumos()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -4890,16 +4844,11 @@
                 <tr>
                   <th>No. Factura</th>
                   <th>Cliente</th>
-                  <th
-                    id="th-fecha-facturas-insumos"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha('facturasInsumos', renderFacturasInsumos)
-                    "
-                  >
+                  <th id="th-fecha-facturas-insumos" class="th-sortable">
                     Emisión
                   </th>
-                  <th style="text-align: right">Total</th>
+                  <th>Factura de Servicio</th>
+                  <th style="text-align: right">Costo Total</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>
@@ -4912,7 +4861,7 @@
           <div id="factura-insumos-create" class="config-subview">
             <form
               class="form-card"
-              onsubmit="return guardarFacturaInsumo(event);"
+              id="factura-insumos-form"
               style="max-width: 100%"
             >
               <div>
@@ -4928,16 +4877,18 @@
                     <input
                       type="text"
                       id="factura-insumo-cliente"
-                      list="clientes-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Escribe para buscar un cliente..."
                       required
                     />
-                    <datalist id="clientes-datalist"></datalist>
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-insumo-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
-                      onclick="irCrearCliente()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
@@ -4946,54 +4897,13 @@
                   </div>
                 </div>
                 <div class="field">
-                  <label>Factura de Servicio Asociada</label>
-                  <div
-                    class="dropzone dropzone-compact"
-                    id="factura-insumo-dropzone"
-                    onclick="
-                      document
-                        .getElementById('factura-insumo-archivo-input')
-                        .click()
-                    "
-                    ondragover="
-                      event.preventDefault();
-                      this.classList.add('dragover');
-                    "
-                    ondragleave="this.classList.remove('dragover')"
-                    ondrop="manejarDropArchivoInsumo(event)"
+                  <label for="factura-insumo-servicio"
+                    >Factura de Servicio Asociada
+                    <span class="required">*</span></label
                   >
-                    <input
-                      type="file"
-                      id="factura-insumo-archivo-input"
-                      style="display: none"
-                      onchange="manejarArchivoInsumo(this.files[0])"
-                    />
-                    <div class="dropzone-default">
-                      <svg class="icon icon-xl">
-                        <use href="#icon-upload"></use>
-                      </svg>
-                      <div>
-                        Arrastra la factura o <strong>selecciona una</strong>
-                      </div>
-                    </div>
-                    <div class="file-chip">
-                      <svg class="icon" style="width: 16px; height: 16px">
-                        <use href="#icon-paperclip"></use>
-                      </svg>
-                      <span id="factura-insumo-archivo-nombre"></span>
-                      <button
-                        type="button"
-                        onclick="
-                          event.stopPropagation();
-                          quitarArchivoInsumo();
-                        "
-                      >
-                        <svg class="icon" style="width: 14px; height: 14px">
-                          <use href="#icon-close"></use>
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
+                  <select id="factura-insumo-servicio" required>
+                    <option value="">Selecciona primero un cliente</option>
+                  </select>
                 </div>
                 <div class="field">
                   <label
@@ -5015,19 +4925,9 @@
                 <div class="field">
                   <label>Estado</label>
                   <select id="factura-insumo-estado">
-                    <option value="Por Pagar">Por Pagar</option>
-                    <option value="Pagada">Pagada</option>
-                    <option value="Vencida">Vencida</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Método de Pago</label>
-                  <select id="factura-insumo-metodo-pago">
-                    <option>Efectivo USD</option>
-                    <option>Efectivo CUP</option>
-                    <option>Transferencia USD</option>
-                    <option>Tarjeta</option>
-                    <option>Zelle</option>
+                    <option value="pending">Pendiente</option>
+                    <option value="completed">Completada</option>
+                    <option value="cancelled">Cancelada</option>
                   </select>
                 </div>
               </div>
@@ -5047,31 +4947,23 @@
                     <input
                       type="text"
                       id="factura-insumo-buscar"
-                      list="insumos-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Buscar insumo para agregar a la factura..."
                     />
-                    <datalist id="insumos-datalist"></datalist>
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-insumo-producto-add"
                       title="Agregar insumo encontrado"
-                      onclick="agregarLineaDesdeBusquedaInsumo()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    class="btn-secondary"
-                    onclick="crearInsumoRapido()"
-                  >
-                    <svg class="icon" style="width: 16px; height: 16px">
-                      <use href="#icon-plus"></use>
-                    </svg>
-                    Crear Nuevo Insumo
-                  </button>
                 </div>
 
                 <div class="line-items">
@@ -5090,8 +4982,8 @@
                 <button
                   type="button"
                   class="add-product-row"
+                  id="factura-insumo-agregar-fila"
                   style="margin-top: 15px"
-                  onclick="agregarLineaInsumo()"
                 >
                   <svg class="icon" style="width: 16px; height: 16px">
                     <use href="#icon-plus"></use>
@@ -5107,28 +4999,6 @@
                     <span class="summary-value" id="factura-insumo-subtotal"
                       >0.00 USD</span
                     >
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Descuento (%)</span>
-                    <input
-                      type="number"
-                      id="factura-insumo-descuento"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesInsumo()"
-                    />
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Impuestos (%)</span>
-                    <input
-                      type="number"
-                      id="factura-insumo-impuesto"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesInsumo()"
-                    />
                   </div>
                   <div class="factura-summary-total">
                     <span>Total</span>
@@ -5152,7 +5022,7 @@
                 <button
                   type="button"
                   class="btn-secondary"
-                  onclick="cancelarFacturaInsumosForm()"
+                  id="factura-insumo-cancelar"
                 >
                   Cancelar
                 </button>
@@ -5169,12 +5039,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showFacturaInsumosTab(
-                    'list',
-                    document.getElementById('tab-factura-insumos-list'),
-                  )
-                "
+                id="factura-insumo-volver"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Facturas de Insumos
@@ -5189,9 +5054,6 @@
                   <span class="kpi-tag" id="factura-insumo-ver-estado-tag"
                     ><span id="factura-insumo-ver-estado-txt"></span
                   ></span>
-                  <span class="kpi-tag tone-blue"
-                    ><span id="factura-insumo-ver-metodo"></span
-                  ></span>
                 </div>
               </div>
             </div>
@@ -5199,7 +5061,7 @@
             <div class="kpi-hero-grid pv-hero-grid">
               <div class="kpi-hero tone-blue">
                 <div class="kpi-hero-top">
-                  <span class="kpi-hero-label">Total de la Factura</span>
+                  <span class="kpi-hero-label">Costo Total</span>
                   <div class="kpi-icon">
                     <svg class="icon">
                       <use href="#icon-dollar-circle"></use>
@@ -5213,7 +5075,7 @@
                 id="factura-insumo-ver-estado-card"
               >
                 <div class="kpi-hero-top">
-                  <span class="kpi-hero-label">Estado de Pago</span>
+                  <span class="kpi-hero-label">Estado</span>
                   <div class="kpi-icon">
                     <svg class="icon"><use href="#icon-money-send"></use></svg>
                   </div>
@@ -5313,20 +5175,6 @@
                     id="factura-insumo-ver-subtotal"
                   ></span>
                 </div>
-                <div class="factura-summary-row">
-                  <span>Descuento</span>
-                  <span
-                    class="summary-value"
-                    id="factura-insumo-ver-descuento"
-                  ></span>
-                </div>
-                <div class="factura-summary-row">
-                  <span>Impuestos</span>
-                  <span
-                    class="summary-value"
-                    id="factura-insumo-ver-impuestos"
-                  ></span>
-                </div>
                 <div class="factura-summary-total">
                   <span>Total</span>
                   <span
@@ -5353,7 +5201,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="exportarFacturaInsumoPDF(facturaInsumoVerNumero)"
+                id="factura-insumo-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
@@ -5363,7 +5211,7 @@
               <button
                 type="button"
                 class="btn-danger"
-                onclick="eliminarFacturaInsumoDesdeVer()"
+                id="factura-insumo-eliminar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
@@ -5373,11 +5221,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="
-                  alert(
-                    'La edición de facturas ya guardadas estará disponible próximamente.',
-                  )
-                "
+                id="factura-insumo-editar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
@@ -5392,18 +5236,10 @@
         <div id="page-facturas-garantia" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-factura-garantia-list"
-                onclick="showFacturaGarantiaTab('list', this)"
-              >
+              <button class="tab active" id="tab-factura-garantia-list">
                 Lista de Facturas
               </button>
-              <button
-                class="tab"
-                id="tab-factura-garantia-create"
-                onclick="showFacturaGarantiaTab('create', this)"
-              >
+              <button class="tab" id="tab-factura-garantia-create">
                 Nueva Factura de Garantía
               </button>
             </div>
@@ -5412,7 +5248,6 @@
                 type="text"
                 id="factura-garantia-search"
                 placeholder="Buscar por cliente o No. de factura..."
-                oninput="renderFacturasGarantia()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -5429,19 +5264,11 @@
                 <tr>
                   <th>No. Factura</th>
                   <th>Cliente</th>
-                  <th
-                    id="th-fecha-facturas-garantia"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha(
-                        'facturasGarantia',
-                        renderFacturasGarantia,
-                      )
-                    "
-                  >
+                  <th id="th-fecha-facturas-garantia" class="th-sortable">
                     Emisión
                   </th>
-                  <th style="text-align: right">Total</th>
+                  <th>Factura Original</th>
+                  <th style="text-align: right">Costo Total</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>
@@ -5454,7 +5281,7 @@
           <div id="factura-garantia-create" class="config-subview">
             <form
               class="form-card"
-              onsubmit="return guardarFacturaGarantia(event);"
+              id="factura-garantia-form"
               style="max-width: 100%"
             >
               <div>
@@ -5470,15 +5297,18 @@
                     <input
                       type="text"
                       id="factura-garantia-cliente"
-                      list="clientes-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Escribe para buscar un cliente..."
                       required
                     />
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-garantia-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
-                      onclick="irCrearCliente()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
@@ -5487,55 +5317,13 @@
                   </div>
                 </div>
                 <div class="field">
-                  <label>Factura Original Asociada</label>
-                  <div
-                    class="dropzone dropzone-compact"
-                    id="factura-garantia-dropzone"
-                    onclick="
-                      document
-                        .getElementById('factura-garantia-archivo-input')
-                        .click()
-                    "
-                    ondragover="
-                      event.preventDefault();
-                      this.classList.add('dragover');
-                    "
-                    ondragleave="this.classList.remove('dragover')"
-                    ondrop="manejarDropArchivoGarantia(event)"
+                  <label for="factura-garantia-original"
+                    >Factura Original Asociada
+                    <span class="required">*</span></label
                   >
-                    <input
-                      type="file"
-                      id="factura-garantia-archivo-input"
-                      style="display: none"
-                      onchange="manejarArchivoGarantia(this.files[0])"
-                    />
-                    <div class="dropzone-default">
-                      <svg class="icon icon-xl">
-                        <use href="#icon-upload"></use>
-                      </svg>
-                      <div>
-                        Arrastra la factura original o
-                        <strong>selecciona una</strong>
-                      </div>
-                    </div>
-                    <div class="file-chip">
-                      <svg class="icon" style="width: 16px; height: 16px">
-                        <use href="#icon-paperclip"></use>
-                      </svg>
-                      <span id="factura-garantia-archivo-nombre"></span>
-                      <button
-                        type="button"
-                        onclick="
-                          event.stopPropagation();
-                          quitarArchivoGarantia();
-                        "
-                      >
-                        <svg class="icon" style="width: 14px; height: 14px">
-                          <use href="#icon-close"></use>
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
+                  <select id="factura-garantia-original" required>
+                    <option value="">Selecciona primero un cliente</option>
+                  </select>
                 </div>
                 <div class="field">
                   <label
@@ -5557,19 +5345,9 @@
                 <div class="field">
                   <label>Estado</label>
                   <select id="factura-garantia-estado">
-                    <option value="Por Pagar">Por Pagar</option>
-                    <option value="Pagada">Pagada</option>
-                    <option value="Vencida">Vencida</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Método de Pago</label>
-                  <select id="factura-garantia-metodo-pago">
-                    <option>Efectivo USD</option>
-                    <option>Efectivo CUP</option>
-                    <option>Transferencia USD</option>
-                    <option>Tarjeta</option>
-                    <option>Zelle</option>
+                    <option value="pending">Pendiente</option>
+                    <option value="completed">Completada</option>
+                    <option value="cancelled">Cancelada</option>
                   </select>
                 </div>
               </div>
@@ -5589,30 +5367,23 @@
                     <input
                       type="text"
                       id="factura-garantia-buscar"
-                      list="productos-datalist"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
                       placeholder="Buscar producto en garantía para agregar..."
                     />
                     <button
                       type="button"
                       class="icon-btn"
+                      id="factura-garantia-producto-add"
                       title="Agregar producto encontrado"
-                      onclick="agregarLineaDesdeBusquedaGarantia()"
                     >
                       <svg class="icon" style="width: 20px; height: 20px">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    class="btn-secondary"
-                    onclick="crearProductoGarantiaRapido()"
-                  >
-                    <svg class="icon" style="width: 16px; height: 16px">
-                      <use href="#icon-plus"></use>
-                    </svg>
-                    Crear Nuevo Producto
-                  </button>
                 </div>
 
                 <div class="line-items">
@@ -5631,8 +5402,8 @@
                 <button
                   type="button"
                   class="add-product-row"
+                  id="factura-garantia-agregar-fila"
                   style="margin-top: 15px"
-                  onclick="agregarLineaGarantia()"
                 >
                   <svg class="icon" style="width: 16px; height: 16px">
                     <use href="#icon-plus"></use>
@@ -5648,28 +5419,6 @@
                     <span class="summary-value" id="factura-garantia-subtotal"
                       >0.00 USD</span
                     >
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Descuento (%)</span>
-                    <input
-                      type="number"
-                      id="factura-garantia-descuento"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesGarantia()"
-                    />
-                  </div>
-                  <div class="factura-summary-row">
-                    <span>Impuestos (%)</span>
-                    <input
-                      type="number"
-                      id="factura-garantia-impuesto"
-                      value="0"
-                      min="0"
-                      max="100"
-                      oninput="recalcularTotalesGarantia()"
-                    />
                   </div>
                   <div class="factura-summary-total">
                     <span>Total</span>
@@ -5693,7 +5442,7 @@
                 <button
                   type="button"
                   class="btn-secondary"
-                  onclick="cancelarFacturaGarantiaForm()"
+                  id="factura-garantia-cancelar"
                 >
                   Cancelar
                 </button>
@@ -5710,12 +5459,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showFacturaGarantiaTab(
-                    'list',
-                    document.getElementById('tab-factura-garantia-list'),
-                  )
-                "
+                id="factura-garantia-volver"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Facturas de Garantía
@@ -5733,9 +5477,6 @@
                   <span class="kpi-tag" id="factura-garantia-ver-estado-tag"
                     ><span id="factura-garantia-ver-estado-txt"></span
                   ></span>
-                  <span class="kpi-tag tone-blue"
-                    ><span id="factura-garantia-ver-metodo"></span
-                  ></span>
                 </div>
               </div>
             </div>
@@ -5743,7 +5484,7 @@
             <div class="kpi-hero-grid pv-hero-grid">
               <div class="kpi-hero tone-blue">
                 <div class="kpi-hero-top">
-                  <span class="kpi-hero-label">Total de la Factura</span>
+                  <span class="kpi-hero-label">Costo Total</span>
                   <div class="kpi-icon">
                     <svg class="icon">
                       <use href="#icon-dollar-circle"></use>
@@ -5760,7 +5501,7 @@
                 id="factura-garantia-ver-estado-card"
               >
                 <div class="kpi-hero-top">
-                  <span class="kpi-hero-label">Estado de Pago</span>
+                  <span class="kpi-hero-label">Estado</span>
                   <div class="kpi-icon">
                     <svg class="icon"><use href="#icon-money-send"></use></svg>
                   </div>
@@ -5860,20 +5601,6 @@
                     id="factura-garantia-ver-subtotal"
                   ></span>
                 </div>
-                <div class="factura-summary-row">
-                  <span>Descuento</span>
-                  <span
-                    class="summary-value"
-                    id="factura-garantia-ver-descuento"
-                  ></span>
-                </div>
-                <div class="factura-summary-row">
-                  <span>Impuestos</span>
-                  <span
-                    class="summary-value"
-                    id="factura-garantia-ver-impuestos"
-                  ></span>
-                </div>
                 <div class="factura-summary-total">
                   <span>Total</span>
                   <span
@@ -5903,7 +5630,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="exportarFacturaGarantiaPDF(facturaGarantiaVerNumero)"
+                id="factura-garantia-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
@@ -5913,7 +5640,7 @@
               <button
                 type="button"
                 class="btn-danger"
-                onclick="eliminarFacturaGarantiaDesdeVer()"
+                id="factura-garantia-eliminar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
@@ -5923,11 +5650,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="
-                  alert(
-                    'La edición de facturas ya guardadas estará disponible próximamente.',
-                  )
-                "
+                id="factura-garantia-editar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-edit"></use>
@@ -5942,18 +5665,10 @@
         <div id="page-facturas-perdidas" class="page" hidden>
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-factura-perdidas-list"
-                onclick="showFacturaPerdidasTab('list', this)"
-              >
+              <button class="tab active" id="tab-factura-perdidas-list">
                 Lista de Facturas
               </button>
-              <button
-                class="tab"
-                id="tab-factura-perdidas-create"
-                onclick="showFacturaPerdidasTab('create', this)"
-              >
+              <button class="tab" id="tab-factura-perdidas-create">
                 Nueva Factura de Pérdidas
               </button>
             </div>
@@ -5962,7 +5677,6 @@
                 type="text"
                 id="factura-perdidas-search"
                 placeholder="Buscar por producto o No. de factura..."
-                oninput="renderFacturasPerdidas()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -5980,17 +5694,8 @@
                   <th>No. Factura</th>
                   <th>Producto</th>
                   <th>Cantidad</th>
-                  <th style="text-align: right">Costo Asociado</th>
-                  <th
-                    id="th-fecha-facturas-perdidas"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha(
-                        'facturasPerdidas',
-                        renderFacturasPerdidas,
-                      )
-                    "
-                  >
+                  <th style="text-align: right">Costo Total</th>
+                  <th id="th-fecha-facturas-perdidas" class="th-sortable">
                     Fecha
                   </th>
                   <th>Acciones</th>
@@ -6004,7 +5709,7 @@
           <div id="factura-perdidas-create" class="config-subview">
             <form
               class="form-card"
-              onsubmit="return guardarFacturaPerdida(event);"
+              id="factura-perdidas-form"
               style="max-width: 100%"
             >
               <div>
@@ -6015,37 +5720,31 @@
 
               <div class="factura-form-row">
                 <div class="field">
-                  <label>Producto <span class="required">*</span></label>
-                  <input
-                    type="text"
-                    id="factura-perdida-producto"
-                    list="productos-datalist"
-                    placeholder="Escribe para buscar un producto..."
-                    required
-                  />
+                  <label for="factura-perdida-producto"
+                    >Producto <span class="required">*</span></label
+                  >
+                  <div id="factura-perdida-producto-combobox"></div>
                 </div>
                 <div class="field">
                   <label
                     >Cantidad de Pérdidas <span class="required">*</span></label
                   >
                   <input
-                    type="number"
+                    type="text"
                     id="factura-perdida-cantidad"
-                    min="0"
-                    step="1"
+                    inputmode="decimal"
                     value="1"
                     required
                   />
                 </div>
                 <div class="field">
-                  <label>Costo Asociado <span class="required">*</span></label>
+                  <label for="factura-perdida-costo">Costo Asociado</label>
                   <input
-                    type="number"
+                    type="text"
                     id="factura-perdida-costo"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    required
+                    readonly
+                    placeholder="—"
+                    title="Se calcula al guardar con el costo real de los lotes"
                   />
                 </div>
               </div>
@@ -6070,7 +5769,7 @@
                 <button
                   type="button"
                   class="btn-secondary"
-                  onclick="cancelarFacturaPerdidasForm()"
+                  id="factura-perdida-cancelar"
                 >
                   Cancelar
                 </button>
@@ -6087,12 +5786,7 @@
               <button
                 type="button"
                 class="cat-view-back"
-                onclick="
-                  showFacturaPerdidasTab(
-                    'list',
-                    document.getElementById('tab-factura-perdidas-list'),
-                  )
-                "
+                id="factura-perdida-volver"
               >
                 <svg class="icon"><use href="#icon-chevron-left"></use></svg>
                 Facturas de Pérdidas
@@ -6212,7 +5906,7 @@
               <button
                 type="button"
                 class="btn-secondary"
-                onclick="exportarFacturaPerdidaPDF(facturaPerdidaVerNumero)"
+                id="factura-perdida-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
@@ -6222,26 +5916,12 @@
               <button
                 type="button"
                 class="btn-danger"
-                onclick="eliminarFacturaPerdidaDesdeVer()"
+                id="factura-perdida-eliminar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Factura
-              </button>
-              <button
-                type="button"
-                class="btn-primary"
-                onclick="
-                  alert(
-                    'La edición de facturas ya guardadas estará disponible próximamente.',
-                  )
-                "
-              >
-                <svg class="icon" style="width: 16px; height: 16px">
-                  <use href="#icon-edit"></use>
-                </svg>
-                Editar
               </button>
             </div>
           </div>
@@ -6258,7 +5938,6 @@
                 type="text"
                 id="factura-general-search"
                 placeholder="Buscar por número, cliente o proveedor..."
-                oninput="renderFacturasGeneral()"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -6279,17 +5958,14 @@
                 </svg>
                 Tipo</label
               >
-              <select
-                id="factura-general-tipo"
-                onchange="renderFacturasGeneral()"
-              >
+              <select id="factura-general-tipo">
                 <option value="">Todos</option>
-                <option value="Entrada">Entrada</option>
-                <option value="Venta">Venta</option>
-                <option value="Servicio">Servicio</option>
-                <option value="Garantía">Garantía</option>
-                <option value="Insumo">Insumo</option>
-                <option value="Pérdida">Pérdida</option>
+                <option value="E">Entrada</option>
+                <option value="V">Venta</option>
+                <option value="S">Servicio</option>
+                <option value="GG">Garantía</option>
+                <option value="GI">Insumo</option>
+                <option value="P">Pérdida</option>
               </select>
             </div>
             <div class="field field-select-item">
@@ -6302,14 +5978,11 @@
                 </svg>
                 Estado</label
               >
-              <select
-                id="factura-general-estado"
-                onchange="renderFacturasGeneral()"
-              >
+              <select id="factura-general-estado">
                 <option value="">Todos</option>
-                <option value="Pagada">Pagada</option>
-                <option value="Por Pagar">Por Pagar</option>
-                <option value="Vencida">Vencida</option>
+                <option value="pendientes">Pendientes</option>
+                <option value="completadas">Completadas</option>
+                <option value="canceladas">Canceladas</option>
               </select>
             </div>
           </div>
@@ -6321,13 +5994,7 @@
                   <th>No. Factura</th>
                   <th>Tipo</th>
                   <th>Cliente / Proveedor</th>
-                  <th
-                    id="th-fecha-facturas-general"
-                    class="th-sortable"
-                    onclick="
-                      toggleOrdenFecha('facturasGeneral', renderFacturasGeneral)
-                    "
-                  >
+                  <th id="th-fecha-facturas-general" class="th-sortable">
                     Fecha
                   </th>
                   <th style="text-align: right">Total</th>

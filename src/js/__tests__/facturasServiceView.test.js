@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -24,12 +34,16 @@ vi.mock("../components/confirmDialog.js", () => ({
   confirmDialog: vi.fn(() => Promise.resolve(true)),
 }));
 
-import {
-  createServiceInvoice,
-  getInvoice,
-  listInvoices,
-} from "../services/invoicesService.js";
-import { initFacturasView } from "../views/facturasView.js";
+// Con isolate:false los módulos se comparten entre archivos de test: se
+// recarga la vista para que use los mocks de este archivo.
+let createServiceInvoice, getInvoice, listInvoices, initFacturasView;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({ createServiceInvoice, getInvoice, listInvoices } =
+    await import("../services/invoicesService.js"));
+  ({ initFacturasView } = await import("../views/facturasView.js"));
+});
 
 function seedServicePage() {
   document.body.innerHTML = `
@@ -132,21 +146,6 @@ describe("facturasView submódulo service", () => {
       document.getElementById("facturas-servicios-body").textContent,
     ).toContain("Aún no hay facturas de servicio");
 
-    // Etiqueta del cliente y columnas propias de la tabla de servicios.
-    const headers = Array.from(
-      document.querySelectorAll(
-        "#factura-servicios-list thead th",
-      ),
-    ).map((th) => th.textContent);
-    expect(headers).toEqual([
-      "No. Factura",
-      "Cliente",
-      "Emisión",
-      "Total",
-      "Estado",
-      "Acciones",
-    ]);
-
     listInvoices.mockResolvedValueOnce([
       {
         id: 1,
@@ -168,6 +167,100 @@ describe("facturasView submódulo service", () => {
     expect(
       document.getElementById("facturas-servicios-body").textContent,
     ).toContain("No se pudieron cargar");
+  });
+
+  it("el HTML de producción tiene la etiqueta de cliente, las columnas y los controles del submódulo", async () => {
+    const html = await readFile(
+      path.resolve(process.cwd(), "src", "dashboard-unificado.html"),
+      "utf8",
+    );
+    const page = new DOMParser()
+      .parseFromString(html, "text/html")
+      .getElementById("page-facturas-servicios");
+    const texts = (selector) =>
+      Array.from(page.querySelectorAll(selector)).map((el) =>
+        el.textContent.trim(),
+      );
+
+    expect(
+      page.querySelector("#factura-servicios-create label").textContent,
+    ).toContain("Buscar Cliente");
+    expect(texts("#factura-servicios-list thead th")).toEqual([
+      "No. Factura",
+      "Cliente",
+      "Emisión",
+      "Total",
+      "Estado",
+      "Acciones",
+    ]);
+    // Las líneas de servicio son insumos cobrados a precio de venta (FS-03).
+    expect(texts("#factura-servicios-create .li-head div")).toEqual([
+      "No",
+      "Producto / Insumo",
+      "Cantidad",
+      "Unidad",
+      "Precio Unitario",
+      "Subtotal",
+      "Acciones",
+    ]);
+    expect(texts("#factura-servicios-ver .li-head div")).toEqual([
+      "No",
+      "Producto / Insumo",
+      "Cantidad",
+      "Unidad",
+      "Precio Unitario",
+      "Subtotal",
+    ]);
+    expect(
+      Array.from(page.querySelectorAll("#factura-servicio-estado option")).map(
+        (o) => o.value,
+      ),
+    ).toEqual(["pending", "completed", "cancelled"]);
+    expect(
+      Array.from(
+        page.querySelectorAll("#factura-servicio-metodo-pago option"),
+      ).map((o) => o.value),
+    ).toEqual(["cash", "transfer", "card", "zelle"]);
+
+    for (const id of [
+      "factura-servicios-form",
+      "factura-servicio-cliente-add",
+      "factura-servicio-producto-add",
+      "factura-servicio-agregar-fila",
+      "factura-servicio-cancelar",
+      "factura-servicio-volver",
+      "factura-servicio-editar",
+      "factura-servicio-exportar",
+      "factura-servicio-eliminar",
+    ]) {
+      expect(page.querySelector(`#${id}`), id).not.toBeNull();
+    }
+    for (const id of [
+      "factura-servicio-descuento",
+      "factura-servicio-impuesto",
+      "factura-servicio-ver-descuento",
+      "factura-servicio-ver-impuestos",
+    ]) {
+      expect(page.querySelector(`#${id}`), id).toBeNull();
+    }
+    expect(
+      page.querySelector("[onclick],[oninput],[onchange],[onsubmit]"),
+    ).toBeNull();
+  });
+
+  it("el select de estado usa códigos pending/completed/cancelled y el método de pago solo se muestra con completed", async () => {
+    listInvoices.mockResolvedValue([]);
+    await initFacturasView();
+
+    const estado = document.getElementById("factura-servicio-estado");
+    const metodo = document.getElementById("factura-servicio-metodo-pago");
+    estado.value = "pending";
+    estado.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(metodo.style.display).toBe("none");
+
+    estado.value = "completed";
+    estado.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(metodo.style.display).not.toBe("none");
   });
 
   it("debouncea el buscador #factura-servicios-search con 300ms", async () => {
@@ -247,9 +340,7 @@ describe("facturasView submódulo service", () => {
 
     document
       .getElementById("factura-servicios-form")
-      .dispatchEvent(
-        new Event("submit", { bubbles: true, cancelable: true }),
-      );
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => {
       expect(createServiceInvoice).toHaveBeenCalledWith(
         expect.objectContaining({

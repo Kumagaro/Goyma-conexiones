@@ -13,7 +13,7 @@ Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en 
   - Frontend: **HTML + CSS + JavaScript vanilla** (sin React, Vue ni similares).
   - Base de datos: **SQLite local** (única BD para todo el proyecto).
   - Tests: Rust nativo (`#[cfg(test)]`) en el backend + **Vitest/jsdom** en el frontend (dependencia de desarrollo, justificada en `plan.md` de cada feature).
-- **Estado actual:** el módulo de Autenticación y Usuarios ya está implementado en Rust/SQLite y frontend; los demás módulos siguen en desarrollo y sus backends aún están pendientes.
+- **Estado actual:** Autenticación y Usuarios (`spec-01`) e Inventario-Productos (`spec-02`) están implementados en Rust/SQLite y frontend. Contactos-Facturación-Historial (`spec-03`) tiene el **backend completo** (35 comandos con tests) y su interfaz **en curso**: ver los huecos anotados en `specs/03-contactos-facturacion-historial/task-03.md` §6 antes de dar el módulo por cerrado. El resto de módulos (notificaciones, configuración, respaldo; ver `specs/pendientes.md`) siguen pendientes.
 - **Usuarios:** exclusivos de Cuba (validaciones como teléfono `+53XXXXXXXX` son intencionales, no placeholders). Una sola sesión activa a la vez. Roles: `Administrador` y `Contador`.
 - **Desarrollador:** una sola persona, apoyada por agentes de IA. No hay equipo que coordinar.
 
@@ -95,9 +95,9 @@ No marques una tarea como completa sin haber verificado que el código funciona 
 
 ## 7. Comandos del proyecto
 
-- **Desarrollo / build:** `npm run tauri:dev` y `npm run tauri:build` (Tauri v2, frontend estático en `src/`).
-- **Formateo:** `npx prettier --write .` para frontend; `cargo fmt --manifest-path src-tauri/Cargo.toml` y `cargo clippy --manifest-path src-tauri/Cargo.toml` para Rust.
-- **Tests:** `cargo test --manifest-path src-tauri/Cargo.toml` (backend) y `npm test` (frontend, Vitest + jsdom).
+- **Desarrollo / build:** `npm run tauri:dev` y `npm run tauri:build` (Tauri v2, frontend estático en `src/`). Requiere Rust 1.88 o superior (`rust-version` en `src-tauri/Cargo.toml`).
+- **Formateo:** `npx prettier --write .` para frontend (respeta `.prettierignore`: librerías minificadas, generados, `*.md`, `auth.css` y `dashboard.css`); `cargo fmt --manifest-path src-tauri/Cargo.toml` y `cargo clippy --manifest-path src-tauri/Cargo.toml` para Rust.
+- **Tests:** `cargo test --manifest-path src-tauri/Cargo.toml` (backend) y `npm test` (frontend, Vitest + jsdom). Lint estricto: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`.
 
 ---
 

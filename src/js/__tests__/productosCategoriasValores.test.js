@@ -292,6 +292,183 @@ describe("valores de Fase 2 en productos y categorías", () => {
     );
   });
 
+  it("Fase 3: Ingresos y Valor Total pintan por fila los importes reales del backend", async () => {
+    const { formatMoney } = await import("../utils/formatters.js");
+    seedCategoriesPage();
+    listCategories.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          name: "Bebidas",
+          description: null,
+          productCount: 2,
+          ingresosCents: 1_234_567,
+        },
+        {
+          id: 2,
+          name: "Lácteos",
+          description: null,
+          productCount: 1,
+          ingresosCents: 39_900,
+        },
+      ],
+      expiredCleanupWarning: null,
+    });
+    getCategory.mockResolvedValue({
+      id: 1,
+      name: "Bebidas",
+      description: null,
+      productCount: 2,
+      ingresosCents: 1_234_567,
+      products: [],
+    });
+
+    const categories = await import("../views/categoriasView.js");
+    await categories.initCategoriasView();
+    const rows = Array.from(document.querySelectorAll("#categorias-body tr"));
+    expect(rows[0].textContent).toContain(formatMoney(1_234_567));
+    expect(rows[1].textContent).toContain(formatMoney(39_900));
+    expect(rows[1].textContent).not.toContain(formatMoney(1_234_567));
+    document
+      .querySelector("#categorias-body button[data-categoria-action='view']")
+      .click();
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("categoria-ver-ingresos").textContent,
+      ).toBe(formatMoney(1_234_567)),
+    );
+
+    seedProductsPage();
+    const product = {
+      id: 4,
+      name: "Café SP03",
+      categoryId: 2,
+      categoryName: "Lácteos",
+      unitId: null,
+      unitName: null,
+      unitAbbreviation: null,
+      quantity: "12",
+      costCents: 133,
+      sellingPriceCents: 160,
+      valorTotalCents: 1_700,
+      profitPercent: "20,00",
+      expiresOn: null,
+      isOutOfStock: false,
+      isLowStock: false,
+    };
+    listProducts.mockResolvedValue([product]);
+    getProduct.mockResolvedValue({
+      ...product,
+      description: null,
+      isDiscontinued: false,
+      discontinuedAt: null,
+      remainingDays: null,
+      expiredCleanupWarning: null,
+    });
+    const products = await import("../views/productosView.js");
+    await products.initProductosView();
+    await products.showProductoTab("list");
+    // Valor Total = lotes restantes × costo (no cantidad × costo promedio).
+    expect(document.getElementById("productos-body").textContent).toContain(
+      formatMoney(1_700),
+    );
+    document
+      .querySelector('#productos-body [data-product-action="view"]')
+      .click();
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("producto-ver-valor-total").textContent,
+      ).toBe(formatMoney(1_700)),
+    );
+  });
+
+  it.each([
+    ["null", { expiredCleanupWarning: null }],
+    ["ausente", {}],
+  ])(
+    "H-7: productos y categorías no se rompen con expiredCleanupWarning %s",
+    async (_label, warningField) => {
+      seedCategoriesPage();
+      listCategories.mockResolvedValue({
+        items: [
+          {
+            id: 1,
+            name: "Bebidas",
+            description: null,
+            productCount: 0,
+            ingresosCents: 0,
+          },
+        ],
+        ...warningField,
+      });
+      getCategory.mockResolvedValue({
+        id: 1,
+        name: "Bebidas",
+        description: null,
+        productCount: 0,
+        ingresosCents: 0,
+        products: [],
+        ...warningField,
+      });
+      const categories = await import("../views/categoriasView.js");
+      await categories.initCategoriasView();
+      expect(document.getElementById("categorias-body").textContent).toContain(
+        "Bebidas",
+      );
+      document
+        .querySelector("#categorias-body button[data-categoria-action='view']")
+        .click();
+      await vi.waitFor(() =>
+        expect(
+          document.getElementById("categoria-ver-nombre").textContent,
+        ).toBe("Bebidas"),
+      );
+
+      seedProductsPage();
+      const product = {
+        id: 4,
+        name: "Café",
+        categoryId: null,
+        categoryName: null,
+        unitId: null,
+        unitName: null,
+        unitAbbreviation: null,
+        quantity: "1",
+        costCents: 100,
+        sellingPriceCents: 120,
+        valorTotalCents: 100,
+        profitPercent: "20,00",
+        expiresOn: null,
+        isOutOfStock: false,
+        isLowStock: false,
+      };
+      listProducts.mockResolvedValue([product]);
+      getProduct.mockResolvedValue({
+        ...product,
+        description: null,
+        isDiscontinued: false,
+        discontinuedAt: null,
+        remainingDays: null,
+        ...warningField,
+      });
+      const products = await import("../views/productosView.js");
+      await products.initProductosView();
+      await products.showProductoTab("list");
+      document
+        .querySelector('#productos-body [data-product-action="view"]')
+        .click();
+      await vi.waitFor(() =>
+        expect(document.getElementById("producto-ver-nombre").textContent).toBe(
+          "Café",
+        ),
+      );
+      // Sin aviso, el estado queda vacío y oculto (no "undefined").
+      const feedback = document.getElementById("producto-detalle-feedback");
+      expect(feedback.textContent).toBe("");
+      expect(feedback.hidden).toBe(true);
+    },
+  );
+
   it("salida segura en productos: un nombre con HTML se muestra como texto en listado y detalle", async () => {
     seedProductsPage();
     const malicious = {

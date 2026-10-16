@@ -581,6 +581,8 @@ fn client_invoice_history(
                             invoice_type,
                         },
                     ),
+                    product_name: None,
+                    quantity: None,
                 }
             },
         )
@@ -658,7 +660,7 @@ mod tests {
         assert_allows_both_roles, assert_requires_session, create_test_session, create_test_user,
         insert_product_fixture, setup_test_db,
     };
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use rusqlite::OptionalExtension;
 
     const TS: &str = "2026-10-03T00:00:00Z";
@@ -1204,9 +1206,10 @@ mod tests {
                 .execute(
                     "INSERT INTO invoices (type, number, invoiceDate, status, clientId, contactFullName,
                         contactFullNameNormalized, contactNationalId, contactPhone, associatedNumber,
-                        associatedType, createdByUserId, createdByName, createdAt, updatedAt)
+                        associatedType, paidAt, createdByUserId, createdByName, createdAt, updatedAt)
                      VALUES (?1, ?2, ?3, ?4, ?5, 'Luis García', 'luis garcia', '12345678941', '+5355550112',
-                        CASE WHEN ?6 THEN 'V-00001' END, CASE WHEN ?6 THEN 'V' END, ?7, 'admin', ?8, ?8)",
+                        CASE WHEN ?6 THEN 'V-00001' END, CASE WHEN ?6 THEN 'V' END,
+                        CASE WHEN ?4 = 'completed' THEN ?8 END, ?7, 'admin', ?8, ?8)",
                     rusqlite::params![
                         invoice_type,
                         number,
@@ -1394,6 +1397,13 @@ mod tests {
         assert_allows_both_roles(list_clients_inner);
         assert_requires_session(|connection, now| search_clients_inner(connection, now, "ana"));
         assert_allows_both_roles(|connection, now| search_clients_inner(connection, now, "ana"));
+    }
+
+    #[test]
+    fn get_client_detail_requires_session_and_allows_both_roles() {
+        // Fila de la matriz de autorización que faltaba (§6).
+        assert_requires_session(|connection, now| get_client_detail_inner(connection, now, 1));
+        assert_allows_both_roles(|connection, now| get_client_detail_inner(connection, now, 1));
     }
 
     #[test]

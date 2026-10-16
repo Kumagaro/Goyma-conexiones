@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -29,14 +37,26 @@ vi.mock("../components/confirmDialog.js", () => ({
   confirmDialog: vi.fn(() => Promise.resolve(true)),
 }));
 
-import {
-  createEntryInvoice,
+// Con isolate:false los módulos se comparten entre archivos de test: se
+// recarga la vista para que use los mocks de este archivo.
+let createEntryInvoice,
   downloadInvoiceAttachment,
   getInvoice,
   listInvoices,
   saveInvoiceAttachment,
-} from "../services/invoicesService.js";
-import { initFacturasView } from "../views/facturasView.js";
+  initFacturasView;
+
+beforeAll(async () => {
+  vi.resetModules();
+  ({
+    createEntryInvoice,
+    downloadInvoiceAttachment,
+    getInvoice,
+    listInvoices,
+    saveInvoiceAttachment,
+  } = await import("../services/invoicesService.js"));
+  ({ initFacturasView } = await import("../views/facturasView.js"));
+});
 
 function seedEntryPage() {
   document.body.innerHTML = `

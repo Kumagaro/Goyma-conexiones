@@ -1,0 +1,15 @@
+# Librerías de terceros ya minificadas: no se reformatean.
+src/js/libs/
+
+# Generado por Tauri/Cargo y por npm.
+src-tauri/gen/
+src-tauri/target/
+package-lock.json
+
+# Agents.md §3: Prettier se aplica a HTML/CSS/JS; la documentación se edita a mano.
+*.md
+
+# Agents.md §3 y §9: estos estilos no se modifican sin necesidad de la feature,
+# tampoco para reformatearlos.
+src/css/auth.css
+src/css/dashboard.css

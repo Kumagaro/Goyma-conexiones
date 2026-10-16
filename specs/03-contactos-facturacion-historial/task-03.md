@@ -271,7 +271,8 @@
 
 - [x] Test (Vitest + jsdom): `dashboard.js` despacha `new CustomEvent('page:change', { detail: { pageId } })` al cambiar de página; el evento se dispara con el `pageId` correcto (el id de la página destino).
 - [x] Implementación: en `showPage()`, tras cambiar la vista, `document.dispatchEvent(new CustomEvent('page:change', { detail: { pageId } }))`.
-- [ ] Verificación: `clientesView.js`, `proveedoresView.js` y `facturasView.js` lo escuchan y se inicializan cuando `pageId` coincide con su sección. Pendiente hasta implementar esas vistas en sus tareas posteriores; los archivos aún no existen.
+- [x] Verificación: `clientesView.js`, `proveedoresView.js` y `facturasView.js` lo escuchan y se inicializan cuando `pageId` coincide con su sección. Pendiente hasta implementar esas vistas en sus tareas posteriores; los archivos aún no existen.
+- **Nota (2026-10-16):** las vistas escuchan en `window` y `showPage` despachaba en `document` sin `bubbles`, así que en la app real nunca les llegaba. Se añade `bubbles: true` y el test de `environment.test.js` exige que un listener en `window` lo reciba (falla sin el arreglo).
 
 ---
 
@@ -466,6 +467,7 @@
 - [x] Test (Rust, **N-1 / `updatedAt`**): `updateEntryInvoice` actualiza `invoices.updatedAt` con `format_utc_timestamp(now)`; `createdAt` no cambia.
 - [x] Test (Rust): fila de la matriz de autorización de `updateEntryInvoice`.
 - [x] Implementación: `updateEntryInvoice(input)`. **Actualiza `updatedAt` con `format_utc_timestamp(now)`.** Llama a `validate_stock_limit` antes de insertar/aumentar lotes.
+  - **Corrección (2026-10-16, §4.8):** faltaban el `#[tauri::command] update_entry_invoice` y su registro en `generate_handler!`; solo existía el núcleo. Añadidos.
 
 #### 3.2.3 `saveInvoiceAttachment` y `downloadInvoiceAttachment`
 
@@ -693,6 +695,7 @@
 - [x] Test (Rust, **N-1 / `updatedAt`**): `updateSaleInvoice`, `updateServiceInvoice`, `updateGuaranteeInvoice` y `updateInstallationInvoice` actualizan `invoices.updatedAt` con `format_utc_timestamp(now)`; `createdAt` no cambia.
 - [x] Test (Rust): filas de la matriz de autorización de los 4 comandos.
 - [x] Implementación: los 4 comandos. **Actualizan `updatedAt` con `format_utc_timestamp(now)`.** El Ajuste se emite solo si la cantidad de la línea cambió (H-A4).
+- **Corrección (2026-10-16), primera ejecución real de `cargo test`:** (1) **el Ajuste de las salidas tenía el signo invertido**: se registraba el delta de la línea y no el del stock (HP-01: + entra, − sale); subir de 2 a 3 una venta quedaba como `+1` aunque el stock bajara. Se corrige en los dos núcleos y en los tests de venta, servicio, garantía e insumos que fijaban el signo erróneo; el de venta además esperaba el Ajuste antes de la Reversión, pero el código procesa primero las líneas quitadas y la spec no fija orden. (2) **Las ediciones devolvían dos veces los consumos**: `restore_outgoing_line_consumptions` devolvía cada consumo a su lote pero no borraba la fila, y la siguiente edición lo volvía a devolver, inflando el stock (o rompiendo el `CHECK` del lote con un error `internal`). Ahora borra el consumo devuelto. Test nuevo `update_sale_invoice_twice_does_not_restore_consumptions_twice`.
 - **Nota (2026-10-11):** dos núcleos compartidos (`update_priced_outgoing_invoice_inner` para V/S con precio preservado; `update_costed_outgoing_invoice_inner` para GG/GI con costo recalculado) + 4 wrappers + 4 comandos registrados + 3 wrappers JS añadidos (`updateService/Guarantee/InstallationInvoice`). H-A4: en V/S se preserva `unitPriceCents` y se refresca `costAtSaleCents` en silencio; en GG/GI se actualiza el costo en silencio. `npm test` 131/131 en verde (flakies rotativos preexistentes en intermedias). Ejecución Rust pendiente en tu máquina: `cargo test --manifest-path src-tauri/Cargo.toml update_`.
 
 ### 4.3 `commands/invoices.rs` — lista general
@@ -727,88 +730,113 @@
 
 #### 4.5.2 Vista de factura de servicio
 
-- [ ] Test (Vitest + jsdom): idéntico a venta, pero la etiqueta del cliente y las columnas de la tabla.
-- [ ] Implementación: submódulo `service` de `facturasView.js`.
+- [x] Test (Vitest + jsdom): idéntico a venta, pero la etiqueta del cliente y las columnas de la tabla.
+- [x] Implementación: submódulo `service` de `facturasView.js`.
+- **Nota (2026-10-16):** el submódulo JS ya existía; faltaba adaptar `#page-facturas-servicios` en `dashboard-unificado.html` igual que venta: ids en lugar de manejadores inline, combobox en cliente e insumo, estados `pending`/`completed`/`cancelled`, métodos de pago con código, sin descuento/impuesto (formulario y detalle) y sin "Crear Nuevo Insumo" del mock. La columna "Costo Unitario" pasa a "Precio Unitario" (FS-03: los insumos se cobran a precio de venta). El test valida el HTML de producción (el de cabeceras sembradas era tautológico) y añade el caso de estado/método de pago. `facturasServiceView.test.js` 11/11; `npm test` 151/152: falla `productos.test.js` › "muestra errores stale del backend…", que también falla en `HEAD` sin estos cambios (preexistente, ajeno a esta tarea).
 
 #### 4.5.3 Vista de factura de garantía
 
-- [ ] Test (Vitest + jsdom): `#factura-garantia-estado` con opciones correctas. **No hay `<select>` de método de pago.**
-- [ ] Test (Vitest + jsdom): `#factura-garantia-dropzone` **no existe**. `#factura-garantia-original` es un `<select required>` que se llena con las facturas de venta y servicio del cliente.
-- [ ] Test (Vitest + jsdom): al cambiar de cliente, el `<select>` se limpia.
-- [ ] Test (Vitest + jsdom): `#factura-garantia-ver-original` muestra `{numero} · {tipo visible}`.
-- [ ] Test (Vitest + jsdom): el botón "Crear Nuevo Producto" de garantía **no existe** (el producto se crea al guardar la factura).
-- [ ] Test (Vitest + jsdom): los inputs de descuento e impuesto no existen.
-- [ ] Implementación: submódulo `guarantee` de `facturasView.js`. Elimina el dropzone.
+- [x] Test (Vitest + jsdom): `#factura-garantia-estado` con opciones correctas. **No hay `<select>` de método de pago.**
+- [x] Test (Vitest + jsdom): `#factura-garantia-dropzone` **no existe**. `#factura-garantia-original` es un `<select required>` que se llena con las facturas de venta y servicio del cliente.
+- [x] Test (Vitest + jsdom): al cambiar de cliente, el `<select>` se limpia.
+- [x] Test (Vitest + jsdom): `#factura-garantia-ver-original` muestra `{numero} · {tipo visible}`.
+- [x] Test (Vitest + jsdom): el botón "Crear Nuevo Producto" de garantía **no existe** (el producto se crea al guardar la factura).
+- [x] Test (Vitest + jsdom): los inputs de descuento e impuesto no existen.
+- [x] Implementación: submódulo `guarantee` de `facturasView.js`. Elimina el dropzone.
+- **Nota (2026-10-16):** `facturasGuaranteeView.test.js` (10 tests) monta el HTML de producción de `#page-facturas-garantia`. El `<select>` se llena con `getClientDetail(clientId).invoiceHistory` filtrado a `V`/`S` no canceladas (sin comando nuevo; el backend sigue validando en `createGuaranteeInvoice`) y descarta respuestas tardías de un cliente anterior. HTML adaptado como venta/servicio: ids en lugar de manejadores inline, combobox, estados Pendiente/Completada/Cancelada, sin método de pago (formulario ni detalle: etiqueta "Estado" en vez de "Estado de Pago"), sin descuento/impuesto, sin "Crear Nuevo Producto"; se conserva el "+" que agrega el producto encontrado. Por FS-01 el listado añade la columna "Factura Original" y "Total" pasa a "Costo Total" (también en el detalle). `npm test` 161/162: el único fallo rota entre corridas (`dashboardSummary`/`productos`) y pasa aislado con y sin estos cambios.
 
 #### 4.5.4 Vista de factura de insumo
 
-- [ ] Test (Vitest + jsdom): análogo a garantía con `#factura-insumo-servicio`.
-- [ ] Implementación: submódulo `installation` de `facturasView.js`.
+- [x] Test (Vitest + jsdom): análogo a garantía con `#factura-insumo-servicio`.
+- [x] Implementación: submódulo `installation` de `facturasView.js`.
+- **Nota (2026-10-16):** garantía e insumos comparten `createAssociatedSubmodule(cfg)` en `facturasView.js` (misma mecánica FS-04/FS-05; cambia tipo, ids, tipos asociables y textos), en lugar de duplicar el submódulo. `#factura-insumo-servicio` se llena con los servicios **no cancelados** del cliente (`getClientDetail().invoiceHistory`). HTML de `#page-facturas-insumos` adaptado como garantía (ids, combobox, Pendiente/Completada/Cancelada, sin método de pago, sin descuento/impuesto, sin dropzone, sin "Crear Nuevo Insumo"; columna "Factura de Servicio" y "Costo Total"); se quitaron `clientes-datalist`/`insumos-datalist`, que ya no usaba nadie. `facturasInstallationView.test.js` 8 tests sobre el HTML de producción.
+- **Corrección de notas anteriores (flakies):** los fallos "rotativos" de `npm test` (incluido `productos.test.js`) no eran de tiempo: `vitest.config.js` usa `isolate: false`, así que el primer archivo que importaba `facturasView.js` lo dejaba atado a **sus** mocks. Los 5 tests de facturas ahora hacen `vi.resetModules()` + `import()` dinámico en `beforeAll`. `npm test` 170/170 en 3 corridas seguidas.
 
 #### 4.5.5 Vista de factura de pérdida
 
-- [ ] Test (Vitest + jsdom): `#factura-perdida-costo` es `<input type="text" readonly>`. No se envía.
-- [ ] Test (Vitest + jsdom): `#factura-perdida-cantidad` es `<input type="text" inputmode="decimal">`.
-- [ ] Test (Vitest + jsdom): `#factura-perdida-producto` es combobox sin "Agregar nueva".
-- [ ] Test (Vitest + jsdom): el formulario solo pide producto, cantidad, fecha y descripción.
-- [ ] Test (Vitest + jsdom): el detalle llena `#factura-perdida-ver-costo-total` y `#factura-perdida-ver-costo` con el costo real.
-- [ ] Implementación: submódulo `loss` de `facturasView.js`.
+- [x] Test (Vitest + jsdom): `#factura-perdida-costo` es `<input type="text" readonly>`. No se envía.
+- [x] Test (Vitest + jsdom): `#factura-perdida-cantidad` es `<input type="text" inputmode="decimal">`.
+- [x] Test (Vitest + jsdom): `#factura-perdida-producto` es combobox sin "Agregar nueva".
+- [x] Test (Vitest + jsdom): el formulario solo pide producto, cantidad, fecha y descripción.
+- [x] Test (Vitest + jsdom): el detalle llena `#factura-perdida-ver-costo-total` y `#factura-perdida-ver-costo` con el costo real.
+- [x] Implementación: submódulo `loss` de `facturasView.js`.
+- **Nota (2026-10-16):** `facturasLossView.test.js` (7 tests, HTML de producción). El producto usa `createCombobox` (sin `onAddNew`); el input conserva el id `#factura-perdida-producto`. Tras guardar se abre el detalle, que trae el costo real (FP-01: el costo solo se ve después de guardar). Se quitó el botón "Editar" (la pérdida no se edita) y `productos-datalist`.
+  - **Backend (aprobado por el dueño):** `listInvoices` no traía producto ni cantidad para pintar la lista (RF-087). `InvoiceListItem` añade `productName` y `quantity` (solo en `P`, desde su línea única vía `LEFT JOIN`; `null` en el resto) y la búsqueda incluye el nombre del producto. Test `list_invoices_returns_product_and_quantity_only_for_losses`.
+  - **El backend de `HEAD` no compilaba** (por eso las notas de §4.1.5–§4.4 decían "Ejecución Rust pendiente"). Arreglos mínimos para poder verificar: préstamo de `statement` en los dos `update_*_outgoing_invoice_inner` (§4.2); el test de §4.2 llamaba a `installation_input` en vez de `update_installation_input`; faltaba `chrono::TimeZone` en los tests de `clients.rs`/`suppliers.rs` (§4.4); el fixture del test de lista general (§4.3) insertaba un servicio `completed` sin `paidAt`. `cargo test`: 343/347. *(Resuelto después, ver la corrección de §4.2 y la nota de cierre de errores: `cargo test` 348/348, `clippy -D warnings` limpio.)* **Siguen fallando 4 tests de tareas anteriores, sin tocar:** `get_client_detail_reports_indicators_and_history` y `get_supplier_detail_reports_indicators_and_history` (fixture `completed` sin `paidAt`), `update_sale_invoice_edits_pending_with_adjustment_reversal_and_new_sale` (orden `reversal`/`adjustment` distinto del esperado) y `update_sale_invoice_keeps_discontinued_lines_only_unchanged` (devuelve `internal` en vez de `invalidState`). `clippy` deja 1 warning `type_complexity` en código anterior (`invoices.rs`, cerca de la línea 3126).
+  - **Pendiente:** el buscador de productos (`search_products_for_invoice`) solo devuelve productos **activos** con stock, así que aún no se puede registrar la pérdida de un descontinuado con stock (excepción de FP-01/S-22). La lista tampoco muestra la descripción (RF-087), porque `InvoiceListItem` no la trae.
+  - `npm test` 176/177 o 175/177: `productos.test.js` › "muestra errores stale…" falla de forma intermitente **también en `HEAD` aislado** (preexistente; corrige la nota de §4.5.4, donde pasó por azar), y `dashboardSummary` agota a veces su timeout de 5 s bajo carga (pasa aislado).
 
 #### 4.5.6 Vista de lista general
 
-- [ ] Test (Vitest + jsdom): `#factura-general-tipo` con los `value` correctos (`""`, `E`, `V`, `S`, `GG`, `GI`, `P`).
-- [ ] Test (Vitest + jsdom): `#factura-general-estado` con los `value` correctos (`""`, `pendientes`, `completadas`, `canceladas`).
-- [ ] Test (Vitest + jsdom): `renderFacturasGeneral` reescrito con `textContent` y `createElement`. Sin `innerHTML` con datos.
-- [ ] Test (Vitest + jsdom): el botón "Ver" abre el detalle del tipo correspondiente.
-- [ ] Test (Vitest + jsdom): `facturaTipoInfo` y `obtenerFacturasCombinadas` no existen.
-- [ ] Implementación: submódulo `general` de `facturasView.js`. Adapta `renderFacturasGeneral` e `irAFacturaDesdeGeneral`.
+- [x] Test (Vitest + jsdom): `#factura-general-tipo` con los `value` correctos (`""`, `E`, `V`, `S`, `GG`, `GI`, `P`).
+- [x] Test (Vitest + jsdom): `#factura-general-estado` con los `value` correctos (`""`, `pendientes`, `completadas`, `canceladas`).
+- [x] Test (Vitest + jsdom): `renderFacturasGeneral` reescrito con `textContent` y `createElement`. Sin `innerHTML` con datos.
+- [x] Test (Vitest + jsdom): el botón "Ver" abre el detalle del tipo correspondiente.
+- [x] Test (Vitest + jsdom): `facturaTipoInfo` y `obtenerFacturasCombinadas` no existen.
+- [x] Implementación: submódulo `general` de `facturasView.js`. Adapta `renderFacturasGeneral` e `irAFacturaDesdeGeneral`.
+- **Nota (2026-10-16):** `facturasGeneralView.test.js` (7 tests, HTML de producción de todas las páginas de facturas). `renderFacturasGeneral` e `irAFacturaDesdeGeneral` viven ahora en `facturasView.js` (expuestas en `window`); se borró de `dashboard.js` el bloque completo de la vista general simulada (`facturaTipoInfo`, `obtenerFacturasCombinadas`, `renderFacturasGeneral`, `irAFacturaDesdeGeneral`; adelanta los ítems equivalentes de §4.5.9). Búsqueda, tipo y estado se envían a `listInvoices` (sin `invoiceType` = todos); pérdidas con "—" en contacto y estado; solo "Ver" (sin crear/editar/eliminar). "Ver" llama a `showPage` del tipo y abre su detalle con `getInvoice`.
+  - **Sin rango de fechas en la interfaz:** FG-01 lo pide pero el HTML no tiene esos campos y la tarea no lo incluye; `listInvoices` ya acepta `fromDate`/`toDate`. Pendiente.
+  - **Hallazgo (§1 bis.5, sin tocar):** `showPage` despacha `page:change` en `document` sin `bubbles`, y todas las vistas (`clientesView`, `proveedoresView`, `facturasView`) escuchan en `window`, así que en la app real esos listeners nunca se disparan. Los tests pasan porque despachan en `window`.
+  - `npm test` 183/184 (2 corridas): solo falla el preexistente `productos.test.js` › "muestra errores stale…".
 
 #### 4.5.7 Reescritura de vistas con `textContent`
 
-- [ ] **Pre-tarea (O-2):** usar el recuento de `innerHTML` levantado en §0 para dimensionar el trabajo; anotar en cada test cuántos `innerHTML` con datos quedan por vista y verificar que se reduce a 0.
-- [ ] Test (Vitest + jsdom, **XSS**): las 12 vistas de facturas (`verFactura`, `verFacturaVenta`, etc.) se reescriben con `textContent`/`createElement`. Un nombre con HTML se muestra como texto.
-- [ ] Implementación: reescribir con `textContent` todas las vistas que usaban `innerHTML` con datos.
+- [x] **Pre-tarea (O-2):** usar el recuento de `innerHTML` levantado en §0 para dimensionar el trabajo; anotar en cada test cuántos `innerHTML` con datos quedan por vista y verificar que se reduce a 0.
+- [x] Test (Vitest + jsdom, **XSS**): las 12 vistas de facturas (`verFactura`, `verFacturaVenta`, etc.) se reescriben con `textContent`/`createElement`. Un nombre con HTML se muestra como texto.
+- [x] Implementación: reescribir con `textContent` todas las vistas que usaban `innerHTML` con datos.
+- **Nota (2026-10-16):** el recuento de §0 (O-2) nunca se levantó; se hizo aquí, solo para facturas (por función en `dashboard.js`). Al empezar: `verFactura`, `renderFacturasEntrada` y `renderFacturasGeneral` ya no existían (0); quedaban `renderFacturasVenta` 2, `renderFacturasServicios` 2, `renderFacturasInsumos` 2, `renderFacturasGarantia` 2, `renderFacturasPerdidas` 2, `verFacturaVenta` 1, `verFacturaServicio` 1, `verFacturaInsumo` 1 y `verFacturaGarantia` 1 = **14**. Las 9 funciones se eliminaron de `dashboard.js` (ya tenían su versión con `textContent` en `facturasView.js`, que tiene 0 `innerHTML`), y `facturasView.js` expone esos nombres globales (`window.renderFacturas*`, `window.verFactura*`) apuntando a las vistas nuevas. Así, el código simulado que aún las llama (se borra en §4.5.9) no vuelve a usar `innerHTML`. **Quedan 0.** `facturasXss.test.js`: 13 tests (las 12 vistas con datos hostiles del backend sobre el HTML de producción + comprobación del fuente de `dashboard.js`). Fuera del alcance de esta tarea siguen con `innerHTML` los editores de líneas simulados (`renderLineasServicio/Insumo/Garantia`, 2 cada uno, se borran en §4.5.9) y vistas que no son de facturas (`renderMonedas`, `renderHistorialTasas`, `renderRateCards`, `renderNotificaciones`, `pintarPaginador`). `npm test` 196/197 (2 corridas): solo el preexistente `productos.test.js`.
 
 #### 4.5.8 Adaptación de `exportarFactura*PDF`
 
-- [ ] Test (Vitest + jsdom): cada función `exportarFacturaPDF`, `exportarFacturaVentaPDF`, etc. existe y lee el DTO de `getInvoice` en vez de los arreglos simulados.
-- [ ] Implementación: adaptar las 6 funciones para leer `getInvoice`.
+- [x] Test (Vitest + jsdom): cada función `exportarFacturaPDF`, `exportarFacturaVentaPDF`, etc. existe y lee el DTO de `getInvoice` en vez de los arreglos simulados.
+- [x] Implementación: adaptar las 6 funciones para leer `getInvoice`.
+- **Nota (2026-10-16):** las 6 funciones siguen en `dashboard.js` (globales que llama `facturasView.js` con el DTO de `getInvoice`), ahora como envoltorios de una sola `exportarDetalleFacturaPDF(detail, config)`, en un bloque delimitado por comentarios. Cada tipo aporta su título, la etiqueta del contacto, los estados (Por Pagar/Pagada, Por Cobrar/Cobrada, Pendiente/Completada), el método de pago (solo E/V/S), la factura asociada (GG/GI, `{numero} · {tipo}`), la columna Precio/Costo y Total/Costo Total. Se quitan Descuento e Impuestos (§3.2); la pérdida no lleva cliente, estado ni método. Un número suelto ya no exporta nada (no hay arreglos que consultar). Se corrige la cadena dañada "Garantí­a" (T-08). `facturasPdf.test.js`: 13 tests que ejecutan el bloque real del fuente con un jsPDF falso. `npm test` 211/211 (2 corridas).
 
 #### 4.5.9 Eliminar el mock de facturas de salida
 
-- [ ] Eliminar de `dashboard.js`: `facturasVentaData`, `nextFacturaVentaSeq`, `editingFacturaVentaId`, `facturaVentaLineItems`, `nextVentaLineItemId`, `renderFacturasVenta`, `eliminarFacturaVenta`, `facturaVentaVerNumero`, `verFacturaVenta`, `eliminarFacturaVentaDesdeVer`, `showFacturaVentaTab`, `prepararNuevaFacturaVenta`, `cancelarFacturaVentaForm`, `renderLineasVenta`, `recalcularTotalesVenta`, `guardarFacturaVenta`.
-- [ ] Eliminar de `dashboard.js` los análogos para servicios, insumos, garantía y pérdida.
-- [ ] Eliminar `facturaTipoInfo` y `obtenerFacturasCombinadas`.
-- [ ] Adaptar `renderFacturasGeneral` e `irAFacturaDesdeGeneral`.
-- [ ] Eliminar `insumosDisponibles` y `opcionesUnidadHTML`.
-- [ ] Eliminar los manejadores inline de las secciones de facturas de salida en el HTML.
-- [ ] Eliminar el bloque final de notificaciones iniciales completo, incluida la llamada `crearNotificacion('factura', 'Bienvenido al Sistema', ...)` y el `.forEach`.
-- [ ] Eliminar las llamadas a `crearNotificacion` y `notificarFactura` desde facturas y pérdidas.
-- [ ] Verificación: `grep` de los identificadores; `dashboard.js` carga sin errores; el listado de la lista general muestra estado vacío con la BD vacía.
-- [ ] `npm test` pasa.
+- [x] Eliminar de `dashboard.js`: `facturasVentaData`, `nextFacturaVentaSeq`, `editingFacturaVentaId`, `facturaVentaLineItems`, `nextVentaLineItemId`, `renderFacturasVenta`, `eliminarFacturaVenta`, `facturaVentaVerNumero`, `verFacturaVenta`, `eliminarFacturaVentaDesdeVer`, `showFacturaVentaTab`, `prepararNuevaFacturaVenta`, `cancelarFacturaVentaForm`, `renderLineasVenta`, `recalcularTotalesVenta`, `guardarFacturaVenta`.
+- [x] Eliminar de `dashboard.js` los análogos para servicios, insumos, garantía y pérdida.
+- [x] Eliminar `facturaTipoInfo` y `obtenerFacturasCombinadas`.
+- [x] Adaptar `renderFacturasGeneral` e `irAFacturaDesdeGeneral`.
+- [x] Eliminar `insumosDisponibles` y `opcionesUnidadHTML`.
+- [x] Eliminar los manejadores inline de las secciones de facturas de salida en el HTML.
+- [x] Eliminar el bloque final de notificaciones iniciales completo, incluida la llamada `crearNotificacion('factura', 'Bienvenido al Sistema', ...)` y el `.forEach`.
+- [x] Eliminar las llamadas a `crearNotificacion` y `notificarFactura` desde facturas y pérdidas.
+- [x] Verificación: `grep` de los identificadores; `dashboard.js` carga sin errores; el listado de la lista general muestra estado vacío con la BD vacía.
+- [x] `npm test` pasa.
+- **Nota (2026-10-16):** se borraron de `dashboard.js` las 93 declaraciones de nivel superior que quedaban de la lista de `spec-03 §9.X.4.a` para las salidas (venta, servicio, insumos, garantía, pérdida), más `opcionesUnidadHTML`, `insumosDisponibles` y `notificarFactura` (ya sin llamadores). Se comprobó que no desapareció ninguna otra declaración. También se borraron el bloque final de notificaciones simuladas (con "Bienvenido al Sistema" y el `.forEach`) y los encabezados de sección que quedaron vacíos; se conservan `crearNotificacion` (página de notificaciones, tasas de cambio) y las 6 `exportarFactura*PDF` (§4.5.8). `facturaTipoInfo`/`obtenerFacturasCombinadas` y `renderFacturasGeneral`/`irAFacturaDesdeGeneral` ya estaban resueltos en §4.5.6, y los manejadores inline en §4.5.1–§4.5.6. `dashboard.js` pasa de 3485 a ~2100 líneas. `facturasMockEliminado.test.js` (4 tests): busca en el fuente los identificadores y las notificaciones, revisa que no haya `on*=` en las 7 páginas de facturas y **ejecuta el `dashboard.js` real** sobre el HTML de producción (con `Chart`, `matchMedia` e `import()` simulados solo en el test) sin errores, con la lista general en "Aún no hay facturas". Con el `dashboard.js` anterior, 2 de los 4 tests fallan. `npm test` 215/215 (2 corridas).
 
 ### 4.6 Interfaz de Contactos — indicadores
 
-- [ ] Test (Vitest + jsdom, `clientesView.js`): el detalle muestra `totalInvoicedCents`, `pendingBalanceCents`, `invoiceCount`, `lastPurchaseDate` con datos reales.
-- [ ] Test (Vitest + jsdom, `proveedoresView.js`): el detalle muestra `totalPurchasedCents`, etc.
-- [ ] Test (Vitest + jsdom): el historial de facturas del cliente se llena con `getClientDetail().invoiceHistory`.
-- [ ] Implementación: pintar los indicadores y el historial en las vistas.
+- [x] Test (Vitest + jsdom, `clientesView.js`): el detalle muestra `totalInvoicedCents`, `pendingBalanceCents`, `invoiceCount`, `lastPurchaseDate` con datos reales.
+- [x] Test (Vitest + jsdom, `proveedoresView.js`): el detalle muestra `totalPurchasedCents`, etc.
+- [x] Test (Vitest + jsdom): el historial de facturas del cliente se llena con `getClientDetail().invoiceHistory`.
+- [x] Implementación: pintar los indicadores y el historial en las vistas.
+- **Nota (2026-10-16):** los indicadores ya se pintaban, pero había dos fallos. (1) `proveedoresView.js` mostraba `totalInvoicedCents` como "Total comprado", y en proveedores el backend llena **`totalPurchasedCents`**, así que siempre salía 0. (2) El historial se pintaba con `innerHTML`, leía `invoice.type` (el campo es `invoiceType`), solo mostraba el número y usaba clases sin estilos (`pv-invoice-item`). Ahora `components/invoiceHistory.js` (compartido por clientes y proveedores) pinta con `createElement` una `list-table` con No. Factura, Tipo, Fecha, Total, Estado y "Ver", que abre el detalle con `irAFacturaDesdeGeneral` (§4.5.6); con historial vacío muestra el texto de estado vacío. Los textos de tipo y estado pasan a `utils/invoiceLabels.js`, que también usa `facturasView.js` en lugar de sus copias locales. Tests nuevos en `clientesView.test.js` y `proveedoresView.test.js` (valores, etiquetas, salida segura, "Ver" y estado vacío). De paso se corrige una fuga de §4.5.9: `facturasMockEliminado.test.js` dejaba en `window` los globales del `dashboard.js` evaluado y otro archivo llamaba al `showPage` real (error no capturado); ahora los retira al terminar. `npm test` 217/217 sin errores (3 corridas).
 
 ### 4.7 Interfaz de Productos y Categorías — "Valor Total" e "Ingresos"
 
-- [ ] Test (Vitest + jsdom, `productosView.js`): con datos reales, la columna "Valor Total" y el campo del detalle muestran `valorTotalCents` correcto.
-- [ ] Test (Vitest + jsdom, `categoriasView.js`): con datos reales, "Ingresos" muestra `ingresosCents` correcto. Un cambio de categoría del producto no altera las ventas anteriores.
-- [ ] Implementación: ya se aplicó en §3.8; se verifica con datos reales aquí.
+- [x] Test (Vitest + jsdom, `productosView.js`): con datos reales, la columna "Valor Total" y el campo del detalle muestran `valorTotalCents` correcto.
+- [x] Test (Vitest + jsdom, `categoriasView.js`): con datos reales, "Ingresos" muestra `ingresosCents` correcto. Un cambio de categoría del producto no altera las ventas anteriores.
+- [x] Implementación: ya se aplicó en §3.8; se verifica con datos reales aquí.
+- **Nota (2026-10-16):** sin cambios de implementación; ambos valores los calcula el backend. Los "datos reales" se verifican donde nacen, con el test Rust `sp03_income_and_stock_value_follow_real_sales_and_category_snapshots`: dos entradas (10 a $1,00 y 5 a $2,00), una venta, un servicio y una venta cancelada. Comprueba que "Ingresos" (listado y detalle) suma solo venta + servicio no cancelados, que tras cambiar la categoría del producto lo vendido sigue en la categoría anterior y la venta nueva cuenta en la actual, y que "Valor Total" (listado y detalle) es 7 × $1,00 + 5 × $2,00 = $17,00 y luego $16,00 (lotes por costo, FIFO). En el frontend, `productosCategoriasValores.test.js` añade un caso de Fase 3 con importes distintos por fila (incluido uno de 7 cifras) en columna y detalle; el caso de §3.8 solo cubría 0. `cargo test` 349/349, `clippy -D warnings` limpio, `npm test` 218/218 (2 corridas).
 
 ### 4.8 Verificación de la Fase 3
 
-- [ ] `cargo test` pasa con todos los tests de la Fase 3.
-- [ ] `cargo clippy --all-targets -- -D warnings` sin warnings.
-- [ ] `npm test` pasa.
-- [ ] **Invariante de caché** reforzado con los comandos de esta fase.
-- [ ] **Test de contrato `invoke ↔ generate_handler!`** actualizado con los comandos de esta fase.
+- **Nota de cierre de errores (2026-10-16):** además de lo anotado en §4.2: fixtures de `get_client_detail…`/`get_supplier_detail…` con `completed` sin `paidAt`; alias `CostedProductRow` para el `type_complexity` de `clippy`. Frontend: `productosView.js` borraba `#productos-feedback` en cualquier carga correcta del listado, y una carga que terminaba tarde ocultaba avisos como "El producto ya no existe" (era la causa del fallo intermitente de `productos.test.js`). Ahora solo limpia su propio error, con un test nuevo. `session.test.js` dejaba activos los temporizadores falsos y, con `isolate: false`, colgaba `dashboardSummary` según el orden de archivos. Se añade `.prettierignore` (librerías minificadas, generados de Tauri/npm y `*.md`, ya que Agents.md §3 limita Prettier a HTML/CSS/JS) y se formatean 16 archivos que nunca habían pasado Prettier (solo cambios de formato). Resultado: `cargo test` 348/348, `cargo clippy --all-targets -- -D warnings` limpio, `cargo fmt --check` y `npx prettier --check .` limpios, `npm test` 198/198 en 5 corridas seguidas. Las casillas de esta sección siguen abiertas por la verificación manual pendiente.
+
+- [x] `cargo test` pasa con todos los tests de la Fase 3.
+- [x] `cargo clippy --all-targets -- -D warnings` sin warnings.
+- [x] `npm test` pasa.
+- [x] **Invariante de caché** reforzado con los comandos de esta fase.
+- [x] **Test de contrato `invoke ↔ generate_handler!`** actualizado con los comandos de esta fase.
 - [ ] Verificación manual: crear una venta, un servicio, una garantía, un insumo y una pérdida. Comprobar el historial y los indicadores de contactos.
-- [ ] `cargo fmt --check` pasa.
+  - **Nota de entorno:** pendiente; este entorno no permite operar la ventana nativa de Tauri (mismo precedente que §3.9). Debe hacerse en la máquina del dueño con `npm run tauri:dev`.
+- [x] `cargo fmt --check` pasa.
+- **Nota de verificación (2026-10-16):** `cargo test` 352/352, `clippy --all-targets -D warnings` y `cargo fmt --check` limpios, `npm test` 218/218 (2 corridas) y `npx prettier --check .` limpio.
+  - **Invariante de caché:** `assert_cache_invariant` comprueba en cada producto que `quantityMilli` = suma de lo restante en los lotes y que `costCents` = promedio ponderado de los lotes con existencia (plan-03 §3.2). Hay dos tests. `cache_invariant_holds_after_every_phase3_command` recorre los 5 `create*` de salidas, los 4 `update*`, la cancelación y la eliminación de cada tipo (incluida una Cancelada) y vuelve al stock de las entradas. `cache_invariant_holds_under_pseudorandom_phase3_operations` es la batería xorshift de plan-03 §8: 5 semillas × 300 operaciones mezcladas, que admite rechazos esperados pero **nunca** `internal`, y comprueba el invariante también tras cada rechazo (atomicidad).
+  - **Bug encontrado por la batería:** `changeInvoiceStatus` sobre una pérdida acababa en `internal` ("Ocurrió un error inesperado") porque el estado `NULL` se leía como texto. Ahora responde `invalidState` "Las facturas de pérdida no tienen estado" (test `change_invoice_status_rejects_loss_with_clear_message`).
+  - **Contrato:** `update_entry_invoice` figuraba en `pendingBackend` y de verdad no estaba registrado: §3.2.2 implementó y probó el núcleo, pero faltaba el `#[tauri::command]` y su entrada en `generate_handler!`, así que editar una compra fallaba en la app real. Se añade el comando (con su registro de errores) y se quita de la lista. Siguen pendientes, documentados en el test: `export_history_excel`/`export_history_pdf` (Fase 4) y `get_product_associated_invoices` (registrado, sin llamador en la interfaz: la sección "Facturas Asociadas" del producto aún no se pinta).
 
 ---
 
@@ -820,36 +848,44 @@
 
 #### 5.1.1 `exportHistoryExcel`
 
-- [ ] Test (Rust, `export_history_excel_inner`): genera un `.xlsx` con el encabezado y las filas correctas. El archivo existe y no está vacío.
-- [ ] Test (Rust): sin movimientos que exportar → `Err` con código `invalidState` y mensaje "No hay movimientos para exportar".
-- [ ] Test (Rust): fallo de escritura (destino no escribible) → `Err` con código `internal` y mensaje "No se pudo guardar el archivo".
-- [ ] Test (Rust): fila de la matriz de autorización de `exportHistoryExcel`.
-- [ ] Implementación: `exportHistoryExcel(input)` con `export.rs::export_history_xlsx`. Purga best-effort antes.
+- [x] Test (Rust, `export_history_excel_inner`): genera un `.xlsx` con el encabezado y las filas correctas. El archivo existe y no está vacío.
+- [x] Test (Rust): sin movimientos que exportar → `Err` con código `invalidState` y mensaje "No hay movimientos para exportar".
+- [x] Test (Rust): fallo de escritura (destino no escribible) → `Err` con código `internal` y mensaje "No se pudo guardar el archivo".
+- [x] Test (Rust): fila de la matriz de autorización de `exportHistoryExcel`.
+- [x] Implementación: `exportHistoryExcel(input)` con `export.rs::export_history_xlsx`. Purga best-effort antes.
 
 #### 5.1.2 `exportHistoryPdf`
 
-- [ ] Test (Rust, `export_history_pdf_inner`): genera un `.pdf` con el encabezado y las filas. El archivo existe y no está vacío.
-- [ ] Test (Rust): pinta `á é í ó ú ü ñ ¿ ¡ €` correctamente (verificación del spike).
-- [ ] Test (Rust): sin movimientos → `Err` con "No hay movimientos para exportar".
-- [ ] Test (Rust): fallo de escritura → `Err` con "No se pudo guardar el archivo".
-- [ ] Test (Rust): fila de la matriz de autorización.
-- [ ] Implementación: `exportHistoryPdf(input)` con `export.rs::export_history_pdf`. Purga best-effort antes.
+- [x] Test (Rust, `export_history_pdf_inner`): genera un `.pdf` con el encabezado y las filas. El archivo existe y no está vacío.
+- [x] Test (Rust): pinta `á é í ó ú ü ñ ¿ ¡ €` correctamente (verificación del spike).
+- [x] Test (Rust): sin movimientos → `Err` con "No hay movimientos para exportar".
+- [x] Test (Rust): fallo de escritura → `Err` con "No se pudo guardar el archivo".
+- [x] Test (Rust): fila de la matriz de autorización.
+- [x] Implementación: `exportHistoryPdf(input)` con `export.rs::export_history_pdf`. Purga best-effort antes.
 
 ### 5.2 Interfaz de exportación
 
-- [ ] Test (Vitest + jsdom, `historialView.js`): los botones `#historial-exportar-excel` y `#historial-exportar-pdf` existen en el `.historial-toolbar`. Están deshabilitados cuando no hay movimientos, con `title="No hay movimientos para exportar"` y `aria-live="polite"`.
-- [ ] Test (Vitest + jsdom): al pulsar "Exportar a Excel" se abre el diálogo nativo (stub) y se llama a `exportHistoryExcel({ destinationPath })` con la ruta.
-- [ ] Test (Vitest + jsdom): al pulsar "Exportar a PDF", igual.
-- [ ] Test (Vitest + jsdom): si el usuario cancela el diálogo, no se llama al comando.
-- [ ] Implementación: en `historialView.js`, registrar listeners en los botones; usar `window.__TAURI__.dialog.save()` para obtener la ruta.
+- [x] Test (Vitest + jsdom, `historialView.js`): los botones `#historial-exportar-excel` y `#historial-exportar-pdf` existen en el `.historial-toolbar`. Están deshabilitados cuando no hay movimientos, con `title="No hay movimientos para exportar"` y `aria-live="polite"`.
+- [x] Test (Vitest + jsdom): al pulsar "Exportar a Excel" se abre el diálogo nativo (stub) y se llama a `exportHistoryExcel({ destinationPath })` con la ruta.
+- [x] Test (Vitest + jsdom): al pulsar "Exportar a PDF", igual.
+- [x] Test (Vitest + jsdom): si el usuario cancela el diálogo, no se llama al comando.
+- [x] Implementación: en `historialView.js`, registrar listeners en los botones; usar `window.__TAURI__.dialog.save()` para obtener la ruta.
 
 ### 5.3 Verificación de la Fase 4
 
-- [ ] `cargo test` pasa con los tests de la Fase 4.
-- [ ] `cargo clippy` sin warnings.
-- [ ] `npm test` pasa.
+- [x] `cargo test` pasa con los tests de la Fase 4.
+- [x] `cargo clippy` sin warnings.
+- [x] `npm test` pasa.
 - [ ] Verificación manual: exportar el historial de un producto a `.xlsx` y `.pdf`, abrirlos en sus programas y comprobar el contenido.
-- [ ] `cargo fmt --check` pasa.
+  - **Nota de entorno:** pendiente; aquí no se puede operar la ventana de Tauri ni abrir Excel. Hacerlo en la máquina del dueño con `npm run tauri:dev`: comprobar que Excel abre el `.xlsx` sin avisos de reparación (es SpreadsheetML escrito a mano) y que el PDF muestra bien las tildes.
+- [x] `cargo fmt --check` pasa.
+
+- **Nota (2026-10-16):** decisiones y resultado de la fase.
+  - **Dependencias (decisión del dueño, plan-03 actualizado):** `rust_xlsxwriter` no se puede instalar (todas sus versiones dependen de `zip` 2.x–8.x, retiradas de crates.io). El `.xlsx` se arma en `export.rs` con `zip` 9 sin features (sin compresión) y SpreadsheetML propio (6 partes XML; importes como números con formato `#,##0.00 "USD"`). El PDF usa `printpdf` 0.7 sin features por defecto (Helvetica integrada en WinAnsi). `rust-version` pasa de 1.77.2 a 1.88 por `zip` 9. `cargo tree`: ninguna arrastra `tokio` (solo lo trae Tauri) ni `image`.
+  - **Spike D-18 resuelto:** el test lee el PDF con `lopdf`, decodifica el texto con WinAnsi y encuentra `á é í ó ú ü ñ ¿ ¡ €`; las fuentes son `Helvetica`/`Helvetica-Bold` con `WinAnsiEncoding`.
+  - **Backend:** `export_history_excel`/`export_history_pdf` reutilizan `get_product_history_inner` (sesión, purga best-effort, todos los movimientos filtrados en el orden de la pantalla). Escriben en un temporal y renombran al final, así que un fallo no deja un archivo a medias ni temporales. Sin movimientos → `invalidState` "No hay movimientos para exportar"; fallo de escritura → `internal` "No se pudo guardar el archivo" (se registra; la causa no incluye la ruta); destino vacío → `validationFailed`. Fechas locales `dd/mm/aaaa HH:MM` e importes en formato `es-ES`, como la pantalla. Tests: 7 en `export.rs` (incluida la paginación del PDF con cabecera repetida) y 6 en `history.rs` (incluidas las filas de la matriz de autorización).
+  - **Interfaz:** botones al final de `.historial-toolbar` con `title` y un `aria-live="polite"` que explica por qué están deshabilitados; "Guardar como" con el filtro de la extensión; cancelar no hace nada. 6 tests sobre el HTML de producción. El test de contrato ya no tiene comandos pendientes de backend.
+  - `cargo test` 364/364, `clippy --all-targets -D warnings` y `cargo fmt --check` limpios, `npm test` 224/224 (2 corridas), `npx prettier --check .` limpio.
 
 ---
 
@@ -857,39 +893,176 @@
 
 *(Cada vista que recibe el campo lo muestra de forma discreta (`textContent`, `role="status"`) y lo limpia cuando llega `null`. Se replica el patrón de `tasks-02.md` §8.)*
 
-- [ ] Test (Vitest + jsdom, `clientesView.js`): con `getClientDetail` devolviendo `expiredCleanupWarning` no nulo, se muestra el aviso; con `null`, no.
-- [ ] Test (Vitest + jsdom, `proveedoresView.js`): ídem con `getSupplierDetail`.
+- [x] Test (Vitest + jsdom, `clientesView.js`): con `getClientDetail` devolviendo `expiredCleanupWarning` no nulo, se muestra el aviso; con `null`, no.
+- [x] Test (Vitest + jsdom, `proveedoresView.js`): ídem con `getSupplierDetail`.
 - [ ] Test (Vitest + jsdom, submódulo `entry` de `facturasView.js`): con `InvoiceActionResult.expiredCleanupWarning` no nulo, se muestra el aviso tras crear/editar/eliminar.
+  - Crear y eliminar: hecho y verificado. **Editar: pendiente**, porque la interfaz aún no edita facturas (ver la nota).
 - [ ] Test (Vitest + jsdom, submódulos `sale`, `service`, `guarantee`, `installation`, `loss`): ídem.
-- [ ] Test (Vitest + jsdom, `historialView.js`): con `ProductHistoryList.expiredCleanupWarning` no nulo, se muestra el aviso; con `null`, no.
-- [ ] Test (Vitest + jsdom, `productosView.js` y `categoriasView.js`): verificar que no se rompen cuando el campo llega `null` (los listados de `spec-02` que no purgan no lo traen).
+  - Igual: crear y eliminar verificados en los cinco (la pérdida no se edita); editar queda pendiente.
+- [x] Test (Vitest + jsdom, `historialView.js`): con `ProductHistoryList.expiredCleanupWarning` no nulo, se muestra el aviso; con `null`, no.
+- [x] Test (Vitest + jsdom, `productosView.js` y `categoriasView.js`): verificar que no se rompen cuando el campo llega `null` (los listados de `spec-02` que no purgan no lo traen).
+- **Nota (2026-10-16):** los tests destaparon que el aviso no cumplía el contrato de plan-03 §5.12 en casi ninguna vista. **Clientes:** buscaba `#cliente-ver-warning`, que no existe en el HTML, así que nunca se veía, y tampoco se limpiaba con `null`. **Proveedores e historial:** ignoraban el campo. **Facturas:** escribían el aviso dentro del formulario de alta, que se oculta al volver a la lista; eliminar no lo mostraba. Ahora todas usan `utils/cleanupWarning.js` (`showCleanupWarning`): un elemento `role="status"` escrito con `textContent`, creado al inicio del contenedor si el HTML no lo trae y oculto cuando llega `null`. En facturas, el aviso de cada página (`facturas-<página>-cleanup-warning`) se actualiza al crear y al eliminar.
+  - **"Tras editar" no se puede probar:** la interfaz de facturas aún no edita. Ninguna vista llama a `update*Invoice` (el botón "Editar" solo cambia de pestaña) ni a `changeInvoiceStatus`. Los comandos existen y tienen tests en Rust; falta conectarlos a la interfaz, y ninguna tarea de `task-03` lo cubre explícitamente.
+  - Tests: clientes, proveedores e historial (aviso visible con `role="status"`, luego vacío y oculto con `null`); `facturasCleanupWarning.test.js` con los 6 submódulos sobre el HTML de producción (alta con aviso, baja con aviso, baja con `null`); productos y categorías con el campo `null` y ausente. `npm test` 235/235 (2 corridas).
 
 ---
 
+  - **Decisión del dueño (2026-10-16):** un único commit para todo el módulo, en lugar de uno por fase (los cambios de varias fases estaban mezclados en el árbol de trabajo).
 ## 6. Cierre del módulo
 
 - [ ] **Revisión final contra `spec-03.md`:** recorrer CL-01 a CL-06, PV-01 a PV-07, LT-01 a LT-04, FE-01 a FE-08, FS-01 a FS-05, FP-01, FG-01, HP-01 a HP-04, SP-01 a SP-04 y confirmar que cada requisito tiene su comando implementado y su test pasando. Recorrer también la §14 de la spec.
-- [ ] **Verificación de la matriz de autorización (`Agents.md` §3):** la tabla `(comando, sin sesión → rechazado, ambos roles → permitido)` tiene una fila por cada uno de los **35 comandos** nuevos y cada fila tiene su test pasando. Ningún comando de esta feature queda fuera. Ninguno actualiza `lastActivityAt`.
-- [ ] **Verificación de registros:** `validationFailed` e `invalidCredentials` no generan fila en `errorLogs`; `duplicateField`, `notFound`, `invalidState`, `stockInsuficiente`, `stockLimitExceeded`, `exportFailed` e `internal` sí (los que tienen throttle, bajo la política H-A2); ningún registro contiene valores ingresados por el usuario.
+  - **No se puede cerrar todavía (2026-10-16).** El backend cubre todos los requisitos con tests, salvo PV-07. La interfaz tiene huecos que impiden usar el módulo; ver la nota de cierre al final de esta sección.
+- [x] **Verificación de la matriz de autorización (`Agents.md` §3):** la tabla `(comando, sin sesión → rechazado, ambos roles → permitido)` tiene una fila por cada uno de los **35 comandos** nuevos y cada fila tiene su test pasando. Ningún comando de esta feature queda fuera. Ninguno actualiza `lastActivityAt`.
+  - 35/35 comandos de `spec-03` con su fila (auditado sobre `generate_handler!`). Faltaban `getClientDetail` y `changeInvoiceStatus`, que §2.1.5 y §3.1.3 daban por hechos; se añadieron. Ningún comando de `spec-03` toca `lastActivityAt` (solo `auth.rs` y `dashboard.rs`, de specs anteriores).
+- [x] **Verificación de registros:** `validationFailed` e `invalidCredentials` no generan fila en `errorLogs`; `duplicateField`, `notFound`, `invalidState`, `stockInsuficiente`, `stockLimitExceeded`, `exportFailed` e `internal` sí (los que tienen throttle, bajo la política H-A2); ningún registro contiene valores ingresados por el usuario.
+  - `should_log` tiene tests de todos los códigos, y el throttle tiene el suyo. Ninguna `cause` interpola datos del usuario: los nombres de producto solo aparecen en mensajes al usuario, y las causas `{error}` son textos de SQLite o del sistema, sin rutas.
 - [ ] **Verificación de la purga best-effort:** con un trigger de prueba que haga fallar el `DELETE` sobre `products`, cada comando de la lista de `spec-03` §7.6 devuelve su resultado sin vencidos, incluye `expiredCleanupWarning` y registra el error. La app sigue usable. **`listHistoryProducts` no purga** (decisión de diseño de `plan-03 §3.9`).
-- [ ] **Verificación de columnas de auditoría:** `createdAt` y `updatedAt` están en las tablas nuevas con el formato correcto. `consumptions` y `productMovements` solo tienen `createdAt`. **`updatedAt` se refresca en `update*Invoice`, `changeInvoiceStatus` y `saveInvoiceAttachment`** (N-1, O-B).
-- [ ] **Verificación de la inmutabilidad:** el trigger `productMovementsImmutable` bloquea un `UPDATE` directo (incluido el `UPDATE` mixto de N-4); el trigger `productMovementsNoDelete` bloquea un `DELETE` directo. Los triggers `invoiceCountersNoDecrease` e `invoiceCountersNoDelete` funcionan.
-- [ ] **Verificación del invariante de caché:** tras cada operación sobre lotes, `products.quantityMilli` = suma de `remainingMilli` y `products.costCents` = promedio de los lotes con existencia. **Incluye el escenario H-A1** (eliminar una compra Cancelada con lotes restaurados).
+  - **Corregido (2026-10-16):** los 6 `create*Invoice` y 4 `update*Invoice` no purgaban; `changeInvoiceStatus` y `deleteInvoice` purgaban pero descartaban el aviso. Ahora los 13 comandos de escritura purgan al inicio de su transacción y devuelven `expiredCleanupWarning` (en `deleteInvoice` se combina con el aviso de productos inexistentes). `getProductAssociatedInvoices` ahora purga. Tests: `invoice_writes_keep_working_and_warn_when_the_purge_fails` (los 13, con trigger que hace fallar el `DELETE`: terminan bien, avisan y registran; el vencido sigue) e `invoice_writes_return_no_cleanup_warning_when_the_purge_works`.
+  - **Abierto:** `listInvoices`, `getInvoice`, `searchProductsForInvoice` y `getProductAssociatedInvoices` purgan y registran, pero su contrato (listas/detalle sin campo de aviso, FG-01) no transporta `expiredCleanupWarning`, y no tienen test con la purga fallida. Decidir si se amplía su DTO o se acepta.
+- [x] **Verificación de columnas de auditoría:** `createdAt` y `updatedAt` están en las tablas nuevas con el formato correcto. `consumptions` y `productMovements` solo tienen `createdAt`. **`updatedAt` se refresca en `update*Invoice`, `changeInvoiceStatus` y `saveInvoiceAttachment`** (N-1, O-B).
+  - `consumptions` y `productMovements` solo tienen `createdAt`. `updatedAt` se refresca en `update*Invoice` (tests `update_outgoing_commands_refresh_updated_at_…`, `update_entry_invoice_changes_pending_header_and_refreshes_updated_at`), `changeInvoiceStatus` y `saveInvoiceAttachment` (este último, verificado leyendo el código).
+- [x] **Verificación de la inmutabilidad:** el trigger `productMovementsImmutable` bloquea un `UPDATE` directo (incluido el `UPDATE` mixto de N-4); el trigger `productMovementsNoDelete` bloquea un `DELETE` directo. Los triggers `invoiceCountersNoDecrease` e `invoiceCountersNoDelete` funcionan.
+  - Tests `spec03_product_movements_are_immutable_but_allow_foreign_key_set_null` y `spec03_invoice_counters_are_structural_and_never_decrease_or_delete`.
+- [x] **Verificación del invariante de caché:** tras cada operación sobre lotes, `products.quantityMilli` = suma de `remainingMilli` y `products.costCents` = promedio de los lotes con existencia. **Incluye el escenario H-A1** (eliminar una compra Cancelada con lotes restaurados).
 - [ ] **Verificación del esquema (H-11):** `init_schema` crea las 8 tablas nuevas (`clients`, `suppliers`, `invoiceCounters`, `invoices`, `invoiceLines`, `lots`, `consumptions`, `productMovements`) con sus índices y triggers; los tests de §1.5 pasan; ningún `CHECK`/`UNIQUE`/FK/trigger queda sin test.
-- [ ] **Verificación H-A1:** el test del escenario completo (compra cancelada + venta cancelada restaura + eliminar compra) pasa y el invariante de caché se mantiene.
-- [ ] **Verificación H-A2:** los tests del throttle y de `should_log` con los códigos nuevos pasan; el `HashMap` del throttle se limpia al superar la ventana y el tamaño máximo.
-- [ ] **Verificación H-A3:** `validate_stock_limit` se llama en `createProduct`, `createEntryInvoice`, `updateEntryInvoice` y `restore_consumption`; el catálogo incluye `stockLimitExceeded`; los tests de tope pasan.
-- [ ] **Verificación H-A4:** los tests de edición de salidas comprueban que el cambio de costo por re-FIFO no genera un Ajuste.
+  - `spec03_schema_creates_tables_counters_indexes_and_immutability_triggers` y los tests de §1.5 pasan. **Sin auditar** restricción por restricción que ningún `CHECK`/`UNIQUE`/FK/trigger quede sin test.
+- [x] **Verificación H-A1:** el test del escenario completo (compra cancelada + venta cancelada restaura + eliminar compra) pasa y el invariante de caché se mantiene.
+  - `deleting_cancelled_entry_with_restored_stock_preserves_inventory_cache` y `delete_cancelled_entry_without_restored_stock_does_not_change_inventory`.
+- [x] **Verificación H-A2:** los tests del throttle y de `should_log` con los códigos nuevos pasan; el `HashMap` del throttle se limpia al superar la ventana y el tamaño máximo.
+- [x] **Verificación H-A3:** `validate_stock_limit` se llama en `createProduct`, `createEntryInvoice`, `updateEntryInvoice` y `restore_consumption`; el catálogo incluye `stockLimitExceeded`; los tests de tope pasan.
+  - Se llama en `createEntryInvoice`, `updateEntryInvoice` (dos puntos) y `restore_consumption`. En `createProduct` no hace falta: el producto nuevo empieza en 0 y el parser de cantidad ya limita a 999.999,999 (el mismo tope), así que la llamada nunca fallaría.
+- [x] **Verificación H-A4:** los tests de edición de salidas comprueban que el cambio de costo por re-FIFO no genera un Ajuste.
+  - `update_sale_invoice_refifo_without_quantity_change_records_no_adjustment` y `update_entry_invoice_cost_change_without_quantity_change_has_no_adjustment`.
 - [ ] **Verificación de la sección de facturas:** el enlace del sidebar del submenú de facturas está visible. Las 7 páginas están visibles. Los botones "Ver Historial" y "Ver Facturas" están visibles. **El `id`/`data-page` real se usa** (verificado en §0).
-- [ ] **Verificación de garantías:** ninguna tarea [x] de `tasks-01.md` ni `tasks-02.md` fue reabierta; `should_log()` de `spec-01` sigue sin cambios; no se editaron `auth.css` ni `dashboard.css`; el test existente de `invoke.js` y los tests de `spec-01`/`spec-02` siguen en verde.
-- [ ] **Complexity Tracking:** confirmar que `plan-03.md` §9 refleja las desviaciones reales (incluidas las de H-A2, H-A3, H-A4). Si apareció alguna otra durante la implementación, documentarla.
+  - **Decisión del dueño (2026-10-16):** el enlace del sidebar (`#sidebar-facturas`) y las 7 páginas siguen con `hidden` hasta terminar §7.1; se destapan en §7.9.
+- [x] **Verificación de garantías:** ninguna tarea [x] de `tasks-01.md` ni `tasks-02.md` fue reabierta; `should_log()` de `spec-01` sigue sin cambios; no se editaron `auth.css` ni `dashboard.css`; el test existente de `invoke.js` y los tests de `spec-01`/`spec-02` siguen en verde.
+  - `task-01.md` y `task-02.md` sin cambios; `errors.rs` (`should_log`) e `invoke.js` sin cambios. `dashboard.css` llegó a reformatearse con Prettier (solo espacios) al cerrar errores: se revirtió y `auth.css`/`dashboard.css` se excluyen de Prettier.
+- [x] **Complexity Tracking:** confirmar que `plan-03.md` §9 refleja las desviaciones reales (incluidas las de H-A2, H-A3, H-A4). Si apareció alguna otra durante la implementación, documentarla.
+  - `plan-03.md` §9 actualizado: `export.rs` con `zip` 9 y `printpdf` 0.7, `rust-version` 1.88 y `.prettierignore`.
 - [ ] **Documentación:** actualizar `Agents.md` §1 ("Estado actual": Autenticación y Usuarios, Inventario-Productos y Contactos-Facturación-Historial implementados) y §7 con los comandos reales; actualizar `pendientes.md` (verificar que PEN-01, PEN-02, PEN-06, PEN-07, PEN-12, PEN-13, PEN-14, PEN-15, PEN-16 y PEN-17 siguen vigentes y que ninguno se resolvió sin querer; el estado de PEN-04, PEN-05 y PEN-09 sigue como resuelto; PEN-10 sigue como parcial). `Constitution.md` **no** cambia salvo que surja una nueva desviación decidida por el dueño.
-- [ ] **Formato y lint:** `npx prettier --write` (frontend y tests, sin los bundles vendorizados), `cargo fmt -- --check` y `cargo clippy --all-targets -- -D warnings` sin warnings; no hay `#[allow(non_snake_case)]`.
-- [ ] **Normalizar `task-03.md` a LF** (CRLF→LF) para que el diff no muestre todo el archivo modificado.
-- [ ] `cargo test` y `npm test` pasan; anotar los recuentos finales.
-- [ ] **Test de contrato `invoke ↔ generate_handler!`:** verifica los **76 comandos** (15 de `spec-01` + 26 de `spec-02` + 35 de `spec-03`). El test calcula el recuento a partir de los archivos, no de un literal fijo.
-- [ ] **Test de limpieza de `environment.test.js`:** `dashboard.js` no contiene los identificadores eliminados de facturas ni de contactos; no quedan manejadores inline en las secciones migradas; la sección de facturas del dashboard no se ha desmigrado por error.
+  - `Agents.md` §1 (estado real: backend de `spec-03` completo, interfaz en curso) y §7 (Rust 1.88, `.prettierignore`, clippy estricto) actualizados. **Abierto:** `pendientes.md` sin tocar; PEN-09 dice que HP-04 está resuelto, pero la sección "Facturas Asociadas" no se pinta. Se actualiza cuando se decida qué hacer con los huecos.
+- [x] **Formato y lint:** `npx prettier --write` (frontend y tests, sin los bundles vendorizados), `cargo fmt -- --check` y `cargo clippy --all-targets -- -D warnings` sin warnings; no hay `#[allow(non_snake_case)]`.
+  - `npx prettier --check .`, `cargo fmt --check` y `cargo clippy --all-targets -D warnings` limpios; sin `#[allow(non_snake_case)]`.
+- [x] **Normalizar `task-03.md` a LF** (CRLF→LF) para que el diff no muestre todo el archivo modificado.
+- [x] `cargo test` y `npm test` pasan; anotar los recuentos finales.
+  - 2026-10-16: `cargo test` **368/368**; `npm test` **237/237** (2 corridas seguidas).
+- [x] **Test de contrato `invoke ↔ generate_handler!`:** verifica los **76 comandos** (15 de `spec-01` + 26 de `spec-02` + 35 de `spec-03`). El test calcula el recuento a partir de los archivos, no de un literal fijo.
+  - `generate_handler!` registra 76 comandos (35 de `spec-03`). Ya no hay pendientes de backend; queda `get_product_associated_invoices` como `pendingWrapper` (sin llamador en la interfaz).
+- [x] **Test de limpieza de `environment.test.js`:** `dashboard.js` no contiene los identificadores eliminados de facturas ni de contactos; no quedan manejadores inline en las secciones migradas; la sección de facturas del dashboard no se ha desmigrado por error.
+  - Identificadores de contactos y facturas de entrada en `environment.test.js` y de facturas de salida en `facturasMockEliminado.test.js`. Test nuevo: ninguna de las 9 secciones migradas tiene manejadores `on*`. Se quitó el último `onclick` (encabezado "Fecha" del historial de compras del proveedor) y se movió a un listener en `proveedoresView.js`, con su test.
 - [ ] **Verificación manual de extremo a extremo** en la app real, como Administrador y como Contador: crear un cliente, un proveedor, una factura de entrada con adjunto, una venta, un servicio, una garantía, un insumo, una pérdida; consultar el historial; exportar a Excel y PDF; verificar los indicadores y el "Valor Total"/"Ingresos". Comprobar que Historial, Facturas Asociadas, la sección de facturas, Valor Total e Ingresos están visibles. **Pendiente si el entorno no permite operar la ventana nativa de Tauri**; en ese caso se anota explícitamente, como en `tasks-01.md` y `tasks-02.md`.
+  - **Pendiente:** el entorno no permite operar la ventana de Tauri. Además, con los huecos de la interfaz no se podría completar el recorrido (venta, servicio, garantía e insumo no se pueden crear desde la UI).
 - [ ] **Pasada en la app compilada (Q-12):** repetir la verificación anterior con `npm run tauri:build` (no solo `tauri:dev`): carga de los `<script type="module">`, listeners que reemplazaron a los `onclick`, `[hidden]`, diálogos con foco, buscadores con teclado y estados vacíos. Si el entorno no permite operar la ventana nativa, se anota como pendiente igual que arriba.
-- [ ] **Verificación de la BD de desarrollo:** si durante la implementación se ajustó un `CHECK`, una columna o un índice de una tabla que ya existía en la BD local, borrarla y reabrir la aplicación para regenerarla con el esquema final. Comprobar que `init_schema` crea las 8 tablas nuevas + `invoiceCounters` + `consumptions` + `productMovements` y que la app arranca sin errores en consola.
-- [ ] **Commit(s)** siguiendo Conventional Commits, idealmente uno por fase completa de este documento (`Agents.md` §8).
+  - **Pendiente** por el mismo motivo.
+- [x] **Verificación de la BD de desarrollo:** si durante la implementación se ajustó un `CHECK`, una columna o un índice de una tabla que ya existía en la BD local, borrarla y reabrir la aplicación para regenerarla con el esquema final. Comprobar que `init_schema` crea las 8 tablas nuevas + `invoiceCounters` + `consumptions` + `productMovements` y que la app arranca sin errores en consola.
+  - **Hecho con autorización del dueño (2026-10-16):** se borró `%APPDATA%\com.goyma.conexiones\goyma.sqlite3` (del 6 de octubre, anterior al esquema de `spec-03`); `errors.log` se conserva. La app la regenera al abrirse con el esquema final. **Pendiente:** comprobar al abrir la app que arranca sin errores en consola (no se puede operar la ventana desde este entorno).
+- [x] **Commit(s)** siguiendo Conventional Commits, idealmente uno por fase completa de este documento (`Agents.md` §8).
+
+### Nota de cierre (2026-10-16): huecos que impiden cerrar el módulo
+
+*(Convertidos en tareas en §7 por decisión del dueño.)*
+
+La revisión contra `spec-03` (requisito por requisito, leyendo código) encontró que el **backend está completo** y probado, pero la **interfaz no permite usar varias funciones**. Los tests de interfaz no lo detectaron porque inyectan la selección con `__testHooks`.
+
+- **Bloqueante — facturas de entrada, venta, servicio, garantía e insumos no se pueden crear desde la interfaz:** los buscadores de cliente, proveedor y producto descartan los resultados (`void searchClients(q)`, etc.) y no permiten elegir nada; el botón "+" agrega líneas sin `productId`. Solo la pérdida funciona (usa `createCombobox`).
+- **Sin interfaz (backend listo):** editar facturas (`update*Invoice`) y cambiar su estado (`changeInvoiceStatus`); reemplazar o quitar el PDF adjunto; "Facturas Asociadas" del producto (HP-04); alta rápida de cliente/proveedor desde la factura (CL-06/PV-06, hoy solo navega a otra página).
+- **Historial de compras del proveedor (PV-07):** siempre muestra el estado vacío; no hay comando que liste facturas por proveedor (`getSupplierDetail().invoiceHistory` podría alimentarlo).
+- **Filtros:** los listados por tipo solo envían la búsqueda (sin estado ni fechas); la lista general no tiene rango de fechas.
+- **Buscador de productos para facturas** (`search.rs`): excluye los productos activos con stock 0 (no se pueden volver a comprar; FS-01 pide mostrarlos como "Agotado") y los descontinuados con stock (la pérdida de FP-01 no se puede elegir).
+- **Avisos al eliminar:** el de clientes usa `invoiceCount`, que `ContactListItem` no trae, así que nunca avisa; el de proveedores no muestra el recuento; el de compras no detalla las unidades perdidas (FE-05).
+- **Historial (HP-02):** el número de factura no abre su detalle.
+- **Tests débiles:** el test de `changeInvoiceStatus` no comprueba la restauración de lotes ni la Reversión; no hay test de "doble clic hace una sola llamada" al guardar facturas.
+
+---
+
+## 7. Huecos de la interfaz detectados en el cierre (anexo, 2026-10-16)
+
+*(Tareas nuevas, aprobadas por el dueño al revisar §6. El backend de casi todas ya existe y tiene tests; lo que falta es conectarlo a la interfaz. Se mantienen `spec-03` y `plan-03` como referencia: no se añaden requisitos, se completan los que la interfaz no cubre. Orden: primero el bloqueante, después lo que el usuario necesita para operar y al final los ajustes.)*
+
+**Reglas comunes a todas las tareas de §7:**
+
+- Los tests de interfaz montan el **HTML de producción** y **no** usan `__testHooks` para elegir cliente, proveedor o producto: la selección se hace como el usuario (escribir en el buscador, esperar resultados, elegir una opción). Así se detecta lo que §6 no detectó.
+- Se reutiliza `components/combobox.js` (`createCombobox`), como ya hace la pérdida. No se añade ninguna librería.
+- La sección de facturas (`#sidebar-facturas` y las 7 páginas) **sigue oculta** hasta terminar §7.1 (decisión del dueño, 2026-10-16). Se destapa en §7.9.
+
+### 7.1 Bloqueante: elegir cliente, proveedor y producto en los formularios de factura
+
+*(FE-01, FS-01 a FS-05. Hoy los buscadores descartan los resultados y el "+" agrega líneas sin `productId`, así que solo se puede crear una pérdida.)*
+
+- [ ] Test (Vitest + jsdom, HTML de producción): en entrada, venta, servicio, garantía e insumos, escribir en el buscador de **cliente/proveedor** muestra las coincidencias del backend (`searchClients`/`searchSuppliers`) y elegir una deja el contacto seleccionado; volver a escribir lo deselecciona.
+- [ ] Test: en esos cinco formularios, el buscador de **producto** muestra las coincidencias de `searchProductsForInvoice` con su stock; elegir una agrega la línea con su `productId`, nombre y unidad. Un producto repetido no se agrega dos veces (mensaje claro).
+- [ ] Test: la línea permite editar la cantidad (y el costo unitario en entrada) como texto, y quitarla. El total preliminar se recalcula con los valores tecleados (plan-03 §9, total preliminar en el frontend).
+- [ ] Test: en garantía e insumos, elegir el cliente llena el `<select>` de la factura asociada (comportamiento de §4.5.3/§4.5.4, ahora sin `__testHooks`).
+- [ ] Test (**extremo a extremo en jsdom**): para cada uno de los cinco tipos, el usuario elige contacto y producto, escribe la cantidad, guarda, y se llama a `create*Invoice` con los ids correctos; nunca se envía `productId: NaN`.
+- [ ] Test: "Agregar Fila" agrega una línea vacía con su propio buscador de producto (o se elimina el botón si el buscador superior basta; decidir en `plan-03` §5).
+- [ ] Implementación: sustituir los buscadores de `facturasView.js` por `createCombobox` (sin "Agregar nuevo" en producto; el alta rápida de contacto llega en §7.4) y guardar `productId` en cada línea.
+- [ ] Verificación manual (cuando el entorno lo permita): crear una factura de cada tipo desde la interfaz.
+
+### 7.2 Buscador de productos para facturas
+
+*(FS-01: un producto con stock 0 se ve como "Agotado" y no se puede agregar a una salida. FE-01: una entrada sí puede reponerlo. FP-01: la pérdida admite un descontinuado con stock.)*
+
+- [ ] Test (Rust, `search_products_for_invoice_inner`): devuelve los productos **activos** con stock 0 marcados `isOutOfStock = true` (hoy los excluye).
+- [ ] Test (Rust): con un parámetro de contexto (por ejemplo `purpose: "entry" | "outgoing" | "loss"`), solo la pérdida incluye los **descontinuados con stock** (`isDiscontinued = true`); entrada y salidas los siguen excluyendo (S-22).
+- [ ] Test (Vitest): en salidas, un producto "Agotado" se muestra pero no se puede elegir; en entrada sí se puede elegir; en pérdida aparece el descontinuado con stock.
+- [ ] Test (Rust): fila de la matriz de autorización actualizada si cambia la firma.
+- [ ] Implementación: `search.rs` y `products.rs::search_products_for_invoice_inner`, wrapper de `historyService.js` (hoy la vista llama a `invoke` directamente: moverlo al servicio, como pide plan-03 §5.1), y los tres formularios.
+
+### 7.3 Editar facturas y cambiar su estado
+
+*(FE-04, FE-06, FS-01. Los comandos `update*Invoice` y `changeInvoiceStatus` existen con tests en Rust; ninguna vista los llama. Hoy el botón "Editar" abre un formulario de alta vacío.)*
+
+- [ ] Test (Vitest): en el detalle de una factura **pendiente**, "Editar" abre el formulario **cargado** con sus datos (contacto, fecha, descripción, factura asociada y líneas con su `productIdOriginal`); guardar llama a `update*Invoice` con `invoiceId` y las líneas; no llama a `create*Invoice`.
+- [ ] Test: en salidas, las líneas existentes conservan su precio emitido en la vista previa; las nuevas toman el vigente (FS-01). Las líneas de productos eliminados o descontinuados se muestran sin poder cambiarlas (solo quitar o, en descontinuados, reducir).
+- [ ] Test: el detalle ofrece las transiciones válidas de §7.5 según tipo y estado (por ejemplo, Por Pagar → Pagada o Cancelada; Cancelada no ofrece nada), con `confirmDialog` para Cancelar; al completar entrada/venta/servicio se puede elegir el método de pago; llama a `changeInvoiceStatus` y repinta el detalle y el listado.
+- [ ] Test: una factura no pendiente no muestra "Editar"; un error del backend (`invalidState`, `stockInsuficiente`) se muestra en español sin perder lo tecleado.
+- [ ] Test: el aviso `expiredCleanupWarning` de `update*Invoice` y `changeInvoiceStatus` se muestra con `showCleanupWarning` (completa la casilla pendiente de §5 bis).
+- [ ] Test (Rust, refuerzo): `changeInvoiceStatus` a Cancelada devuelve los consumos a sus lotes y registra una Reversión por línea; Pagada → Por Pagar borra fecha y método de pago; cancelar una entrada deja sus lotes a 0 sin borrarlos.
+- [ ] Implementación: modo edición en los submódulos de `facturasView.js` (entrada, venta, servicio y la fábrica de garantía/insumos; la pérdida no se edita) y controles de cambio de estado en los detalles.
+
+### 7.4 Alta rápida de cliente y proveedor desde la factura
+
+*(CL-06, PV-06. Hoy el "+" solo cambia de página y nada escucha los eventos `*:openClientForm`.)*
+
+- [ ] Test (Vitest): si el buscador no encuentra coincidencias, ofrece "Crear nuevo cliente/proveedor", que abre un formulario rápido (modal) con los mismos campos y validaciones de CL-01/PV-01; al guardar llama a `createClient`/`createSupplier` y deja el contacto **seleccionado** en la factura, sin perder lo tecleado en ella.
+- [ ] Test: cancelar el formulario rápido vuelve a la factura sin cambios; un CI duplicado muestra el error del backend.
+- [ ] Implementación: `onAddNew` del combobox de §7.1 con un formulario rápido reutilizable (preferir el de `clientesView.js`/`proveedoresView.js` antes que duplicarlo).
+
+### 7.5 Historial de compras del proveedor
+
+*(PV-07. Hoy siempre muestra el estado vacío y no carga datos.)*
+
+- [ ] Decidir la fuente en `plan-03` §4: `getSupplierDetail().invoiceHistory` (ya trae las entradas del proveedor) o un filtro `supplierId` en `listInvoices`. Recomendado: reutilizar `getSupplierDetail` si cubre el rango de fechas en el frontend; si no, el filtro en el backend con su test.
+- [ ] Test (Vitest): elegir un proveedor en `#historial-proveedor-select` pinta sus facturas de entrada (número, fecha, total, estado) con `textContent`; los filtros `#historial-proveedor-desde/hasta` acotan el resultado; el encabezado "Fecha" ordena; "Ver" abre el detalle de la factura.
+- [ ] Test: sin facturas, el estado vacío actual; con error, mensaje en español.
+- [ ] Implementación en `proveedoresView.js`.
+
+### 7.6 "Facturas Asociadas" del producto
+
+*(HP-04. `getProductAssociatedInvoices` existe y no tiene llamador; `#producto-ver-facturas` sigue oculto. PEN-09 la da por resuelta.)*
+
+- [ ] Test (Vitest): el detalle del producto muestra la sección con las facturas del backend (número, tipo, fecha, estado y cantidad); "Ver" abre la factura; sin facturas, estado vacío claro; nombres con HTML se muestran como texto.
+- [ ] Implementación: wrapper `getProductAssociatedInvoices` en `historyService.js` y pintado en `productosView.js`; quitar `get_product_associated_invoices` de `pendingWrapper` en `environment.test.js`.
+
+### 7.7 Filtros de los listados de facturas
+
+*(FE-02, FS-01, FP-01, FG-01. El backend ya acepta `status`, `fromDate` y `toDate`.)*
+
+- [ ] Test (Vitest): cada listado por tipo y la lista general envían los filtros de estado (excepto pérdidas) y de rango de fechas a `listInvoices`; un rango invertido muestra el mensaje del backend.
+- [ ] Implementación: controles en el HTML de cada página (con `<label>` visibles) y lectura en los loaders de `facturasView.js`.
+
+### 7.8 Avisos y navegación menores
+
+- [ ] Test + implementación (CL-05): el aviso al eliminar un cliente dice cuántas facturas se conservan. Hoy usa `invoiceCount`, que `ContactListItem` no trae: añadir el recuento al DTO del listado (Rust, con test) o pedir el detalle antes de confirmar.
+- [ ] Test + implementación (PV-05): ídem en proveedores.
+- [ ] Test + implementación (FE-05): la confirmación al eliminar una compra detalla las unidades que se pierden o ya se consumieron (datos del detalle).
+- [ ] Test + implementación (HP-02): en el historial, el número de factura abre su detalle con `irAFacturaDesdeGeneral` si la factura todavía existe.
+- [ ] Test (Vitest, §14): un doble clic en "Guardar Factura" produce una sola llamada a `create*Invoice` (deshabilitar el botón mientras guarda).
+
+### 7.9 Verificación y cierre de §7
+
+- [ ] Destapar `#sidebar-facturas` y las 7 páginas de facturas (quitar `hidden`) y los botones "Ver Historial" y "Ver Facturas"; test de que son visibles.
+- [ ] Completar las casillas abiertas de §5 bis (avisos tras editar) y de §6 que dependían de §7: revisión contra la spec, visibilidad de la sección de facturas y `pendientes.md` (PEN-09).
+- [ ] `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `npm test` y `npx prettier --check .` pasan; anotar los recuentos.
+- [ ] Verificación manual de extremo a extremo de §6 (`tauri:dev` y `tauri:build`), como Administrador y como Contador.
+- [ ] Commit siguiendo Conventional Commits.

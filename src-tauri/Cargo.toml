@@ -6,7 +6,7 @@ authors = ["you"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,3 +26,9 @@ rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 bcrypt = "0.17"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
+# Exportación del historial (HP-03, plan-03 §3.10), sin features por defecto,
+# sin imágenes ni runtime async. El .xlsx se arma en export.rs con zip 9 (sin
+# compresión): todas las versiones de rust_xlsxwriter dependen de zip 2-8,
+# retirado de crates.io. printpdf 0.7: Helvetica integrada (D-18).
+zip = { version = "9.0.4", default-features = false }
+printpdf = { version = "0.7.0", default-features = false }

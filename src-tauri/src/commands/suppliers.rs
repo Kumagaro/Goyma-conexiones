@@ -578,6 +578,8 @@ fn supplier_invoice_history(
                             invoice_type,
                         },
                     ),
+                    product_name: None,
+                    quantity: None,
                 }
             },
         )
@@ -645,7 +647,7 @@ mod tests {
         assert_allows_both_roles, assert_requires_session, create_test_session, create_test_user,
         insert_product_fixture, setup_test_db,
     };
-    use chrono::Utc;
+    use chrono::{TimeZone, Utc};
     use rusqlite::OptionalExtension;
 
     #[test]
@@ -999,10 +1001,10 @@ mod tests {
             connection
                 .execute(
                     "INSERT INTO invoices (type, number, invoiceDate, status, supplierId, contactFullName,
-                        contactFullNameNormalized, contactNationalId, contactPhone, createdByUserId,
-                        createdByName, createdAt, updatedAt)
+                        contactFullNameNormalized, contactNationalId, contactPhone, paidAt,
+                        createdByUserId, createdByName, createdAt, updatedAt)
                      VALUES ('E', ?1, ?2, ?3, ?4, 'Ana Pérez', 'ana perez', '12345678951', '+5355550116',
-                        ?5, 'admin', ?6, ?6)",
+                        CASE WHEN ?3 = 'completed' THEN ?6 END, ?5, 'admin', ?6, ?6)",
                     rusqlite::params![
                         number,
                         date,

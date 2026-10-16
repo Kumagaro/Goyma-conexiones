@@ -22,6 +22,7 @@ import {
   updateSupplier,
 } from "../services/suppliersService.js";
 import { initProveedoresView } from "../views/proveedoresView.js";
+import { formatDate, formatMoney } from "../utils/formatters.js";
 
 function seedSupplierPage() {
   document.body.innerHTML = `
@@ -53,6 +54,7 @@ function seedSupplierPage() {
         </div>
         <div id="proveedor-historial" class="config-subview">
           <select id="historial-proveedor-select"></select>
+          <table><thead><tr><th id="th-fecha-historial-proveedor">Fecha</th></tr></thead></table>
           <tbody id="historial-proveedor-body"></tbody>
         </div>
         <div id="proveedor-ver" class="config-subview">
@@ -88,6 +90,18 @@ describe("proveedoresView", () => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
     document.body.innerHTML = "";
+  });
+
+  it("el encabezado Fecha del historial de compras ordena sin onclick inline", async () => {
+    listSuppliers.mockResolvedValue([]);
+    window.toggleOrdenFecha = vi.fn();
+    await initProveedoresView();
+    document.getElementById("th-fecha-historial-proveedor").click();
+    expect(window.toggleOrdenFecha).toHaveBeenCalledWith(
+      "historialProveedor",
+      expect.any(Function),
+    );
+    delete window.toggleOrdenFecha;
   });
 
   it("carga proveedores y muestra el estado vacío si no llega nada", async () => {
@@ -146,6 +160,7 @@ describe("proveedoresView", () => {
       createdAt: "2026-02-05",
       indicators: {
         totalInvoicedCents: 0,
+        totalPurchasedCents: 0,
         pendingBalanceCents: 0,
         invoiceCount: 0,
         lastPurchaseDate: null,
@@ -168,7 +183,9 @@ describe("proveedoresView", () => {
     document.getElementById("proveedor-cargo").value = "Analista";
     document.getElementById("proveedor-direccion").value = "Calle 9";
 
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }),
+    );
     await vi.waitFor(() => {
       expect(createSupplier).toHaveBeenCalledWith({
         firstName: "Luis",
@@ -183,14 +200,18 @@ describe("proveedoresView", () => {
     });
 
     await vi.waitFor(() => {
-      expect(document.querySelector('#proveedores-body tr[data-supplier-id="3"]')).not.toBeNull();
+      expect(
+        document.querySelector('#proveedores-body tr[data-supplier-id="3"]'),
+      ).not.toBeNull();
     });
-    const row = document.querySelector('#proveedores-body tr[data-supplier-id="3"]');
+    const row = document.querySelector(
+      '#proveedores-body tr[data-supplier-id="3"]',
+    );
     row.querySelector('[data-supplier-action="detail"]').click();
     await vi.waitFor(() => {
-      expect(document.getElementById("proveedor-ver-nombre-completo").textContent).toContain(
-        "Marta López",
-      );
+      expect(
+        document.getElementById("proveedor-ver-nombre-completo").textContent,
+      ).toContain("Marta López");
     });
     expect(document.getElementById("proveedor-ver-fecha-entrada")).toBeNull();
 
@@ -204,16 +225,155 @@ describe("proveedoresView", () => {
       },
     ]);
     await initProveedoresView();
-    expect(document.getElementById("proveedores-body").textContent).toContain("Ana");
-    expect(document.getElementById("proveedores-body").querySelector("img")).toBeNull();
+    expect(document.getElementById("proveedores-body").textContent).toContain(
+      "Ana",
+    );
+    expect(
+      document.getElementById("proveedores-body").querySelector("img"),
+    ).toBeNull();
 
     await vi.waitFor(() => {
-      expect(document.querySelector('#proveedores-body tr[data-supplier-id="7"]')).not.toBeNull();
+      expect(
+        document.querySelector('#proveedores-body tr[data-supplier-id="7"]'),
+      ).not.toBeNull();
     });
-    const deleteRow = document.querySelector('#proveedores-body tr[data-supplier-id="7"]');
+    const deleteRow = document.querySelector(
+      '#proveedores-body tr[data-supplier-id="7"]',
+    );
     deleteRow.querySelector('[data-supplier-action="delete"]').click();
     await vi.waitFor(() => {
       expect(deleteSupplier).toHaveBeenCalledWith(7);
     });
+  });
+  it("el detalle muestra totalPurchasedCents, los indicadores y el historial de compras", async () => {
+    listSuppliers.mockResolvedValue([
+      { id: 8, fullName: "Luis Gómez", company: null, phone: "+5355550002" },
+    ]);
+    const detail = {
+      id: 8,
+      firstName: "Luis",
+      lastName: "Gómez",
+      fullName: "Luis Gómez",
+      nationalId: "90010112346",
+      phone: "+5355550002",
+      createdAt: "2026-01-03",
+      indicators: {
+        totalInvoicedCents: 0,
+        totalPurchasedCents: 98_700,
+        pendingBalanceCents: 10_000,
+        invoiceCount: 2,
+        lastPurchaseDate: "2026-02-11",
+      },
+      invoiceHistory: [
+        {
+          id: 21,
+          number: "E-00021",
+          invoiceType: "E",
+          date: "2026-02-11",
+          totalCents: 88_700,
+          status: "completed",
+        },
+      ],
+      expiredCleanupWarning: null,
+    };
+    getSupplierDetail.mockResolvedValue(detail);
+    window.irAFacturaDesdeGeneral = vi.fn();
+
+    await initProveedoresView();
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('[data-supplier-action="detail"]'),
+      ).not.toBeNull(),
+    );
+    document.querySelector('[data-supplier-action="detail"]').click();
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("proveedor-ver-num-facturas").textContent,
+      ).toBe("2"),
+    );
+
+    const text = (id) => document.getElementById(id).textContent;
+    expect(text("proveedor-ver-total-comprado")).toBe(
+      formatMoney(98_700).replace(" USD", ""),
+    );
+    expect(text("proveedor-ver-saldo-pendiente")).toBe(
+      formatMoney(10_000).replace(" USD", ""),
+    );
+    expect(text("proveedor-ver-ultima-compra")).toBe(formatDate("2026-02-11"));
+
+    const history = document.getElementById("proveedor-ver-historial-facturas");
+    const cells = Array.from(history.querySelectorAll("tbody td")).map(
+      (td) => td.textContent,
+    );
+    expect(cells.slice(0, 5)).toEqual([
+      "E-00021",
+      "Entrada",
+      formatDate("2026-02-11"),
+      formatMoney(88_700),
+      "Pagada",
+    ]);
+    history.querySelector("tbody button").click();
+    expect(window.irAFacturaDesdeGeneral).toHaveBeenCalledWith("E", 21);
+    delete window.irAFacturaDesdeGeneral;
+
+    // Sin compras: estado vacío claro.
+    getSupplierDetail.mockResolvedValue({ ...detail, invoiceHistory: [] });
+    document.querySelector('[data-supplier-action="detail"]')?.click();
+    await vi.waitFor(() =>
+      expect(history.textContent).toContain(
+        "Este proveedor aún no tiene compras registradas.",
+      ),
+    );
+    expect(history.querySelector("table")).toBeNull();
+  });
+  it("H-7: muestra el aviso de purga del detalle con role=status y lo limpia con null", async () => {
+    listSuppliers.mockResolvedValue([
+      { id: 6, fullName: "Rosa Díaz", company: null, phone: "+5355550009" },
+    ]);
+    const detail = {
+      id: 6,
+      firstName: "Rosa",
+      lastName: "Díaz",
+      fullName: "Rosa Díaz",
+      nationalId: "90010112347",
+      phone: "+5355550009",
+      createdAt: "2026-01-04",
+      indicators: {
+        totalInvoicedCents: 0,
+        totalPurchasedCents: 0,
+        pendingBalanceCents: 0,
+        invoiceCount: 0,
+        lastPurchaseDate: null,
+      },
+      invoiceHistory: [],
+      expiredCleanupWarning:
+        "No se pudieron limpiar 2 productos vencidos; se reintentará en la próxima operación",
+    };
+    getSupplierDetail.mockResolvedValue(detail);
+    await initProveedoresView();
+    const open = () =>
+      document.querySelector('[data-supplier-action="detail"]').click();
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('[data-supplier-action="detail"]'),
+      ).not.toBeNull(),
+    );
+    open();
+    const status = () => document.getElementById("proveedor-ver-warning");
+    await vi.waitFor(() =>
+      expect(status()?.textContent).toBe(
+        "No se pudieron limpiar 2 productos vencidos; se reintentará en la próxima operación",
+      ),
+    );
+    expect(status().getAttribute("role")).toBe("status");
+    expect(status().hidden).toBe(false);
+
+    getSupplierDetail.mockResolvedValue({
+      ...detail,
+      expiredCleanupWarning: null,
+    });
+    open();
+    await vi.waitFor(() => expect(status().textContent).toBe(""));
+    expect(status().hidden).toBe(true);
   });
 });

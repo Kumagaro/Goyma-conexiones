@@ -66,7 +66,14 @@ struct EntryUpdateMovement<'a> {
 }
 
 type EntryUpdateProductRow = (String, Option<i64>, Option<String>, Option<String>, String);
-type InvoiceStatusRow = (String, String, Option<String>, Option<String>, String);
+// El estado es NULL en las pérdidas (no tienen estados).
+type InvoiceStatusRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+);
 // Fila de producto para las facturas de venta y servicio: identidad, estado,
 // costo y ganancia vigentes, categoría y unidad (copias para la línea).
 type OutgoingProductRow = (
@@ -299,10 +306,13 @@ pub fn list_invoices_inner(
 
     let mut statement = connection
         .prepare(
-                "SELECT id, number, type, contactFullName, contactCompany, contactNationalId, contactPhone,
-                    invoiceDate, status, associatedNumber, associatedType
-             FROM invoices
-             ORDER BY invoiceDate DESC, id DESC",
+                "SELECT i.id, i.number, i.type, i.contactFullName, i.contactCompany, i.contactNationalId,
+                    i.contactPhone, i.invoiceDate, i.status, i.associatedNumber, i.associatedType,
+                    l.productName, l.quantityMilli
+             FROM invoices i
+             -- La pérdida tiene una sola línea: de ella salen producto y cantidad.
+             LEFT JOIN invoiceLines l ON i.type = 'P' AND l.invoiceId = i.id AND l.position = 1
+             ORDER BY i.invoiceDate DESC, i.id DESC",
         )
         .map_err(|error| map_db_error(error, "listInvoices", &[]))?;
 
@@ -320,6 +330,8 @@ pub fn list_invoices_inner(
                 row.get::<_, Option<String>>(8)?,
                 row.get::<_, Option<String>>(9)?,
                 row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, Option<i64>>(12)?,
             ))
         })
         .map_err(|error| map_db_error(error, "listInvoices", &[]))?;
@@ -338,6 +350,8 @@ pub fn list_invoices_inner(
             status_value,
             associated_number,
             associated_type,
+            product_name,
+            quantity_milli,
         ) = row.map_err(|error| map_db_error(error, "listInvoices", &[]))?;
 
         let invoice_day = match NaiveDate::parse_from_str(&invoice_date, "%Y-%m-%d") {
@@ -386,6 +400,10 @@ pub fn list_invoices_inner(
                     .as_deref()
                     .map(normalize_text)
                     .unwrap_or_default(),
+                product_name
+                    .as_deref()
+                    .map(normalize_text)
+                    .unwrap_or_default(),
             ];
             let normalized_phone = contact_phone
                 .as_deref()
@@ -422,6 +440,8 @@ pub fn list_invoices_inner(
                     invoice_type,
                 },
             ),
+            product_name,
+            quantity: quantity_milli.map(format_quantity_milli),
         });
     }
 
@@ -783,6 +803,8 @@ pub fn create_entry_invoice_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, "createEntryInvoice", &[]))?;
+    // Purga best-effort de P-08 (spec-03 §7.6); su aviso viaja en el resultado.
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
     if input.lines.is_empty() || input.lines.len() > 100 {
@@ -1257,7 +1279,7 @@ pub fn create_entry_invoice_inner(
     Ok(InvoiceActionResult {
         invoice_id,
         number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 
@@ -1283,6 +1305,8 @@ fn create_client_outgoing_invoice_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, op, &[]))?;
+    // Purga best-effort de P-08 (spec-03 §7.6); su aviso viaja en el resultado.
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
     if lines.is_empty() || lines.len() > 100 {
@@ -1592,7 +1616,7 @@ fn create_client_outgoing_invoice_inner(
     Ok(InvoiceActionResult {
         invoice_id,
         number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 
@@ -1672,6 +1696,8 @@ fn create_associated_outgoing_invoice_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, op, &[]))?;
+    // Purga best-effort de P-08 (spec-03 §7.6); su aviso viaja en el resultado.
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
     if lines.is_empty() || lines.len() > 100 {
@@ -1948,7 +1974,7 @@ fn create_associated_outgoing_invoice_inner(
     Ok(InvoiceActionResult {
         invoice_id,
         number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 
@@ -2121,6 +2147,11 @@ fn restore_outgoing_line_consumptions(
         let Some(product_id) = restoration_result.product_id else {
             continue;
         };
+        // El consumo ya volvió a su lote: si se conservara, la siguiente
+        // edición lo devolvería otra vez e inflaría el stock.
+        connection
+            .execute("DELETE FROM consumptions WHERE id = ?1", [consumption_id])
+            .map_err(|error| map_db_error(error, op, &[]))?;
         restored_milli += quantity_milli;
         if restoration.record_reversal {
             let total_price_cents = crate::inventory::round_half_up(
@@ -2154,6 +2185,10 @@ fn restore_outgoing_line_consumptions(
     }
     Ok(restored_milli)
 }
+
+/// Fila de producto para agregar líneas de garantía/insumos al editar:
+/// nombre, unidad (id, nombre, abreviatura) y estado.
+type CostedProductRow = (String, Option<i64>, Option<String>, Option<String>, String);
 
 /// Fila de producto para agregar líneas de venta/servicio al editar.
 type PricedProductRow = (
@@ -2191,6 +2226,8 @@ fn update_priced_outgoing_invoice_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, op, &[]))?;
+    // Purga best-effort de P-08 (spec-03 §7.6); su aviso viaja en el resultado.
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
     let header: Option<(String, String)> = connection
@@ -2249,7 +2286,7 @@ fn update_priced_outgoing_invoice_inner(
                  FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
-        statement
+        let lines = statement
             .query_map([invoice_id], |row| {
                 Ok(OutgoingInvoiceLineRow {
                     id: row.get(0)?,
@@ -2263,7 +2300,8 @@ fn update_priced_outgoing_invoice_inner(
             })
             .map_err(|error| map_db_error(error, op, &[]))?
             .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| map_db_error(error, op, &[]))?
+            .map_err(|error| map_db_error(error, op, &[]))?;
+        lines
     };
     let existing_by_original: std::collections::HashMap<i64, OutgoingInvoiceLineRow> =
         current_lines
@@ -2525,7 +2563,8 @@ fn update_priced_outgoing_invoice_inner(
                         product_id_original: row.product_id_original,
                         product_name: &row.product_name,
                         movement_type: "adjustment",
-                        quantity_milli: delta_milli,
+                        // Con signo del stock (HP-01): subir la cantidad vendida saca stock.
+                        quantity_milli: -delta_milli,
                         unit_price_cents: row.unit_price_cents,
                     },
                     now,
@@ -2718,7 +2757,7 @@ fn update_priced_outgoing_invoice_inner(
     Ok(InvoiceActionResult {
         invoice_id,
         number: invoice_number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 /// Núcleo de edición de garantías e insumos (FS-04, FS-05): el costo se
@@ -2745,6 +2784,8 @@ fn update_costed_outgoing_invoice_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, op, &[]))?;
+    // Purga best-effort de P-08 (spec-03 §7.6); su aviso viaja en el resultado.
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
     let header: Option<(String, String)> = connection
@@ -2829,7 +2870,7 @@ fn update_costed_outgoing_invoice_inner(
                  FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
-        statement
+        let lines = statement
             .query_map([invoice_id], |row| {
                 Ok(OutgoingInvoiceLineRow {
                     id: row.get(0)?,
@@ -2843,7 +2884,8 @@ fn update_costed_outgoing_invoice_inner(
             })
             .map_err(|error| map_db_error(error, op, &[]))?
             .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| map_db_error(error, op, &[]))?
+            .map_err(|error| map_db_error(error, op, &[]))?;
+        lines
     };
     let existing_by_original: std::collections::HashMap<i64, OutgoingInvoiceLineRow> =
         current_lines
@@ -3087,7 +3129,8 @@ fn update_costed_outgoing_invoice_inner(
                         product_id_original: row.product_id_original,
                         product_name: &row.product_name,
                         movement_type: "adjustment",
-                        quantity_milli: delta_milli,
+                        // Con signo del stock (HP-01): subir la cantidad vendida saca stock.
+                        quantity_milli: -delta_milli,
                         unit_price_cents: line_unit_cost_cents,
                     },
                     now,
@@ -3108,26 +3151,25 @@ fn update_costed_outgoing_invoice_inner(
                 &format!("new {op} line quantity is zero"),
             ));
         }
-        let product: Option<(String, Option<i64>, Option<String>, Option<String>, String)> =
-            connection
-                .query_row(
-                    "SELECT p.name, p.unitId, u.name, u.abbreviation, p.status
+        let product: Option<CostedProductRow> = connection
+            .query_row(
+                "SELECT p.name, p.unitId, u.name, u.abbreviation, p.status
                      FROM products p
                      LEFT JOIN units u ON u.id = p.unitId
                      WHERE p.id = ?1",
-                    [product_id],
-                    |db_row| {
-                        Ok((
-                            db_row.get(0)?,
-                            db_row.get(1)?,
-                            db_row.get(2)?,
-                            db_row.get(3)?,
-                            db_row.get(4)?,
-                        ))
-                    },
-                )
-                .optional()
-                .map_err(|error| map_db_error(error, op, &[]))?;
+                [product_id],
+                |db_row| {
+                    Ok((
+                        db_row.get(0)?,
+                        db_row.get(1)?,
+                        db_row.get(2)?,
+                        db_row.get(3)?,
+                        db_row.get(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| map_db_error(error, op, &[]))?;
         let Some((product_name, unit_id, unit_name, unit_abbreviation, product_status)) = product
         else {
             return Err(AppError::new(
@@ -3266,7 +3308,7 @@ fn update_costed_outgoing_invoice_inner(
     Ok(InvoiceActionResult {
         invoice_id,
         number: invoice_number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 pub fn update_sale_invoice_inner(
@@ -3391,6 +3433,8 @@ pub fn create_loss_invoice_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, "createLossInvoice", &[]))?;
+    // Purga best-effort de P-08 (spec-03 §7.6); su aviso viaja en el resultado.
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
     let quantity_milli = parse_quantity_milli(&input.quantity).map_err(|error| {
@@ -3555,7 +3599,7 @@ pub fn create_loss_invoice_inner(
     Ok(InvoiceActionResult {
         invoice_id,
         number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 
@@ -3568,6 +3612,8 @@ pub fn update_entry_invoice_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
+    // Purga best-effort de P-08 (spec-03 §7.6); su aviso viaja en el resultado.
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
     let header: Option<(String, String)> = connection
@@ -4112,7 +4158,7 @@ pub fn update_entry_invoice_inner(
     Ok(InvoiceActionResult {
         invoice_id: input.invoice_id,
         number: invoice_number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 
@@ -4127,7 +4173,7 @@ pub fn change_invoice_status_inner(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, "changeInvoiceStatus", &[]))?;
-    let _ = purge_best_effort(&transaction, now);
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
 
     let row: Option<InvoiceStatusRow> = transaction
         .query_row(
@@ -4161,6 +4207,13 @@ pub fn change_invoice_status_inner(
     };
 
     let invoice_type = InvoiceType::from_str(&invoice_type_value)?;
+    let Some(current_status_value) = current_status_value else {
+        return Err(AppError::new(
+            "invalidState",
+            "Las facturas de pérdida no tienen estado",
+            "status change attempted on loss invoice",
+        ));
+    };
     let current_status = InvoiceStatus::from_str(&current_status_value)?;
     let next_status = InvoiceStatus::from_str(status)?;
     validate_transition(invoice_type, current_status, next_status)?;
@@ -4249,7 +4302,7 @@ pub fn change_invoice_status_inner(
     Ok(InvoiceActionResult {
         invoice_id,
         number,
-        expired_cleanup_warning: None,
+        expired_cleanup_warning,
     })
 }
 
@@ -4643,6 +4696,32 @@ pub fn create_loss_invoice(
     result
 }
 
+// Faltaba el comando: el núcleo existía, pero el frontend no lo podía invocar.
+#[tauri::command]
+pub fn update_entry_invoice(
+    state: tauri::State<'_, std::sync::Mutex<Connection>>,
+    input: UpdateEntryInvoiceInput,
+) -> Result<InvoiceActionResult, AppError> {
+    let mut connection = crate::db::connection::lock_conn(&state);
+    let now = Utc::now();
+    let result = update_entry_invoice_inner(&mut connection, now, input);
+    if let Err(error) = &result {
+        if error.should_log() {
+            if let Some(app_data_dir) = current_app_data_dir() {
+                log_error(
+                    &connection,
+                    "invoices",
+                    "updateEntryInvoice",
+                    error,
+                    now,
+                    app_data_dir,
+                );
+            }
+        }
+    }
+    result
+}
+
 #[tauri::command]
 pub fn update_sale_invoice(
     state: tauri::State<'_, std::sync::Mutex<Connection>>,
@@ -4794,7 +4873,7 @@ fn delete_invoice_inner_with_app_data_dir(
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, "deleteInvoice", &[]))?;
-    let _ = purge_best_effort(&transaction, now);
+    let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
 
     let row: Option<(String, Option<String>, String, Option<String>)> = transaction
         .query_row(
@@ -4888,10 +4967,15 @@ fn delete_invoice_inner_with_app_data_dir(
     Ok(InvoiceActionResult {
         invoice_id,
         number,
-        expired_cleanup_warning: has_missing_products.then(|| {
-            "Algunos productos de la factura ya no existen; no se modificó su inventario."
-                .to_owned()
-        }),
+        expired_cleanup_warning: match (
+            expired_cleanup_warning,
+            has_missing_products.then_some(
+                "Algunos productos de la factura ya no existen; no se modificó su inventario.",
+            ),
+        ) {
+            (Some(purge), Some(missing)) => Some(format!("{purge} {missing}")),
+            (purge, missing) => purge.or_else(|| missing.map(str::to_owned)),
+        },
     })
 }
 
@@ -6921,6 +7005,17 @@ mod tests {
     }
 
     #[test]
+    fn change_invoice_status_requires_session_and_allows_both_roles() {
+        // Fila de la matriz de autorización que faltaba (§6).
+        assert_requires_session(|connection, now| {
+            super::change_invoice_status_inner(connection, now, 1, "completed", None)
+        });
+        assert_allows_both_roles(|connection, now| {
+            super::change_invoice_status_inner(connection, now, 1, "completed", None)
+        });
+    }
+
+    #[test]
     fn create_sale_invoice_requires_session_and_allows_both_roles() {
         assert_requires_session(|connection, now| {
             super::create_sale_invoice_inner(connection, now, sale_input(1, Vec::new(), None))
@@ -8167,7 +8262,8 @@ mod tests {
             "1,00",
         );
 
-        // A: 2→3 (Ajuste +1), B: se quita (Reversión +1), C: nueva (Salida −1).
+        // A: 2→3 (Ajuste −1), B: se quita (Reversión +1), C: nueva (Salida −1).
+        // Las líneas quitadas se procesan antes que las conservadas.
         super::update_sale_invoice_inner(
             &mut connection,
             now,
@@ -8197,8 +8293,8 @@ mod tests {
             vec![
                 ("saleOut".to_owned(), -2_000),
                 ("saleOut".to_owned(), -1_000),
-                ("adjustment".to_owned(), 1_000),
                 ("reversal".to_owned(), 1_000),
+                ("adjustment".to_owned(), -1_000),
                 ("saleOut".to_owned(), -1_000),
             ]
         );
@@ -8329,6 +8425,955 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stock, 2_000);
+    }
+
+    /// Invariante de caché (plan-03 §3.2): `quantityMilli` = suma de lo restante
+    /// en los lotes y `costCents` = promedio ponderado de los lotes con
+    /// existencia. Con stock 0 el producto conserva su último costo, así que
+    /// ese caso no se puede comprobar contra los lotes.
+    fn assert_cache_invariant(connection: &rusqlite::Connection, step: &str) {
+        let rows: Vec<(i64, i64, i64, i64, i64)> = connection
+            .prepare(
+                "SELECT p.id, p.quantityMilli, p.costCents,
+                    COALESCE(SUM(l.remainingMilli), 0),
+                    COALESCE(SUM(l.remainingMilli * l.unitCostCents), 0)
+                 FROM products p
+                 LEFT JOIN lots l ON l.productId = p.id AND l.remainingMilli > 0
+                 GROUP BY p.id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for (product_id, quantity, cost, remaining, weighted) in rows {
+            assert_eq!(
+                quantity, remaining,
+                "{step}: quantityMilli del producto {product_id}"
+            );
+            if remaining > 0 {
+                let expected =
+                    crate::inventory::round_half_up(i128::from(weighted), i128::from(remaining))
+                        as i64;
+                assert_eq!(
+                    cost, expected,
+                    "{step}: costCents del producto {product_id}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn change_invoice_status_rejects_loss_with_clear_message() {
+        // FP-01: la pérdida no tiene estados; antes acababa en `internal`
+        // porque el estado NULL no se podía leer como texto.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, _, supplier_id) = setup_sale_fixture(
+            "lossstatus",
+            "12345679000",
+            "+5355559156",
+            "12345679001",
+            "+5355559157",
+            now,
+        );
+        let product = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Pérdida sin estado",
+            100,
+            2_000,
+            "5",
+            "1,00",
+        );
+        let loss = super::create_loss_invoice_inner(&mut connection, now, loss_input(product, "1"))
+            .unwrap();
+        for status in ["pending", "completed", "cancelled"] {
+            let error = super::change_invoice_status_inner(
+                &mut connection,
+                now,
+                loss.invoice_id,
+                status,
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "invalidState");
+            assert_eq!(error.message, "Las facturas de pérdida no tienen estado");
+        }
+        let stock: i64 = connection
+            .query_row(
+                "SELECT quantityMilli FROM products WHERE id = ?1",
+                [product],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stock, 4_000);
+    }
+
+    #[test]
+    fn invoice_writes_keep_working_and_warn_when_the_purge_fails() {
+        // §6 / spec-03 §7.6: con la purga forzada a fallar, cada comando de
+        // escritura de facturas termina bien, devuelve el aviso y registra el
+        // error. El producto vencido sigue ahí (la purga se deshizo).
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "purgewrites",
+            "12345679002",
+            "+5355559158",
+            "12345679003",
+            "+5355559159",
+            now,
+        );
+        let product = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Purga activo",
+            100,
+            2_000,
+            "50",
+            "1,00",
+        );
+        let expired = insert_product_fixture(
+            &connection,
+            "Purga vencido",
+            None,
+            None,
+            100,
+            2_000,
+            0,
+            "discontinued",
+            Some("2020-01-01T00:00:00Z"),
+            None,
+        );
+        crate::test_utils::create_fail_product_delete_trigger(&connection).unwrap();
+        let logged = |connection: &rusqlite::Connection| -> i64 {
+            connection
+                .query_row("SELECT COUNT(*) FROM errorLogs", [], |row| row.get(0))
+                .unwrap()
+        };
+        fn check(
+            connection: &rusqlite::Connection,
+            step: &str,
+            result: Result<crate::models::invoice::InvoiceActionResult, crate::errors::AppError>,
+            before: i64,
+        ) -> crate::models::invoice::InvoiceActionResult {
+            let result = result.unwrap_or_else(|error| panic!("{step}: {error:?}"));
+            assert!(
+                result
+                    .expired_cleanup_warning
+                    .as_deref()
+                    .is_some_and(|warning| warning.contains("vencidos")),
+                "{step}: {:?}",
+                result.expired_cleanup_warning
+            );
+            let after: i64 = connection
+                .query_row("SELECT COUNT(*) FROM errorLogs", [], |row| row.get(0))
+                .unwrap();
+            assert!(after > before, "{step}: no registró el error");
+            result
+        }
+        // Ejecuta el comando y después comprueba resultado, aviso y registro.
+        macro_rules! run {
+            ($step:expr, $call:expr) => {{
+                let before = logged(&connection);
+                let result = $call;
+                check(&connection, $step, result, before)
+            }};
+        }
+
+        let entry = run!(
+            "createEntryInvoice",
+            super::create_entry_invoice_inner(
+                &mut connection,
+                now,
+                entry_input(
+                    supplier_id,
+                    vec![entry_line(Some(product), None, "5", "1,00")],
+                    None,
+                ),
+            )
+        );
+        let sale = run!(
+            "createSaleInvoice",
+            super::create_sale_invoice_inner(
+                &mut connection,
+                now,
+                sale_input(client_id, vec![sale_line(product, "2")], None),
+            )
+        );
+        let service = run!(
+            "createServiceInvoice",
+            super::create_service_invoice_inner(
+                &mut connection,
+                now,
+                service_input(client_id, vec![service_line(product, "2")], None),
+            )
+        );
+        let guarantee = run!(
+            "createGuaranteeInvoice",
+            super::create_guarantee_invoice_inner(
+                &mut connection,
+                now,
+                guarantee_input(
+                    client_id,
+                    sale.invoice_id,
+                    vec![guarantee_line(product, "1")],
+                    None,
+                ),
+            )
+        );
+        let installation = run!(
+            "createInstallationInvoice",
+            super::create_installation_invoice_inner(
+                &mut connection,
+                now,
+                installation_input(
+                    client_id,
+                    service.invoice_id,
+                    vec![installation_line(product, "1")],
+                    None,
+                ),
+            )
+        );
+        let loss = run!(
+            "createLossInvoice",
+            super::create_loss_invoice_inner(&mut connection, now, loss_input(product, "1"))
+        );
+        run!(
+            "updateEntryInvoice",
+            super::update_entry_invoice_inner(
+                &mut connection,
+                now,
+                update_entry_input(
+                    entry.invoice_id,
+                    supplier_id,
+                    "2026-10-04",
+                    vec![update_entry_line(Some(product), product, "6", "1,00")],
+                ),
+            )
+        );
+        run!(
+            "updateSaleInvoice",
+            super::update_sale_invoice_inner(
+                &mut connection,
+                now,
+                update_sale_input(
+                    sale.invoice_id,
+                    client_id,
+                    vec![update_outgoing_line(Some(product), Some(product), "3")],
+                ),
+            )
+        );
+        run!(
+            "updateServiceInvoice",
+            super::update_service_invoice_inner(
+                &mut connection,
+                now,
+                update_service_input(
+                    service.invoice_id,
+                    client_id,
+                    vec![update_outgoing_line(Some(product), Some(product), "3")],
+                ),
+            )
+        );
+        run!(
+            "updateGuaranteeInvoice",
+            super::update_guarantee_invoice_inner(
+                &mut connection,
+                now,
+                update_guarantee_input(
+                    guarantee.invoice_id,
+                    client_id,
+                    sale.invoice_id,
+                    vec![update_outgoing_line(Some(product), Some(product), "2")],
+                ),
+            )
+        );
+        run!(
+            "updateInstallationInvoice",
+            super::update_installation_invoice_inner(
+                &mut connection,
+                now,
+                update_installation_input(
+                    installation.invoice_id,
+                    client_id,
+                    service.invoice_id,
+                    vec![update_outgoing_line(Some(product), Some(product), "2")],
+                ),
+            )
+        );
+        run!(
+            "changeInvoiceStatus",
+            super::change_invoice_status_inner(
+                &mut connection,
+                now,
+                sale.invoice_id,
+                "completed",
+                None,
+            )
+        );
+        run!(
+            "deleteInvoice",
+            super::delete_invoice_inner(&mut connection, now, loss.invoice_id)
+        );
+
+        // La purga se deshizo en cada intento: el vencido no se borró.
+        let still_there: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE id = ?1",
+                [expired],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 1);
+        assert_cache_invariant(&connection, "tras la batería con purga fallida");
+    }
+
+    #[test]
+    fn invoice_writes_return_no_cleanup_warning_when_the_purge_works() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "purgeok",
+            "12345679004",
+            "+5355559160",
+            "12345679005",
+            "+5355559161",
+            now,
+        );
+        let product = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Purga normal",
+            100,
+            2_000,
+            "5",
+            "1,00",
+        );
+        let expired = insert_product_fixture(
+            &connection,
+            "Vencido purgable",
+            None,
+            None,
+            100,
+            2_000,
+            0,
+            "discontinued",
+            Some("2020-01-01T00:00:00Z"),
+            None,
+        );
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product, "1")], None),
+        )
+        .unwrap();
+        assert_eq!(sale.expired_cleanup_warning, None);
+        // La purga se ejecutó: el vencido ya no existe.
+        let remaining: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE id = ?1",
+                [expired],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn cache_invariant_holds_after_every_phase3_command() {
+        // §4.8: el invariante se cumple tras cada comando de salidas.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "invariantuser",
+            "12345678994",
+            "+5355559150",
+            "12345678995",
+            "+5355559151",
+            now,
+        );
+        let product_a = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Invariante A",
+            100,
+            2_000,
+            "10",
+            "1,00",
+        );
+        let product_b = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Invariante B",
+            300,
+            2_000,
+            "8",
+            "3,00",
+        );
+        // Segundo lote de A con otro costo para que el promedio importe.
+        super::create_entry_invoice_inner(
+            &mut connection,
+            now,
+            entry_input(
+                supplier_id,
+                vec![entry_line(Some(product_a), None, "6", "2,50")],
+                None,
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "entradas iniciales");
+
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(
+                client_id,
+                vec![sale_line(product_a, "12"), sale_line(product_b, "1")],
+                None,
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "createSaleInvoice");
+
+        let service = super::create_service_invoice_inner(
+            &mut connection,
+            now,
+            service_input(client_id, vec![service_line(product_b, "2")], None),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "createServiceInvoice");
+
+        let guarantee = super::create_guarantee_invoice_inner(
+            &mut connection,
+            now,
+            guarantee_input(
+                client_id,
+                sale.invoice_id,
+                vec![guarantee_line(product_a, "1")],
+                None,
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "createGuaranteeInvoice");
+
+        let installation = super::create_installation_invoice_inner(
+            &mut connection,
+            now,
+            installation_input(
+                client_id,
+                service.invoice_id,
+                vec![installation_line(product_b, "1")],
+                None,
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "createInstallationInvoice");
+
+        let loss =
+            super::create_loss_invoice_inner(&mut connection, now, loss_input(product_a, "0.5"))
+                .unwrap();
+        assert_cache_invariant(&connection, "createLossInvoice");
+
+        super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(
+                sale.invoice_id,
+                client_id,
+                vec![update_outgoing_line(Some(product_a), Some(product_a), "9")],
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "updateSaleInvoice");
+
+        super::update_service_invoice_inner(
+            &mut connection,
+            now,
+            update_service_input(
+                service.invoice_id,
+                client_id,
+                vec![
+                    update_outgoing_line(Some(product_b), Some(product_b), "3"),
+                    update_outgoing_line(None, Some(product_a), "1"),
+                ],
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "updateServiceInvoice");
+
+        super::update_guarantee_invoice_inner(
+            &mut connection,
+            now,
+            update_guarantee_input(
+                guarantee.invoice_id,
+                client_id,
+                sale.invoice_id,
+                vec![update_outgoing_line(Some(product_a), Some(product_a), "2")],
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "updateGuaranteeInvoice");
+
+        super::update_installation_invoice_inner(
+            &mut connection,
+            now,
+            update_installation_input(
+                installation.invoice_id,
+                client_id,
+                service.invoice_id,
+                vec![update_outgoing_line(Some(product_b), Some(product_b), "2")],
+            ),
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "updateInstallationInvoice");
+
+        super::change_invoice_status_inner(
+            &mut connection,
+            now,
+            guarantee.invoice_id,
+            "cancelled",
+            None,
+        )
+        .unwrap();
+        assert_cache_invariant(&connection, "changeInvoiceStatus cancelled");
+
+        for (invoice_id, step) in [
+            (guarantee.invoice_id, "deleteInvoice cancelada"),
+            (installation.invoice_id, "deleteInvoice pendiente"),
+            (loss.invoice_id, "deleteInvoice pérdida"),
+            (service.invoice_id, "deleteInvoice servicio"),
+            (sale.invoice_id, "deleteInvoice venta"),
+        ] {
+            super::delete_invoice_inner(&mut connection, now, invoice_id).unwrap();
+            assert_cache_invariant(&connection, step);
+        }
+
+        // Sin salidas, el stock vuelve al de las entradas: A 16, B 8.
+        let stocks: Vec<i64> = [product_a, product_b]
+            .iter()
+            .map(|id| {
+                connection
+                    .query_row(
+                        "SELECT quantityMilli FROM products WHERE id = ?1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(stocks, vec![16_000, 8_000]);
+    }
+
+    #[test]
+    fn cache_invariant_holds_under_pseudorandom_phase3_operations() {
+        // Varias semillas fijas: cada una es una secuencia reproducible distinta.
+        for seed in [0x9E37_79B9_7F4A_7C15, 1, 42, 2026, 0xDEAD_BEEF] {
+            run_pseudorandom_phase3_battery(seed);
+        }
+    }
+
+    fn run_pseudorandom_phase3_battery(seed: u64) {
+        // Batería pseudoaleatoria (plan-03 §8): xorshift con semilla fija para
+        // que un fallo se pueda reproducir. Los rechazos esperados se admiten;
+        // un error `internal` o una caché desincronizada, no.
+        struct XorShift(u64);
+        impl XorShift {
+            fn next(&mut self) -> u64 {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                self.0
+            }
+            fn below(&mut self, n: usize) -> usize {
+                (self.next() % n as u64) as usize
+            }
+        }
+
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "randominvariant",
+            "12345678996",
+            "+5355559152",
+            "12345678997",
+            "+5355559153",
+            now,
+        );
+        let products: Vec<i64> = [("Azar A", "1,00"), ("Azar B", "2,00"), ("Azar C", "3,50")]
+            .iter()
+            .map(|(name, cost)| {
+                insert_stocked_product(
+                    &mut connection,
+                    now,
+                    supplier_id,
+                    name,
+                    100,
+                    2_000,
+                    "20",
+                    cost,
+                )
+            })
+            .collect();
+        let quantities = ["1", "2", "3", "0.5"];
+        let allowed = [
+            "stockInsuficiente",
+            "invalidState",
+            "validationFailed",
+            "stockLimitExceeded",
+            "notFound",
+        ];
+        // (id, tipo) de las facturas de salida vivas.
+        let mut invoices: Vec<(i64, &str)> = Vec::new();
+        let mut rng = XorShift(seed);
+        let mut rejected = 0;
+
+        for step in 0..300 {
+            let product = products[rng.below(products.len())];
+            let quantity = quantities[rng.below(quantities.len())];
+            let op = rng.below(9);
+            let result: Result<Option<(i64, &str)>, crate::errors::AppError> = match op {
+                0 => super::create_sale_invoice_inner(
+                    &mut connection,
+                    now,
+                    sale_input(client_id, vec![sale_line(product, quantity)], None),
+                )
+                .map(|r| Some((r.invoice_id, "V"))),
+                1 => super::create_service_invoice_inner(
+                    &mut connection,
+                    now,
+                    service_input(client_id, vec![service_line(product, quantity)], None),
+                )
+                .map(|r| Some((r.invoice_id, "S"))),
+                2 => super::create_loss_invoice_inner(
+                    &mut connection,
+                    now,
+                    loss_input(product, quantity),
+                )
+                .map(|r| Some((r.invoice_id, "P"))),
+                3 | 4 if !invoices.is_empty() => {
+                    let (invoice_id, _) = invoices[rng.below(invoices.len())];
+                    if op == 3 {
+                        super::change_invoice_status_inner(
+                            &mut connection,
+                            now,
+                            invoice_id,
+                            "cancelled",
+                            None,
+                        )
+                        .map(|_| None)
+                    } else {
+                        let deleted = super::delete_invoice_inner(&mut connection, now, invoice_id)
+                            .map(|_| None);
+                        if deleted.is_ok() {
+                            invoices.retain(|(id, _)| *id != invoice_id);
+                        }
+                        deleted
+                    }
+                }
+                5 => match invoices
+                    .iter()
+                    .filter(|(_, kind)| *kind == "V")
+                    .nth(rng.below(4))
+                {
+                    Some(&(invoice_id, _)) => super::update_sale_invoice_inner(
+                        &mut connection,
+                        now,
+                        update_sale_input(
+                            invoice_id,
+                            client_id,
+                            vec![update_outgoing_line(None, Some(product), quantity)],
+                        ),
+                    )
+                    .map(|_| None),
+                    None => Ok(None),
+                },
+                6 => match invoices.iter().find(|(_, kind)| matches!(*kind, "V" | "S")) {
+                    Some(&(associated, _)) => super::create_guarantee_invoice_inner(
+                        &mut connection,
+                        now,
+                        guarantee_input(
+                            client_id,
+                            associated,
+                            vec![guarantee_line(product, quantity)],
+                            None,
+                        ),
+                    )
+                    .map(|r| Some((r.invoice_id, "GG"))),
+                    None => Ok(None),
+                },
+                7 => match invoices.iter().find(|(_, kind)| *kind == "S") {
+                    Some(&(associated, _)) => super::create_installation_invoice_inner(
+                        &mut connection,
+                        now,
+                        installation_input(
+                            client_id,
+                            associated,
+                            vec![installation_line(product, quantity)],
+                            None,
+                        ),
+                    )
+                    .map(|r| Some((r.invoice_id, "GI"))),
+                    None => Ok(None),
+                },
+                _ => super::create_entry_invoice_inner(
+                    &mut connection,
+                    now,
+                    entry_input(
+                        supplier_id,
+                        vec![entry_line(Some(product), None, "4", "1,75")],
+                        None,
+                    ),
+                )
+                .map(|_| None),
+            };
+            match result {
+                Ok(Some(created)) => invoices.push(created),
+                Ok(None) => {}
+                Err(error) => {
+                    assert!(
+                        allowed.contains(&error.code.as_str()),
+                        "semilla {seed}, paso {step}, op {op}: error inesperado {error:?}"
+                    );
+                    rejected += 1;
+                }
+            }
+            assert_cache_invariant(
+                &connection,
+                &format!("semilla {seed}, paso {step}, op {op}"),
+            );
+        }
+        // La batería ejercita tanto éxitos como rechazos.
+        assert!(
+            rejected > 0 && rejected < 300,
+            "semilla {seed}: rechazos {rejected}"
+        );
+    }
+
+    #[test]
+    fn sp03_income_and_stock_value_follow_real_sales_and_category_snapshots() {
+        // SP-03 con ventas reales: "Ingresos" suma los subtotales de ventas y
+        // servicios no cancelados por la categoría guardada en la línea; un
+        // cambio posterior de categoría no mueve las ventas anteriores.
+        // "Valor Total" es lo restante de cada lote por su costo (FIFO).
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let today = now.date_naive();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "sp03user",
+            "12345678992",
+            "+5355559148",
+            "12345678993",
+            "+5355559149",
+            now,
+        );
+        let drinks = crate::test_utils::insert_category_fixture(&connection, "Bebidas", None);
+        let dairy = crate::test_utils::insert_category_fixture(&connection, "Lácteos", None);
+        let product_id = insert_product_fixture(
+            &connection,
+            "Café SP03",
+            Some(drinks),
+            None,
+            100,
+            2_000,
+            0,
+            "active",
+            None,
+            None,
+        );
+        // Dos lotes: 10 a $1,00 y luego 5 a $2,00.
+        for (quantity, cost) in [("10", "1,00"), ("5", "2,00")] {
+            super::create_entry_invoice_inner(
+                &mut connection,
+                now,
+                entry_input(
+                    supplier_id,
+                    vec![entry_line(Some(product_id), None, quantity, cost)],
+                    None,
+                ),
+            )
+            .unwrap();
+        }
+
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "2")], None),
+        )
+        .unwrap();
+        let service = super::create_service_invoice_inner(
+            &mut connection,
+            now,
+            service_input(client_id, vec![service_line(product_id, "1")], None),
+        )
+        .unwrap();
+        let cancelled = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "4")], None),
+        )
+        .unwrap();
+        super::change_invoice_status_inner(
+            &mut connection,
+            now,
+            cancelled.invoice_id,
+            "cancelled",
+            None,
+        )
+        .unwrap();
+
+        let subtotal = |connection: &rusqlite::Connection, invoice_id: i64| -> i64 {
+            connection
+                .query_row(
+                    "SELECT subtotalCents FROM invoiceLines WHERE invoiceId = ?1",
+                    [invoice_id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let expected_drinks =
+            subtotal(&connection, sale.invoice_id) + subtotal(&connection, service.invoice_id);
+        assert!(expected_drinks > 0);
+
+        let income = |connection: &mut rusqlite::Connection, category_id: i64| -> (i64, i64) {
+            let listed = crate::commands::categories::list_categories_inner(connection, now, None)
+                .unwrap()
+                .items
+                .into_iter()
+                .find(|item| item.id == category_id)
+                .unwrap()
+                .ingresos_cents;
+            let detail =
+                crate::commands::categories::get_category_inner(connection, now, category_id)
+                    .unwrap()
+                    .ingresos_cents;
+            (listed, detail)
+        };
+        let stock_value = |connection: &mut rusqlite::Connection| -> (i64, i64) {
+            let listed = crate::commands::products::list_products_inner(
+                connection,
+                now,
+                today,
+                crate::models::product::ProductFilters::default(),
+            )
+            .unwrap()
+            .into_iter()
+            .find(|item| item.id == product_id)
+            .unwrap()
+            .valor_total_cents;
+            let detail = crate::commands::products::get_product_inner(connection, now, product_id)
+                .unwrap()
+                .product
+                .valor_total_cents;
+            (listed, detail)
+        };
+
+        // La venta cancelada no cuenta; listado y detalle coinciden.
+        assert_eq!(
+            income(&mut connection, drinks),
+            (expected_drinks, expected_drinks)
+        );
+        assert_eq!(income(&mut connection, dairy), (0, 0));
+        // Se consumieron 3 del primer lote (la cancelada devolvió sus 4):
+        // 7 × $1,00 + 5 × $2,00 = $17,00.
+        assert_eq!(stock_value(&mut connection), (1_700, 1_700));
+
+        // El producto cambia de categoría: lo vendido sigue en "Bebidas".
+        connection
+            .execute(
+                "UPDATE products SET categoryId = ?1 WHERE id = ?2",
+                (dairy, product_id),
+            )
+            .unwrap();
+        assert_eq!(
+            income(&mut connection, drinks),
+            (expected_drinks, expected_drinks)
+        );
+        assert_eq!(income(&mut connection, dairy), (0, 0));
+
+        // Una venta nueva ya cuenta para la categoría actual.
+        let later = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "1")], None),
+        )
+        .unwrap();
+        let later_subtotal = subtotal(&connection, later.invoice_id);
+        assert_eq!(
+            income(&mut connection, drinks),
+            (expected_drinks, expected_drinks)
+        );
+        assert_eq!(
+            income(&mut connection, dairy),
+            (later_subtotal, later_subtotal)
+        );
+        assert_eq!(stock_value(&mut connection), (1_600, 1_600));
+    }
+
+    #[test]
+    fn update_sale_invoice_twice_does_not_restore_consumptions_twice() {
+        // Cada edición devuelve los consumos de la anterior una sola vez:
+        // dos ediciones sin cambios dejan el stock y los consumos intactos.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "updatesaletwice",
+            "12345678990",
+            "+5355559146",
+            "12345678991",
+            "+5355559147",
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Café doble",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "2")], None),
+        )
+        .unwrap();
+        for _ in 0..2 {
+            super::update_sale_invoice_inner(
+                &mut connection,
+                now,
+                update_sale_input(
+                    sale.invoice_id,
+                    client_id,
+                    vec![update_outgoing_line(
+                        Some(product_id),
+                        Some(product_id),
+                        "2",
+                    )],
+                ),
+            )
+            .unwrap();
+        }
+        let (stock, consumed): (i64, i64) = connection
+            .query_row(
+                "SELECT p.quantityMilli,
+                    (SELECT COALESCE(SUM(c.quantityMilli), 0) FROM consumptions c
+                     JOIN invoiceLines il ON il.id = c.invoiceLineId WHERE il.invoiceId = ?2)
+                 FROM products p WHERE p.id = ?1",
+                (product_id, sale.invoice_id),
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((stock, consumed), (8_000, 2_000));
     }
 
     #[test]
@@ -8799,7 +9844,7 @@ mod tests {
         )
         .unwrap();
 
-        // 2→1 (Ajuste −1); el precio emitido (300) se conserva.
+        // 2→1 (Ajuste +1: vuelve una unidad al stock); el precio emitido (300) se conserva.
         super::update_service_invoice_inner(
             &mut connection,
             now,
@@ -8831,7 +9876,7 @@ mod tests {
             movements,
             vec![
                 ("serviceOut".to_owned(), -2_000, 300),
-                ("adjustment".to_owned(), -1_000, 300),
+                ("adjustment".to_owned(), 1_000, 300),
             ]
         );
         let line: (i64, i64) = connection
@@ -8883,7 +9928,7 @@ mod tests {
         )
         .unwrap();
 
-        // 2→1 con el mismo lote: el costo se recalcula (100) con Ajuste −1.
+        // 2→1 con el mismo lote: el costo se recalcula (100) con Ajuste +1.
         super::update_guarantee_invoice_inner(
             &mut connection,
             now,
@@ -8916,7 +9961,7 @@ mod tests {
             movements,
             vec![
                 ("warrantyOut".to_owned(), -2_000, 100),
-                ("adjustment".to_owned(), -1_000, 100),
+                ("adjustment".to_owned(), 1_000, 100),
             ]
         );
     }
@@ -8963,7 +10008,7 @@ mod tests {
         super::update_installation_invoice_inner(
             &mut connection,
             now,
-            installation_input(
+            update_installation_input(
                 installation.invoice_id,
                 client_id,
                 service.invoice_id,
@@ -8992,7 +10037,7 @@ mod tests {
             movements,
             vec![
                 ("supplyOut".to_owned(), -2_000),
-                ("adjustment".to_owned(), -1_000),
+                ("adjustment".to_owned(), 1_000),
             ]
         );
     }
@@ -11044,6 +12089,93 @@ mod tests {
     }
 
     #[test]
+    fn list_invoices_returns_product_and_quantity_only_for_losses() {
+        // FP-01/RF-087: la lista de pérdidas muestra producto y cantidad de su
+        // única línea y busca por producto; los demás tipos no los llevan.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let mut connection = setup_test_db();
+        let user_id = create_test_user(
+            &connection,
+            "lossuser",
+            "contador",
+            "+5350000031",
+            "12345678931",
+            "ValidPass1!",
+        );
+        create_test_session(&connection, user_id, false, now, now);
+        let timestamp = format_utc_timestamp(now);
+        connection
+            .execute(
+                "INSERT INTO invoices (type, number, invoiceDate, status, contactFullName,
+                    contactFullNameNormalized, contactNationalId, contactPhone, createdByUserId,
+                    createdByName, createdAt, updatedAt)
+                 VALUES ('E', 'E-00001', '2026-10-01', 'pending', 'Proveedor Uno', 'proveedor uno',
+                    '12345678901', '+5355551234', ?1, 'admin', ?2, ?2)",
+                (user_id, timestamp.clone()),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO invoices (type, number, invoiceDate, status, createdByUserId,
+                    createdByName, createdAt, updatedAt)
+                 VALUES ('P', 'P-00001', '2026-10-02', NULL, ?1, 'admin', ?2, ?2)",
+                (user_id, timestamp.clone()),
+            )
+            .unwrap();
+        for (invoice_id, product_id, name, normalized, quantity_milli) in [
+            (1, 1001, "Producto A", "producto a", 2000),
+            (2, 1002, "Cable Coaxial", "cable coaxial", 1500),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO invoiceLines (invoiceId, position, productIdOriginal, productName,
+                        productNameNormalized, quantityMilli, unitPriceCents, subtotalCents,
+                        createdAt, updatedAt)
+                     VALUES (?1, 1, ?2, ?3, ?4, ?5, 200, 300, ?6, ?6)",
+                    (
+                        invoice_id,
+                        product_id,
+                        name,
+                        normalized,
+                        quantity_milli,
+                        timestamp.clone(),
+                    ),
+                )
+                .unwrap();
+        }
+
+        let all = list_invoices_inner(&mut connection, now, InvoiceFilters::default()).unwrap();
+        let loss = all.iter().find(|item| item.number == "P-00001").unwrap();
+        assert_eq!(loss.product_name.as_deref(), Some("Cable Coaxial"));
+        assert_eq!(
+            loss.quantity.as_deref(),
+            Some(crate::models::product::format_quantity_milli(1500).as_str())
+        );
+        assert_eq!(loss.total_cents, 300);
+        let entry = all.iter().find(|item| item.number == "E-00001").unwrap();
+        assert_eq!(entry.product_name, None);
+        assert_eq!(entry.quantity, None);
+
+        let by_product = list_invoices_inner(
+            &mut connection,
+            now,
+            InvoiceFilters {
+                invoice_type: Some("P".to_owned()),
+                search: Some("coaxial".to_owned()),
+                ..InvoiceFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            by_product
+                .iter()
+                .map(|item| item.number.as_str())
+                .collect::<Vec<_>>(),
+            vec!["P-00001"]
+        );
+    }
+
+    #[test]
     fn list_invoices_returns_all_types_in_date_id_order_for_general_list() {
         // FG-01: sin filtro de tipo devuelve los seis tipos con los campos
         // que pinta la lista general y que pagina el paginador global
@@ -11083,11 +12215,12 @@ mod tests {
                     .execute(
                         "INSERT INTO invoices (type, number, invoiceDate, status, contactFullName,
                             contactFullNameNormalized, contactNationalId, contactPhone, associatedNumber,
-                            associatedType, createdByUserId, createdByName, createdAt, updatedAt)
+                            associatedType, paidAt, createdByUserId, createdByName, createdAt, updatedAt)
                          VALUES (?1, ?2, ?3, ?4, 'Proveedor Uno', 'proveedor uno', '12345678901',
                             '+5355551234',
                             CASE ?1 WHEN 'GG' THEN 'V-00001' WHEN 'GI' THEN 'S-00001' END,
                             CASE ?1 WHEN 'GG' THEN 'V' WHEN 'GI' THEN 'S' END,
+                            CASE WHEN ?4 = 'completed' THEN ?6 END,
                             ?5, 'admin', ?6, ?6)",
                         (invoice_type, number, date, status, user_id, timestamp.clone()),
                     )

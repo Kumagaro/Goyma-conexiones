@@ -78,7 +78,9 @@ export function renderDashboardSummary(summary = {}) {
 }
 
 async function openOutOfStockTab(condition) {
-  const sidebarLink = document.querySelector('#sidebar a[data-page="productos"]');
+  const sidebarLink = document.querySelector(
+    '#sidebar a[data-page="productos"]',
+  );
   if (window.showPage) {
     window.showPage("productos", sidebarLink);
   }

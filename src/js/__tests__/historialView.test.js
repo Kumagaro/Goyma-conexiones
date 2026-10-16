@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 vi.mock("../services/historyService.js", () => ({
   getProductHistory: vi.fn(),
@@ -8,11 +18,13 @@ vi.mock("../services/historyService.js", () => ({
 }));
 
 import {
+  exportHistoryExcel,
+  exportHistoryPdf,
   getProductHistory,
   listHistoryProducts,
 } from "../services/historyService.js";
 import { formatTimestamp } from "../utils/formatters.js";
-import { initHistorialView } from "../views/historialView.js";
+import { __testHooks, initHistorialView } from "../views/historialView.js";
 
 function seedHistoryPage() {
   document.body.innerHTML = `
@@ -251,5 +263,188 @@ describe("historialView", () => {
     const body = document.getElementById("historial-producto-body");
     expect(body.textContent).toContain("Ana");
     expect(body.querySelector("img")).toBeNull();
+  });
+});
+
+describe("historialView exportación (HTML de producción)", () => {
+  let productsPage = "";
+
+  const MOVEMENT = {
+    id: 1,
+    createdAt: "2026-02-10T15:30:00Z",
+    type: "entry",
+    quantity: "10",
+    stockAfter: "10",
+    unitPriceCents: 100,
+    totalPriceCents: 1000,
+    invoiceNumber: "E-00001",
+    invoiceType: "E",
+    userName: "Ana",
+    productIdOriginal: 2,
+  };
+
+  beforeAll(async () => {
+    const html = await readFile(
+      path.resolve(process.cwd(), "src", "dashboard-unificado.html"),
+      "utf8",
+    );
+    productsPage = new DOMParser()
+      .parseFromString(html, "text/html")
+      .getElementById("page-productos").outerHTML;
+  });
+
+  beforeEach(() => {
+    document.body.innerHTML = `<main>${productsPage}</main>`;
+    vi.clearAllMocks();
+    delete window.__historialPageChangeBound;
+    delete window.__historialViewHistoryBound;
+    listHistoryProducts.mockResolvedValue([...ACTIVE_PRODUCTS]);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    delete window.__TAURI__;
+  });
+
+  async function openWithProduct() {
+    await initHistorialView();
+    const select = document.getElementById("historial-producto-select");
+    select.value = "2";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() =>
+      expect(getProductHistory).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: 2 }),
+      ),
+    );
+  }
+
+  it("los botones están en .historial-toolbar y se deshabilitan sin movimientos, con title y aria-live", async () => {
+    getProductHistory.mockResolvedValue({ items: [] });
+    await openWithProduct();
+
+    const toolbar = document.querySelector(
+      "#producto-historial .historial-toolbar",
+    );
+    const status = document.getElementById("historial-exportar-estado");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    for (const id of ["historial-exportar-excel", "historial-exportar-pdf"]) {
+      const button = document.getElementById(id);
+      expect(toolbar.contains(button), id).toBe(true);
+      await vi.waitFor(() => expect(button.disabled).toBe(true));
+      expect(button.title).toBe("No hay movimientos para exportar");
+    }
+    expect(status.textContent).toBe("No hay movimientos para exportar");
+  });
+
+  it("con movimientos los botones se habilitan", async () => {
+    getProductHistory.mockResolvedValue({ items: [MOVEMENT] });
+    await openWithProduct();
+    const excel = document.getElementById("historial-exportar-excel");
+    await vi.waitFor(() => expect(excel.disabled).toBe(false));
+    expect(document.getElementById("historial-exportar-pdf").disabled).toBe(
+      false,
+    );
+    expect(excel.hasAttribute("title")).toBe(false);
+  });
+
+  it.each([
+    ["historial-exportar-excel", "xlsx", () => exportHistoryExcel],
+    ["historial-exportar-pdf", "pdf", () => exportHistoryPdf],
+  ])(
+    "%s abre el diálogo nativo y exporta con la ruta y los filtros activos",
+    async (buttonId, extension, exporterRef) => {
+      getProductHistory.mockResolvedValue({ items: [MOVEMENT] });
+      const save = vi.fn(() => Promise.resolve(`C:\\salida\\h.${extension}`));
+      window.__TAURI__ = { dialog: { save } };
+      exporterRef().mockResolvedValue({
+        exportedCount: 1,
+        expiredCleanupWarning: null,
+      });
+      await openWithProduct();
+      document.getElementById("historial-producto-desde").value = "2026-02-01";
+      const button = document.getElementById(buttonId);
+      await vi.waitFor(() => expect(button.disabled).toBe(false));
+
+      button.click();
+      await vi.waitFor(() =>
+        expect(exporterRef()).toHaveBeenCalledWith({
+          productId: 2,
+          fromDate: "2026-02-01",
+          types: [],
+          destinationPath: `C:\\salida\\h.${extension}`,
+        }),
+      );
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filters: [expect.objectContaining({ extensions: [extension] })],
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(
+          document.getElementById("historial-exportar-estado").textContent,
+        ).toBe("Historial exportado (1 movimiento)."),
+      );
+    },
+  );
+
+  it("si el usuario cancela el diálogo no se llama al comando", async () => {
+    getProductHistory.mockResolvedValue({ items: [MOVEMENT] });
+    const save = vi.fn(() => Promise.resolve(null));
+    window.__TAURI__ = { dialog: { save } };
+    await openWithProduct();
+    const button = document.getElementById("historial-exportar-excel");
+    await vi.waitFor(() => expect(button.disabled).toBe(false));
+
+    button.click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(exportHistoryExcel).not.toHaveBeenCalled();
+    expect(exportHistoryPdf).not.toHaveBeenCalled();
+  });
+
+  it("un fallo de escritura muestra el mensaje del backend", async () => {
+    getProductHistory.mockResolvedValue({ items: [MOVEMENT] });
+    window.__TAURI__ = {
+      dialog: { save: vi.fn(() => Promise.resolve("C:\\x\\h.pdf")) },
+    };
+    exportHistoryPdf.mockRejectedValue(
+      new Error("No se pudo guardar el archivo"),
+    );
+    await openWithProduct();
+    const button = document.getElementById("historial-exportar-pdf");
+    await vi.waitFor(() => expect(button.disabled).toBe(false));
+    button.click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("historial-feedback").textContent).toBe(
+        "No se pudo guardar el archivo",
+      ),
+    );
+  });
+  it("H-7: muestra el aviso de purga del historial y lo limpia con null", async () => {
+    getProductHistory.mockResolvedValue({
+      items: [MOVEMENT],
+      expiredCleanupWarning:
+        "No se pudieron limpiar 2 productos vencidos; se reintentará en la próxima operación",
+    });
+    await openWithProduct();
+    const status = () => document.getElementById("historial-cleanup-warning");
+    await vi.waitFor(() =>
+      expect(status()?.textContent).toBe(
+        "No se pudieron limpiar 2 productos vencidos; se reintentará en la próxima operación",
+      ),
+    );
+    expect(status().getAttribute("role")).toBe("status");
+    // El listado se pinta igual.
+    expect(
+      document.getElementById("historial-producto-body").textContent,
+    ).toContain("E-00001");
+
+    getProductHistory.mockResolvedValue({
+      items: [MOVEMENT],
+      expiredCleanupWarning: null,
+    });
+    await __testHooks.loadProductHistory();
+    expect(status().textContent).toBe("");
+    expect(status().hidden).toBe(true);
   });
 });

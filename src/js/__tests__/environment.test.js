@@ -50,6 +50,35 @@ describe("Vitest con jsdom", () => {
     );
   });
 
+  it("las secciones migradas de contactos y facturas no tienen manejadores inline", async () => {
+    const html = await readFile(
+      path.join(sourceRoot, "dashboard-unificado.html"),
+      "utf8",
+    );
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    for (const id of [
+      "page-clientes",
+      "page-proveedores",
+      "page-facturas-general",
+      "page-facturas-entrada",
+      "page-facturas-venta",
+      "page-facturas-servicios",
+      "page-facturas-insumos",
+      "page-facturas-garantia",
+      "page-facturas-perdidas",
+    ]) {
+      const page = doc.getElementById(id);
+      expect(page, id).not.toBeNull();
+      const inline = Array.from(page.querySelectorAll("*")).filter((el) =>
+        el.getAttributeNames().some((name) => name.startsWith("on")),
+      );
+      expect(
+        inline.map((el) => el.id || el.tagName),
+        id,
+      ).toEqual([]);
+    }
+  });
+
   it("mantiene protegidos los elementos de la spec 1 del dashboard", async () => {
     const dashboardHtml = await readFile(
       path.join(sourceRoot, "dashboard-unificado.html"),
@@ -140,9 +169,18 @@ describe("Vitest con jsdom", () => {
       (event) => dispatchedEvents.push(event),
       { once: true },
     );
+    // Las vistas (clientes, proveedores, facturas) escuchan en window.
+    const windowEvents = [];
+    document.defaultView.addEventListener(
+      "page:change",
+      (event) => windowEvents.push(event),
+      { once: true },
+    );
 
     try {
       showPage("clientes", document.getElementById("clientes-link"));
+      expect(windowEvents).toHaveLength(1);
+      expect(windowEvents[0].detail).toEqual({ pageId: "clientes" });
 
       expect(
         document.getElementById("page-clientes").classList.contains("active"),
@@ -204,13 +242,9 @@ describe("Vitest con jsdom", () => {
       ])
       .map(([, command]) => command)
       .sort();
-    // Wrappers adelantados cuyo backend llega en Fase 3 (salidas) y
-    // Fase 4 (exportación). Al registrarse, esta lista debe recortarse.
-    const pendingBackend = [
-      "export_history_excel",
-      "export_history_pdf",
-      "update_entry_invoice",
-    ].sort();
+    // Wrappers adelantados cuyo backend aún no está registrado. Con las
+    // Fases 3 y 4 terminadas no queda ninguno; si vuelve a haberlos, se listan.
+    const pendingBackend = [];
     // Comandos registrados sin wrapper dedicado todavía. Al añadir el
     // wrapper, esta lista debe recortarse.
     const pendingWrapper = ["get_product_associated_invoices"].sort();

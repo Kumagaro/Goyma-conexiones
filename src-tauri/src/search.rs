@@ -289,6 +289,8 @@ pub fn search_invoices(
                             invoice_type,
                         },
                     ),
+                    product_name: None,
+                    quantity: None,
                 },
             ));
         }

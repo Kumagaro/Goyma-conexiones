@@ -18,6 +18,9 @@ pub struct InvoiceListItem {
     pub total_cents: i64,
     pub status: Option<String>,
     pub associated_invoice: Option<AssociatedInvoice>,
+    /// Solo en pérdidas: copia del producto y cantidad de su única línea.
+    pub product_name: Option<String>,
+    pub quantity: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -327,6 +330,8 @@ mod tests {
                 number: "S-00001".to_owned(),
                 invoice_type: "S".to_owned(),
             }),
+            product_name: None,
+            quantity: None,
         };
         let value: Value = serde_json::to_value(item).unwrap();
         assert_eq!(value["invoiceType"], "V");

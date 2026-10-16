@@ -2,6 +2,7 @@ pub mod attachments;
 pub mod commands;
 pub mod db;
 pub mod errors;
+pub mod export;
 pub mod inventory;
 pub mod invoice_counter;
 pub mod invoice_snapshot;
@@ -90,10 +91,13 @@ pub fn run() {
             commands::products::delete_product,
             commands::history::get_product_history,
             commands::history::list_history_products,
+            commands::history::export_history_excel,
+            commands::history::export_history_pdf,
             commands::dashboard::get_dashboard_summary,
             commands::invoices::list_invoices,
             commands::invoices::get_invoice,
             commands::invoices::create_entry_invoice,
+            commands::invoices::update_entry_invoice,
             commands::invoices::create_sale_invoice,
             commands::invoices::create_service_invoice,
             commands::invoices::create_guarantee_invoice,

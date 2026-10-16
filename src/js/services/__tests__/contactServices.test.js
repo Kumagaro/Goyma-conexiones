@@ -39,14 +39,18 @@ describe("servicios de contactos", () => {
     await getClientDetail(7);
 
     expect(invoke).toHaveBeenNthCalledWith(1, "list_clients", undefined);
-    expect(invoke).toHaveBeenNthCalledWith(2, "search_clients", { query: "ana" });
+    expect(invoke).toHaveBeenNthCalledWith(2, "search_clients", {
+      query: "ana",
+    });
     expect(invoke).toHaveBeenNthCalledWith(3, "create_client", { input });
     expect(invoke).toHaveBeenNthCalledWith(4, "update_client", {
       clientId: 7,
       input,
     });
     expect(invoke).toHaveBeenNthCalledWith(5, "delete_client", { clientId: 7 });
-    expect(invoke).toHaveBeenNthCalledWith(6, "get_client_detail", { clientId: 7 });
+    expect(invoke).toHaveBeenNthCalledWith(6, "get_client_detail", {
+      clientId: 7,
+    });
   });
 
   it("envía los comandos de proveedores con el contrato Tauri correcto", async () => {
@@ -81,13 +85,19 @@ describe("servicios de contactos", () => {
     await getSupplierDetail(9);
 
     expect(invoke).toHaveBeenNthCalledWith(1, "list_suppliers", undefined);
-    expect(invoke).toHaveBeenNthCalledWith(2, "search_suppliers", { query: "garcia" });
+    expect(invoke).toHaveBeenNthCalledWith(2, "search_suppliers", {
+      query: "garcia",
+    });
     expect(invoke).toHaveBeenNthCalledWith(3, "create_supplier", { input });
     expect(invoke).toHaveBeenNthCalledWith(4, "update_supplier", {
       supplierId: 9,
       input,
     });
-    expect(invoke).toHaveBeenNthCalledWith(5, "delete_supplier", { supplierId: 9 });
-    expect(invoke).toHaveBeenNthCalledWith(6, "get_supplier_detail", { supplierId: 9 });
+    expect(invoke).toHaveBeenNthCalledWith(5, "delete_supplier", {
+      supplierId: 9,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(6, "get_supplier_detail", {
+      supplierId: 9,
+    });
   });
 });

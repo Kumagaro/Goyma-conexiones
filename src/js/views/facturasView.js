@@ -1,7 +1,11 @@
+import { createCombobox } from "../components/combobox.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import {
   changeInvoiceStatus,
   createEntryInvoice,
+  createGuaranteeInvoice,
+  createInstallationInvoice,
+  createLossInvoice,
   createSaleInvoice,
   createServiceInvoice,
   deleteInvoice,
@@ -10,9 +14,17 @@ import {
   listInvoices,
   saveInvoiceAttachment,
 } from "../services/invoicesService.js";
-import { searchClients } from "../services/clientsService.js";
+import { getClientDetail, searchClients } from "../services/clientsService.js";
 import { searchSuppliers } from "../services/suppliersService.js";
 import { formatDate, formatMoney } from "../utils/formatters.js";
+import {
+  ASSOCIATED_STATUS_LABELS,
+  ENTRY_STATUS_LABELS,
+  INVOICE_TYPE_LABELS,
+  SALE_STATUS_LABELS,
+  invoiceStatusLabel,
+} from "../utils/invoiceLabels.js";
+import { showCleanupWarning } from "../utils/cleanupWarning.js";
 import { debounce } from "../utils/requestGuard.js";
 
 // Estado local del submódulo de facturas de entrada.
@@ -22,18 +34,6 @@ let selectedSupplier = null;
 let entryLines = [];
 let pendingAttachmentPath = null;
 let downloadDestinationOverride = null;
-
-const ENTRY_STATUS_LABELS = {
-  pending: "Por Pagar",
-  completed: "Pagada",
-  cancelled: "Cancelada",
-};
-
-const SALE_STATUS_LABELS = {
-  pending: "Por Cobrar",
-  completed: "Cobrada",
-  cancelled: "Cancelada",
-};
 
 const PAYMENT_LABELS = {
   cash: "Efectivo",
@@ -47,6 +47,10 @@ export function initFacturasView() {
     initEntryInvoicesView(),
     initSaleInvoicesView(),
     initServiceInvoicesView(),
+    initGuaranteeInvoicesView(),
+    initInstallationInvoicesView(),
+    initLossInvoicesView(),
+    initGeneralInvoicesView(),
   ]);
 }
 
@@ -529,9 +533,11 @@ async function handleEntrySubmit() {
         );
       }
     }
-    if (result?.expiredCleanupWarning) {
-      showEntryFeedback(result.expiredCleanupWarning);
-    }
+    showCleanupWarning(
+      document.getElementById("page-facturas-entrada"),
+      "facturas-entrada-cleanup-warning",
+      result?.expiredCleanupWarning,
+    );
     pendingAttachmentPath = null;
     entryLines = [];
     renderEntryLines();
@@ -642,7 +648,12 @@ async function handleDeleteEntry(invoiceId) {
   });
   if (!confirmed) return;
   try {
-    await deleteInvoice(Number(invoiceId));
+    const deleted = await deleteInvoice(Number(invoiceId));
+    showCleanupWarning(
+      document.getElementById("page-facturas-entrada"),
+      "facturas-entrada-cleanup-warning",
+      deleted?.expiredCleanupWarning,
+    );
     if (currentEntryId === Number(invoiceId)) {
       currentEntryId = null;
       currentEntryDetail = null;
@@ -1021,9 +1032,11 @@ async function handleSaleSubmit() {
 
   try {
     const result = await createSaleInvoice(input);
-    if (result?.expiredCleanupWarning) {
-      showSaleFeedback(result.expiredCleanupWarning);
-    }
+    showCleanupWarning(
+      document.getElementById("page-facturas-venta"),
+      "facturas-venta-cleanup-warning",
+      result?.expiredCleanupWarning,
+    );
     saleLines = [];
     renderSaleLines();
     await loadSaleInvoices();
@@ -1111,7 +1124,12 @@ async function handleDeleteSale(invoiceId) {
   });
   if (!confirmed) return;
   try {
-    await deleteInvoice(Number(invoiceId));
+    const deleted = await deleteInvoice(Number(invoiceId));
+    showCleanupWarning(
+      document.getElementById("page-facturas-venta"),
+      "facturas-venta-cleanup-warning",
+      deleted?.expiredCleanupWarning,
+    );
     if (currentSaleId === Number(invoiceId)) {
       currentSaleId = null;
       currentSaleDetail = null;
@@ -1534,9 +1552,11 @@ async function handleServiceSubmit() {
 
   try {
     const result = await createServiceInvoice(input);
-    if (result?.expiredCleanupWarning) {
-      showServiceFeedback(result.expiredCleanupWarning);
-    }
+    showCleanupWarning(
+      document.getElementById("page-facturas-servicios"),
+      "facturas-servicios-cleanup-warning",
+      result?.expiredCleanupWarning,
+    );
     serviceLines = [];
     renderServiceLines();
     await loadServiceInvoices();
@@ -1630,7 +1650,12 @@ async function handleDeleteService(invoiceId) {
   });
   if (!confirmed) return;
   try {
-    await deleteInvoice(Number(invoiceId));
+    const deleted = await deleteInvoice(Number(invoiceId));
+    showCleanupWarning(
+      document.getElementById("page-facturas-servicios"),
+      "facturas-servicios-cleanup-warning",
+      deleted?.expiredCleanupWarning,
+    );
     if (currentServiceId === Number(invoiceId)) {
       currentServiceId = null;
       currentServiceDetail = null;
@@ -1659,6 +1684,1007 @@ function showServiceFeedback(message) {
     form.append(feedback);
   }
   feedback.textContent = message;
+}
+
+// ============ Submódulos: facturas de garantía y de insumos ============
+// Garantía (FS-04) e insumos (FS-05) comparten mecánica: cliente, factura
+// asociada elegida en un <select>, sin método de pago y costo real.
+
+function createAssociatedSubmodule(cfg) {
+  let currentId = null;
+  let selectedClient = null;
+  let lines = [];
+  let currentDetail = null;
+
+  const byId = (suffix) => document.getElementById(`${cfg.field}-${suffix}`);
+  const listTab = () => document.getElementById(`tab-${cfg.view}-list`);
+  const createTab = () => document.getElementById(`tab-${cfg.view}-create`);
+
+  function init() {
+    removeInlineHandlers();
+    bindPageChangeListener();
+    bindTabs();
+    bindSearch();
+    bindClientCombobox();
+    bindProductCombobox();
+    bindForm();
+    bindTableActions();
+    bindDetailActions();
+    return loadInvoices();
+  }
+
+  function removeInlineHandlers() {
+    const root = document.getElementById(cfg.pageId);
+    if (!root) return;
+    for (const attr of ["onclick", "oninput", "onchange", "onsubmit"]) {
+      root
+        .querySelectorAll(`[${attr}]`)
+        .forEach((el) => el.removeAttribute(attr));
+    }
+  }
+
+  function bindPageChangeListener() {
+    if (window[cfg.windowFlag]) return;
+    window.addEventListener("page:change", (event) => {
+      if (event.detail?.pageId !== cfg.pageKey) return;
+      void init();
+    });
+    window[cfg.windowFlag] = true;
+  }
+
+  // Marca un elemento como enlazado; devuelve false si ya lo estaba.
+  function claim(el) {
+    if (!el || el.dataset.associatedBound === "1") return false;
+    el.dataset.associatedBound = "1";
+    return true;
+  }
+
+  function bindTabs() {
+    const toList = () => showTab("list", listTab());
+    const toCreate = () => showTab("create", createTab());
+    for (const [el, handler] of [
+      [listTab(), toList],
+      [createTab(), toCreate],
+      [byId("cancelar"), toList],
+      [byId("volver"), toList],
+      [byId("editar"), toCreate],
+    ]) {
+      if (claim(el)) el.addEventListener("click", handler);
+    }
+  }
+
+  function showTab(tab, button = null) {
+    document
+      .querySelectorAll(`#${cfg.pageId} .view-tabs .tab`)
+      .forEach((tabButton) => {
+        const isActive =
+          tabButton === button || tabButton.id === `tab-${cfg.view}-${tab}`;
+        tabButton.classList.toggle("active", isActive);
+      });
+    document
+      .querySelectorAll(`#${cfg.pageId} .config-subview`)
+      .forEach((view) => {
+        view.classList.toggle("active", view.id === `${cfg.view}-${tab}`);
+      });
+    const searchBar = document.getElementById(`${cfg.view}-search-bar`);
+    if (searchBar) searchBar.style.display = tab === "list" ? "" : "none";
+  }
+
+  function bindSearch() {
+    const searchInput = document.getElementById(`${cfg.view}-search`);
+    if (!claim(searchInput)) return;
+    const debounced = debounce((query) => {
+      void loadInvoices(query);
+    }, 300);
+    searchInput.addEventListener("input", (event) => {
+      debounced(String(event.target.value ?? "").trim());
+    });
+  }
+
+  function bindClientCombobox() {
+    const input = byId("cliente");
+    if (!claim(input)) return;
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("list");
+    input.setAttribute("autocomplete", "off");
+    const debouncedLookup = debounce((query) => {
+      void searchClients(query).catch(() => {});
+    }, 300);
+    input.addEventListener("input", (event) => {
+      // Cambiar el cliente invalida la factura asociada elegida (FS-04/05).
+      void selectClient(null);
+      debouncedLookup(String(event.target.value ?? "").trim());
+    });
+    byId("cliente-add")?.addEventListener("click", () => {
+      document.dispatchEvent(new CustomEvent(cfg.openClientEvent));
+      if (typeof window.showPage === "function") {
+        window.showPage("clientes");
+      }
+    });
+  }
+
+  function resetAssociatedSelect(placeholder) {
+    const select = document.getElementById(cfg.associatedSelectId);
+    if (!select) return null;
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = placeholder;
+    select.replaceChildren(empty);
+    select.value = "";
+    return select;
+  }
+
+  // Fija el cliente y llena el selector con sus facturas asociables vigentes.
+  async function selectClient(client) {
+    selectedClient = client;
+    const clientId = client?.id ?? client?.clientId ?? null;
+    if (clientId == null) {
+      resetAssociatedSelect("Selecciona primero un cliente");
+      return;
+    }
+    const select = resetAssociatedSelect("Cargando facturas del cliente…");
+    if (!select) return;
+    try {
+      const detail = await getClientDetail(Number(clientId));
+      // Si el usuario cambió de cliente mientras cargaba, se descarta.
+      if (selectedClient !== client) return;
+      const candidates = (detail?.invoiceHistory ?? []).filter(
+        (item) =>
+          cfg.associatedTypes.includes(item?.invoiceType) &&
+          item?.status !== "cancelled",
+      );
+      resetAssociatedSelect(
+        candidates.length ? cfg.selectPlaceholder : cfg.selectEmpty,
+      );
+      for (const item of candidates) {
+        const option = document.createElement("option");
+        option.value = String(item.id);
+        option.textContent = associatedLabel(item);
+        select.append(option);
+      }
+    } catch {
+      if (selectedClient !== client) return;
+      resetAssociatedSelect("No se pudieron cargar las facturas del cliente");
+    }
+  }
+
+  function bindProductCombobox() {
+    const input = byId("buscar");
+    if (!claim(input)) return;
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("list");
+    input.setAttribute("autocomplete", "off");
+    const debouncedLookup = debounce((query) => {
+      void searchProductsForInvoice(query).catch(() => {});
+    }, 300);
+    input.addEventListener("input", (event) => {
+      debouncedLookup(String(event.target.value ?? "").trim());
+    });
+    byId("producto-add")?.addEventListener("click", () => {
+      const name = String(input.value ?? "").trim();
+      if (!name) {
+        input.focus();
+        return;
+      }
+      lines.push({ productName: name, quantity: "1" });
+      input.value = "";
+      renderLines();
+    });
+  }
+
+  function bindForm() {
+    const form = document.getElementById(`${cfg.view}-form`);
+    if (!claim(form)) return;
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void submit();
+    });
+    byId("agregar-fila")?.addEventListener("click", () => {
+      lines.push({ productName: "", quantity: "1" });
+      renderLines();
+    });
+  }
+
+  function bindTableActions() {
+    const body = document.getElementById(cfg.bodyId);
+    if (!claim(body)) return;
+    body.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-associated-action]");
+      if (!action) return;
+      const invoiceId = Number(action.dataset.associatedId);
+      if (!Number.isFinite(invoiceId)) return;
+      if (action.dataset.associatedAction === "detail") {
+        void openDetail(invoiceId);
+      } else if (action.dataset.associatedAction === "delete") {
+        void handleDelete(invoiceId);
+      }
+    });
+  }
+
+  function bindDetailActions() {
+    const exportButton = byId("exportar");
+    if (claim(exportButton)) {
+      exportButton.addEventListener("click", () => {
+        const exporter = window[cfg.exportFn];
+        if (currentDetail && typeof exporter === "function") {
+          exporter(currentDetail);
+        }
+      });
+    }
+    const deleteButton = byId("eliminar");
+    if (claim(deleteButton)) {
+      deleteButton.addEventListener("click", () => {
+        if (currentId != null) void handleDelete(currentId);
+      });
+    }
+  }
+
+  async function loadInvoices(query = "") {
+    const body = document.getElementById(cfg.bodyId);
+    if (!body) return;
+    messageRow(body, `Cargando facturas de ${cfg.noun}…`);
+    try {
+      const filters = query
+        ? { invoiceType: cfg.invoiceType, search: query }
+        : { invoiceType: cfg.invoiceType };
+      const response = await listInvoices(filters);
+      const items = Array.isArray(response)
+        ? response
+        : (response?.items ?? []);
+      renderList(
+        items.filter(
+          (item) => (item?.invoiceType ?? cfg.invoiceType) === cfg.invoiceType,
+        ),
+      );
+    } catch {
+      const message = `No se pudieron cargar las facturas de ${cfg.noun}.`;
+      messageRow(body, message);
+      showFeedback(message);
+    }
+  }
+
+  function renderList(items) {
+    const body = document.getElementById(cfg.bodyId);
+    if (!body) return;
+    if (!items.length) {
+      messageRow(body, `Aún no hay facturas de ${cfg.noun}.`);
+      return;
+    }
+    body.replaceChildren();
+    for (const item of items) {
+      const row = document.createElement("tr");
+      const cells = [
+        item?.number ?? "—",
+        item?.contactName ?? "—",
+        item?.date ? formatDate(item.date) : "—",
+        item?.associatedInvoice ? associatedLabel(item.associatedInvoice) : "—",
+        formatMoney(item?.totalCents ?? 0),
+        ASSOCIATED_STATUS_LABELS[item?.status] ?? item?.status ?? "—",
+      ].map((text) => {
+        const cell = document.createElement("td");
+        cell.textContent = text;
+        return cell;
+      });
+      const actionsCell = document.createElement("td");
+      for (const [action, label] of [
+        ["detail", "Ver"],
+        ["delete", "Eliminar"],
+      ]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.dataset.associatedAction = action;
+        button.dataset.associatedId = String(item?.id ?? "");
+        actionsCell.append(button);
+      }
+      row.append(...cells, actionsCell);
+      body.append(row);
+    }
+  }
+
+  function renderLines() {
+    const container = byId("lineas-body");
+    if (!container) return;
+    container.replaceChildren();
+    lines.forEach((line, index) => {
+      const row = document.createElement("div");
+      row.className = "li-row li-body";
+      for (const text of [
+        String(index + 1),
+        line.productName ?? line.productId ?? "",
+        line.quantity ?? "",
+      ]) {
+        const cell = document.createElement("div");
+        cell.textContent = text;
+        row.append(cell);
+      }
+      container.append(row);
+    });
+  }
+
+  async function submit() {
+    const clientId = selectedClient?.id ?? selectedClient?.clientId ?? null;
+    const associatedInvoiceId =
+      document.getElementById(cfg.associatedSelectId)?.value ?? "";
+    const invoiceDate = byId("fecha-emision")?.value ?? "";
+    const status = byId("estado")?.value ?? "pending";
+    const notes = byId("descripcion")?.value.trim() || undefined;
+
+    if (!clientId || !associatedInvoiceId || !invoiceDate || !lines.length) {
+      showFeedback(cfg.missingMessage);
+      return;
+    }
+
+    const input = {
+      clientId: Number(clientId),
+      associatedInvoiceId: Number(associatedInvoiceId),
+      invoiceDate,
+      status,
+      ...(notes ? { notes } : {}),
+      lines: lines.map((line) => ({
+        productId: Number(line.productId),
+        quantity: String(line.quantity ?? ""),
+      })),
+    };
+
+    try {
+      const result = await cfg.create(input);
+      showCleanupWarning(
+        document.getElementById(cfg.pageId),
+        `${cfg.pageKey}-cleanup-warning`,
+        result?.expiredCleanupWarning,
+      );
+      lines = [];
+      renderLines();
+      await loadInvoices();
+      showTab("list", listTab());
+    } catch (error) {
+      showFeedback(error?.message || "No se pudo guardar la factura.");
+    }
+  }
+
+  async function openDetail(invoiceId) {
+    try {
+      const detail = await getInvoice(Number(invoiceId));
+      currentId = Number(invoiceId);
+      currentDetail = detail;
+      renderDetail(detail);
+      showTab("ver", null);
+    } catch (error) {
+      showFeedback(error?.message || "No se pudo abrir la factura.");
+    }
+  }
+
+  function renderDetail(detail) {
+    const status = ASSOCIATED_STATUS_LABELS[detail?.status] ?? "—";
+    const total = formatMoney(detail?.totalCents ?? 0);
+    const set = (suffix, value) => setText(`${cfg.field}-${suffix}`, value);
+    set("ver-numero-badge", detail?.number ?? "");
+    set("ver-titulo", `${cfg.title} ${detail?.number ?? ""}`);
+    set("ver-estado-txt", status);
+    set("ver-estado-hero", status);
+    set("ver-total", total);
+    set("ver-subtotal", total);
+    set("ver-total-resumen", total);
+    set("ver-cliente", detail?.contactFullName ?? "—");
+    set("ver-numero", detail?.number ?? "");
+    set("ver-emision", detail?.date ? formatDate(detail.date) : "—");
+    setText(
+      cfg.associatedViewId,
+      detail?.associatedInvoice
+        ? associatedLabel(detail.associatedInvoice)
+        : "—",
+    );
+    set("ver-descripcion", detail?.notes ?? "—");
+
+    const productos = byId("ver-productos");
+    if (productos) {
+      productos.replaceChildren();
+      for (const [index, line] of (detail?.lines ?? []).entries()) {
+        const row = document.createElement("div");
+        row.className = "li-row li-body li-body-readonly";
+        // El precio de la línea es el costo real consumido (FS-04/05).
+        for (const text of [
+          String(index + 1),
+          line?.productName ?? "",
+          String(line?.quantity ?? ""),
+          line?.unitAbbreviation ?? line?.unitName ?? "—",
+          formatMoney(line?.unitPriceCents ?? 0),
+          formatMoney(line?.subtotalCents ?? 0),
+        ]) {
+          const cell = document.createElement("div");
+          cell.textContent = text;
+          row.append(cell);
+        }
+        productos.append(row);
+      }
+    }
+
+    // Solo las facturas Pendientes se pueden editar (FS-01).
+    const editButton = byId("editar");
+    if (editButton) editButton.hidden = detail?.status !== "pending";
+  }
+
+  async function handleDelete(invoiceId) {
+    const confirmed = await confirmDialog({
+      title: "Eliminar factura",
+      message: `¿Deseas eliminar esta factura de ${cfg.noun}?`,
+      confirmText: "Eliminar",
+    });
+    if (!confirmed) return;
+    try {
+      const deleted = await deleteInvoice(Number(invoiceId));
+      showCleanupWarning(
+        document.getElementById(cfg.pageId),
+        `${cfg.pageKey}-cleanup-warning`,
+        deleted?.expiredCleanupWarning,
+      );
+      if (currentId === Number(invoiceId)) {
+        currentId = null;
+        currentDetail = null;
+      }
+      await loadInvoices();
+      showTab("list", listTab());
+    } catch (error) {
+      showFeedback(error?.message || "No se pudo eliminar la factura.");
+    }
+  }
+
+  function showFeedback(message) {
+    const form = document.getElementById(`${cfg.view}-form`);
+    if (!form) return;
+    const feedbackId = `${cfg.view}-feedback`;
+    let feedback = document.getElementById(feedbackId);
+    if (!feedback) {
+      feedback = document.createElement("div");
+      feedback.id = feedbackId;
+      feedback.className = "form-feedback";
+      feedback.setAttribute("role", "status");
+      form.append(feedback);
+    }
+    feedback.textContent = message;
+  }
+
+  return {
+    init,
+    reload: () => loadInvoices(),
+    showTab,
+    selectClient,
+    openDetail,
+    submit,
+    setLines: (next) => {
+      lines = next;
+    },
+  };
+}
+
+function messageRow(body, text) {
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  row.append(cell);
+  body.replaceChildren(row);
+}
+
+function associatedLabel(item) {
+  const number = item?.number ?? "";
+  const type = item?.invoiceType ?? "";
+  return `${number} · ${INVOICE_TYPE_LABELS[type] ?? type}`;
+}
+
+const guaranteeSubmodule = createAssociatedSubmodule({
+  invoiceType: "GG",
+  pageId: "page-facturas-garantia",
+  pageKey: "facturas-garantia",
+  view: "factura-garantia",
+  field: "factura-garantia",
+  bodyId: "facturas-garantia-body",
+  associatedSelectId: "factura-garantia-original",
+  associatedViewId: "factura-garantia-ver-original",
+  associatedTypes: ["V", "S"],
+  selectPlaceholder: "Selecciona la factura original",
+  selectEmpty: "Este cliente no tiene ventas ni servicios vigentes",
+  missingMessage:
+    "Completa el cliente, la factura original, la fecha y al menos un producto.",
+  noun: "garantía",
+  title: "Factura de Garantía",
+  exportFn: "exportarFacturaGarantiaPDF",
+  openClientEvent: "guarantee:openClientForm",
+  windowFlag: "__facturasGuaranteePageChangeBound",
+  create: (input) => createGuaranteeInvoice(input),
+});
+
+const installationSubmodule = createAssociatedSubmodule({
+  invoiceType: "GI",
+  pageId: "page-facturas-insumos",
+  pageKey: "facturas-insumos",
+  view: "factura-insumos",
+  field: "factura-insumo",
+  bodyId: "facturas-insumos-body",
+  associatedSelectId: "factura-insumo-servicio",
+  associatedViewId: "factura-insumo-ver-asociada",
+  associatedTypes: ["S"],
+  selectPlaceholder: "Selecciona la factura de servicio",
+  selectEmpty: "Este cliente no tiene servicios vigentes",
+  missingMessage:
+    "Completa el cliente, la factura de servicio, la fecha y al menos un insumo.",
+  noun: "insumos",
+  title: "Factura de Insumos",
+  exportFn: "exportarFacturaInsumoPDF",
+  openClientEvent: "installation:openClientForm",
+  windowFlag: "__facturasInstallationPageChangeBound",
+  create: (input) => createInstallationInvoice(input),
+});
+
+export const initGuaranteeInvoicesView = guaranteeSubmodule.init;
+export const showGuaranteeTab = guaranteeSubmodule.showTab;
+export const openGuaranteeDetail = guaranteeSubmodule.openDetail;
+export const initInstallationInvoicesView = installationSubmodule.init;
+export const showInstallationTab = installationSubmodule.showTab;
+export const openInstallationDetail = installationSubmodule.openDetail;
+
+// ===================== Submódulo: facturas de pérdida =====================
+// FP-01: un solo producto, sin cliente ni estado; el costo lo calcula el
+// backend con el consumo FIFO y solo se muestra después de guardar.
+
+let lossProductCombobox = null;
+let currentLossId = null;
+let currentLossDetail = null;
+
+export function initLossInvoicesView() {
+  const root = document.getElementById("page-facturas-perdidas");
+  if (!root) return Promise.resolve();
+  for (const attr of ["onclick", "oninput", "onchange", "onsubmit"]) {
+    root
+      .querySelectorAll(`[${attr}]`)
+      .forEach((el) => el.removeAttribute(attr));
+  }
+  if (!window.__facturasLossPageChangeBound) {
+    window.addEventListener("page:change", (event) => {
+      if (event.detail?.pageId !== "facturas-perdidas") return;
+      void initLossInvoicesView();
+    });
+    window.__facturasLossPageChangeBound = true;
+  }
+  bindLossTabs();
+  bindLossSearch();
+  bindLossProductCombobox();
+  bindLossForm();
+  bindLossTableActions();
+  bindLossDetailActions();
+  return loadLossInvoices();
+}
+
+function claimLoss(el) {
+  if (!el || el.dataset.lossBound === "1") return false;
+  el.dataset.lossBound = "1";
+  return true;
+}
+
+function bindLossTabs() {
+  const listTab = () => document.getElementById("tab-factura-perdidas-list");
+  const toList = () => showLossTab("list", listTab());
+  for (const [id, handler] of [
+    ["tab-factura-perdidas-list", toList],
+    [
+      "tab-factura-perdidas-create",
+      () =>
+        showLossTab(
+          "create",
+          document.getElementById("tab-factura-perdidas-create"),
+        ),
+    ],
+    ["factura-perdida-cancelar", toList],
+    ["factura-perdida-volver", toList],
+  ]) {
+    const el = document.getElementById(id);
+    if (claimLoss(el)) el.addEventListener("click", handler);
+  }
+}
+
+export function showLossTab(tab, button = null) {
+  document
+    .querySelectorAll("#page-facturas-perdidas .view-tabs .tab")
+    .forEach((tabButton) => {
+      const isActive =
+        tabButton === button || tabButton.id === `tab-factura-perdidas-${tab}`;
+      tabButton.classList.toggle("active", isActive);
+    });
+  document
+    .querySelectorAll("#page-facturas-perdidas .config-subview")
+    .forEach((view) => {
+      view.classList.toggle("active", view.id === `factura-perdidas-${tab}`);
+    });
+  const searchBar = document.getElementById("factura-perdidas-search-bar");
+  if (searchBar) searchBar.style.display = tab === "list" ? "" : "none";
+}
+
+function bindLossSearch() {
+  const searchInput = document.getElementById("factura-perdidas-search");
+  if (!claimLoss(searchInput)) return;
+  const debounced = debounce((query) => {
+    void loadLossInvoices(query);
+  }, 300);
+  searchInput.addEventListener("input", (event) => {
+    debounced(String(event.target.value ?? "").trim());
+  });
+}
+
+// Combobox sin "Agregar nueva": no se pasa onAddNew (FE-FP-03).
+function bindLossProductCombobox() {
+  const container = document.getElementById(
+    "factura-perdida-producto-combobox",
+  );
+  if (!claimLoss(container)) return;
+  lossProductCombobox = createCombobox({
+    container,
+    id: "factura-perdida-producto",
+    placeholder: "Escribe para buscar un producto...",
+    search: searchProductsForInvoice,
+    formatOption: (item) => {
+      const unit = item?.unitAbbreviation ? ` ${item.unitAbbreviation}` : "";
+      return `${item?.name ?? ""} · stock ${item?.stock ?? "0"}${unit}`;
+    },
+  });
+  // Se conserva el id del contrato de interfaz en el input real.
+  const input = lossProductCombobox.getInput();
+  input.id = "factura-perdida-producto";
+  input.required = true;
+}
+
+function bindLossForm() {
+  const form = document.getElementById("factura-perdidas-form");
+  if (!claimLoss(form)) return;
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void handleLossSubmit();
+  });
+}
+
+function bindLossTableActions() {
+  const body = document.getElementById("facturas-perdidas-body");
+  if (!claimLoss(body)) return;
+  body.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-loss-action]");
+    if (!action) return;
+    const invoiceId = Number(action.dataset.lossId);
+    if (!Number.isFinite(invoiceId)) return;
+    if (action.dataset.lossAction === "detail") {
+      void openLossDetail(invoiceId);
+    } else if (action.dataset.lossAction === "delete") {
+      void handleDeleteLoss(invoiceId);
+    }
+  });
+}
+
+function bindLossDetailActions() {
+  const exportButton = document.getElementById("factura-perdida-exportar");
+  if (claimLoss(exportButton)) {
+    exportButton.addEventListener("click", () => {
+      if (
+        currentLossDetail &&
+        typeof window.exportarFacturaPerdidaPDF === "function"
+      ) {
+        window.exportarFacturaPerdidaPDF(currentLossDetail);
+      }
+    });
+  }
+  const deleteButton = document.getElementById("factura-perdida-eliminar");
+  if (claimLoss(deleteButton)) {
+    deleteButton.addEventListener("click", () => {
+      if (currentLossId != null) void handleDeleteLoss(currentLossId);
+    });
+  }
+}
+
+async function loadLossInvoices(query = "") {
+  const body = document.getElementById("facturas-perdidas-body");
+  if (!body) return;
+  messageRow(body, "Cargando facturas de pérdidas…");
+  try {
+    const filters = query
+      ? { invoiceType: "P", search: query }
+      : { invoiceType: "P" };
+    const response = await listInvoices(filters);
+    const items = Array.isArray(response) ? response : (response?.items ?? []);
+    renderLossList(items.filter((item) => (item?.invoiceType ?? "P") === "P"));
+  } catch {
+    messageRow(body, "No se pudieron cargar las facturas de pérdidas.");
+    showLossFeedback("No se pudieron cargar las facturas de pérdidas.");
+  }
+}
+
+function renderLossList(items) {
+  const body = document.getElementById("facturas-perdidas-body");
+  if (!body) return;
+  if (!items.length) {
+    messageRow(body, "Aún no hay facturas de pérdidas.");
+    return;
+  }
+  body.replaceChildren();
+  for (const item of items) {
+    const row = document.createElement("tr");
+    const cells = [
+      item?.number ?? "—",
+      item?.productName ?? "—",
+      item?.quantity ?? "—",
+      formatMoney(item?.totalCents ?? 0),
+      item?.date ? formatDate(item.date) : "—",
+    ].map((text) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      return cell;
+    });
+    const actionsCell = document.createElement("td");
+    for (const [action, label] of [
+      ["detail", "Ver"],
+      ["delete", "Eliminar"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.dataset.lossAction = action;
+      button.dataset.lossId = String(item?.id ?? "");
+      actionsCell.append(button);
+    }
+    row.append(...cells, actionsCell);
+    body.append(row);
+  }
+}
+
+async function handleLossSubmit() {
+  const product = lossProductCombobox?.getSelected() ?? null;
+  const quantity = String(
+    document.getElementById("factura-perdida-cantidad")?.value ?? "",
+  ).trim();
+  const invoiceDate =
+    document.getElementById("factura-perdida-fecha")?.value ?? "";
+  const notes =
+    document.getElementById("factura-perdida-descripcion")?.value.trim() ||
+    undefined;
+
+  if (!product || !quantity || !invoiceDate) {
+    showLossFeedback("Completa el producto, la cantidad y la fecha.");
+    return;
+  }
+
+  // El costo no se envía: lo calcula el backend (FP-01).
+  const input = {
+    productId: Number(product.id),
+    quantity,
+    invoiceDate,
+    ...(notes ? { notes } : {}),
+  };
+
+  try {
+    const result = await createLossInvoice(input);
+    showCleanupWarning(
+      document.getElementById("page-facturas-perdidas"),
+      "facturas-perdidas-cleanup-warning",
+      result?.expiredCleanupWarning,
+    );
+    lossProductCombobox?.setSelected(null);
+    const cantidad = document.getElementById("factura-perdida-cantidad");
+    if (cantidad) cantidad.value = "1";
+    const descripcion = document.getElementById("factura-perdida-descripcion");
+    if (descripcion) descripcion.value = "";
+    await loadLossInvoices();
+    // Tras guardar se abre el detalle, que ya trae el costo real.
+    if (result?.invoiceId != null) await openLossDetail(result.invoiceId);
+  } catch (error) {
+    showLossFeedback(error?.message || "No se pudo guardar la pérdida.");
+  }
+}
+
+export async function openLossDetail(invoiceId) {
+  try {
+    const detail = await getInvoice(Number(invoiceId));
+    currentLossId = Number(invoiceId);
+    currentLossDetail = detail;
+    renderLossDetail(detail);
+    showLossTab("ver", null);
+  } catch (error) {
+    showLossFeedback(error?.message || "No se pudo abrir la pérdida.");
+  }
+}
+
+function renderLossDetail(detail) {
+  const line = detail?.lines?.[0] ?? null;
+  const productName = line?.productName ?? "—";
+  const unit = line?.unitAbbreviation ?? line?.unitName ?? "";
+  setText("factura-perdida-ver-numero-badge", detail?.number ?? "");
+  setText(
+    "factura-perdida-ver-titulo",
+    `Factura de Pérdida ${detail?.number ?? ""}`,
+  );
+  setText("factura-perdida-ver-producto-tag", productName);
+  setText("factura-perdida-ver-producto", productName);
+  setText(
+    "factura-perdida-ver-costo-total",
+    formatMoney(detail?.totalCents ?? 0),
+  );
+  setText(
+    "factura-perdida-ver-costo",
+    line ? formatMoney(line.unitPriceCents ?? 0) : "—",
+  );
+  setText(
+    "factura-perdida-ver-cantidad",
+    line ? `${line.quantity ?? ""}${unit ? ` ${unit}` : ""}` : "—",
+  );
+  setText(
+    "factura-perdida-ver-fecha",
+    detail?.date ? formatDate(detail.date) : "—",
+  );
+  setText("factura-perdida-ver-descripcion", detail?.notes ?? "—");
+}
+
+async function handleDeleteLoss(invoiceId) {
+  const confirmed = await confirmDialog({
+    title: "Eliminar pérdida",
+    message: "¿Deseas eliminar esta factura de pérdida?",
+    confirmText: "Eliminar",
+  });
+  if (!confirmed) return;
+  try {
+    const deleted = await deleteInvoice(Number(invoiceId));
+    showCleanupWarning(
+      document.getElementById("page-facturas-perdidas"),
+      "facturas-perdidas-cleanup-warning",
+      deleted?.expiredCleanupWarning,
+    );
+    if (currentLossId === Number(invoiceId)) {
+      currentLossId = null;
+      currentLossDetail = null;
+    }
+    await loadLossInvoices();
+    showLossTab("list", document.getElementById("tab-factura-perdidas-list"));
+  } catch (error) {
+    showLossFeedback(error?.message || "No se pudo eliminar la pérdida.");
+  }
+}
+
+function showLossFeedback(message) {
+  const form = document.getElementById("factura-perdidas-form");
+  if (!form) return;
+  let feedback = document.getElementById("factura-perdidas-feedback");
+  if (!feedback) {
+    feedback = document.createElement("div");
+    feedback.id = "factura-perdidas-feedback";
+    feedback.className = "form-feedback";
+    feedback.setAttribute("role", "status");
+    form.append(feedback);
+  }
+  feedback.textContent = message;
+}
+
+// ===================== Submódulo: lista general =====================
+// FG-01: solo lectura; todos los tipos vía listInvoices sin `invoiceType`.
+
+// Página y apertura del detalle de cada tipo para el botón "Ver".
+const GENERAL_TYPE_TARGETS = {
+  E: { page: "facturas-entrada", open: (id) => openEntryDetail(id) },
+  V: { page: "facturas-venta", open: (id) => openSaleDetail(id) },
+  S: { page: "facturas-servicios", open: (id) => openServiceDetail(id) },
+  GG: { page: "facturas-garantia", open: (id) => openGuaranteeDetail(id) },
+  GI: { page: "facturas-insumos", open: (id) => openInstallationDetail(id) },
+  P: { page: "facturas-perdidas", open: (id) => openLossDetail(id) },
+};
+
+export function initGeneralInvoicesView() {
+  const search = document.getElementById("factura-general-search");
+  if (!search) return Promise.resolve();
+  if (search.dataset.generalBound !== "1") {
+    search.dataset.generalBound = "1";
+    const debounced = debounce(() => void loadGeneralInvoices(), 300);
+    search.addEventListener("input", debounced);
+    for (const id of ["factura-general-tipo", "factura-general-estado"]) {
+      document
+        .getElementById(id)
+        ?.addEventListener("change", () => void loadGeneralInvoices());
+    }
+    document
+      .getElementById("facturas-general-body")
+      ?.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-general-type]");
+        if (!button) return;
+        void irAFacturaDesdeGeneral(
+          button.dataset.generalType,
+          Number(button.dataset.generalId),
+        );
+      });
+  }
+  if (!window.__facturasGeneralPageChangeBound) {
+    window.addEventListener("page:change", (event) => {
+      if (event.detail?.pageId !== "facturas-general") return;
+      void loadGeneralInvoices();
+    });
+    window.__facturasGeneralPageChangeBound = true;
+  }
+  return loadGeneralInvoices();
+}
+
+async function loadGeneralInvoices() {
+  const body = document.getElementById("facturas-general-body");
+  if (!body) return;
+  const value = (id) => String(document.getElementById(id)?.value ?? "").trim();
+  const filters = {};
+  if (value("factura-general-search"))
+    filters.search = value("factura-general-search");
+  if (value("factura-general-tipo"))
+    filters.invoiceType = value("factura-general-tipo");
+  if (value("factura-general-estado"))
+    filters.status = value("factura-general-estado");
+  messageRow(body, "Cargando facturas…");
+  try {
+    const response = await listInvoices(filters);
+    renderFacturasGeneral(
+      Array.isArray(response) ? response : (response?.items ?? []),
+    );
+  } catch {
+    messageRow(body, "No se pudieron cargar las facturas.");
+  }
+}
+
+export function renderFacturasGeneral(items) {
+  const body = document.getElementById("facturas-general-body");
+  if (!body) return;
+  if (!items.length) {
+    const filtered = [
+      "factura-general-search",
+      "factura-general-tipo",
+      "factura-general-estado",
+    ].some((id) => document.getElementById(id)?.value);
+    messageRow(
+      body,
+      filtered
+        ? "No se encontraron facturas que coincidan con los filtros."
+        : "Aún no hay facturas.",
+    );
+    return;
+  }
+  body.replaceChildren();
+  for (const item of items) {
+    const type = item?.invoiceType ?? "";
+    const row = document.createElement("tr");
+    const cells = [
+      item?.number ?? "—",
+      INVOICE_TYPE_LABELS[type] ?? type,
+      type === "P" ? "—" : (item?.contactName ?? "—"),
+      item?.date ? formatDate(item.date) : "—",
+      formatMoney(item?.totalCents ?? 0),
+      invoiceStatusLabel(type, item?.status),
+    ].map((text) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      return cell;
+    });
+    const actionsCell = document.createElement("td");
+    const viewButton = document.createElement("button");
+    viewButton.type = "button";
+    viewButton.textContent = "Ver";
+    viewButton.dataset.generalType = type;
+    viewButton.dataset.generalId = String(item?.id ?? "");
+    actionsCell.append(viewButton);
+    row.append(...cells, actionsCell);
+    body.append(row);
+  }
+}
+
+// Abre la página del tipo y su detalle; desde aquí no se crea, edita ni elimina.
+export async function irAFacturaDesdeGeneral(type, invoiceId) {
+  const target = GENERAL_TYPE_TARGETS[type];
+  if (!target || !Number.isFinite(invoiceId)) return;
+  if (typeof window.showPage === "function") {
+    window.showPage(
+      target.page,
+      document.querySelector(`#sidebar a[onclick*="'${target.page}'"]`),
+    );
+  }
+  await target.open(invoiceId);
 }
 
 function showEntryFeedback(message) {
@@ -1699,6 +2725,35 @@ window.guardarFacturaServicio = (event) => {
 window.verFactura = (id) => void openEntryDetail(id);
 window.verFacturaVenta = (id) => void openSaleDetail(id);
 window.verFacturaServicio = (id) => void openServiceDetail(id);
+window.showFacturaGarantiaTab = showGuaranteeTab;
+window.guardarFacturaGarantia = (event) => {
+  if (event) event.preventDefault();
+  void guaranteeSubmodule.submit();
+};
+window.verFacturaGarantia = (id) => void openGuaranteeDetail(id);
+window.showFacturaInsumosTab = showInstallationTab;
+window.guardarFacturaInsumo = (event) => {
+  if (event) event.preventDefault();
+  void installationSubmodule.submit();
+};
+window.verFacturaInsumo = (id) => void openInstallationDetail(id);
+window.showFacturaPerdidasTab = showLossTab;
+window.guardarFacturaPerdida = (event) => {
+  if (event) event.preventDefault();
+  void handleLossSubmit();
+};
+window.verFacturaPerdida = (id) => void openLossDetail(id);
+window.renderFacturasGeneral = () => void loadGeneralInvoices();
+// Los listados con los nombres globales antiguos (tarea 4.5.7): mismas vistas
+// con textContent que sustituyen a las de dashboard.js.
+window.renderFacturasEntrada = () => void loadEntryInvoices();
+window.renderFacturasVenta = () => void loadSaleInvoices();
+window.renderFacturasServicios = () => void loadServiceInvoices();
+window.renderFacturasGarantia = () => void guaranteeSubmodule.reload();
+window.renderFacturasInsumos = () => void installationSubmodule.reload();
+window.renderFacturasPerdidas = () => void loadLossInvoices();
+window.irAFacturaDesdeGeneral = (type, id) =>
+  void irAFacturaDesdeGeneral(type, Number(id));
 
 export const __testHooks = {
   setSelectedSupplier: (supplier) => {
@@ -1728,6 +2783,14 @@ export const __testHooks = {
     serviceLines = lines;
   },
   openServiceDetail,
+  selectGuaranteeClient: guaranteeSubmodule.selectClient,
+  setGuaranteeLines: guaranteeSubmodule.setLines,
+  openGuaranteeDetail,
+  selectInstallationClient: installationSubmodule.selectClient,
+  setInstallationLines: installationSubmodule.setLines,
+  openInstallationDetail,
+  openLossDetail,
+  getLossCombobox: () => lossProductCombobox,
 };
 
 if (document.readyState === "loading") {
@@ -1741,6 +2804,18 @@ if (document.readyState === "loading") {
     if (document.getElementById("page-facturas-servicios")) {
       void initServiceInvoicesView();
     }
+    if (document.getElementById("page-facturas-garantia")) {
+      void initGuaranteeInvoicesView();
+    }
+    if (document.getElementById("page-facturas-insumos")) {
+      void initInstallationInvoicesView();
+    }
+    if (document.getElementById("page-facturas-perdidas")) {
+      void initLossInvoicesView();
+    }
+    if (document.getElementById("page-facturas-general")) {
+      void initGeneralInvoicesView();
+    }
   });
 } else {
   if (document.getElementById("page-facturas-entrada")) {
@@ -1751,5 +2826,17 @@ if (document.readyState === "loading") {
   }
   if (document.getElementById("page-facturas-servicios")) {
     void initServiceInvoicesView();
+  }
+  if (document.getElementById("page-facturas-garantia")) {
+    void initGuaranteeInvoicesView();
+  }
+  if (document.getElementById("page-facturas-insumos")) {
+    void initInstallationInvoicesView();
+  }
+  if (document.getElementById("page-facturas-perdidas")) {
+    void initLossInvoicesView();
+  }
+  if (document.getElementById("page-facturas-general")) {
+    void initGeneralInvoicesView();
   }
 }

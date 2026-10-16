@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("sesión del dashboard", () => {
   afterEach(() => {
+    // Con isolate:false los temporizadores falsos pasarían a otros archivos.
+    vi.useRealTimers();
     delete window.__TAURI__;
     vi.resetModules();
   });

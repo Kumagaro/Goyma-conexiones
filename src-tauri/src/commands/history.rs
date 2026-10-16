@@ -6,9 +6,14 @@ use crate::commands::auth::require_session;
 use crate::commands::products::purge_best_effort;
 use crate::db::connection::{current_app_data_dir, lock_conn};
 use crate::errors::{log_error, map_db_error, AppError};
+use crate::export::{
+    export_history_pdf as write_history_pdf, export_history_xlsx as write_history_xlsx,
+    HistoryHeader,
+};
 use crate::models::product::format_quantity_milli;
 use crate::models::product_movement::{
-    ProductHistoryFilters, ProductHistoryItem, ProductHistoryList, ProductHistoryOption,
+    ExportHistoryInput, ExportHistoryResult, ProductHistoryFilters, ProductHistoryItem,
+    ProductHistoryList, ProductHistoryOption,
 };
 use crate::text::{sort_spanish, spanish_sort_key};
 
@@ -295,6 +300,130 @@ pub fn get_product_history(
     result
 }
 
+#[derive(Clone, Copy)]
+enum ExportFormat {
+    Xlsx,
+    Pdf,
+}
+
+/// Exporta todos los movimientos que cumplen los filtros (no solo la página
+/// visible), en el orden de la pantalla. `get_product_history_inner` exige la
+/// sesión y purga best-effort antes de leer.
+fn export_history_inner(
+    connection: &Connection,
+    now: DateTime<Utc>,
+    input: ExportHistoryInput,
+    format: ExportFormat,
+) -> Result<ExportHistoryResult, AppError> {
+    let destination = input.destination_path.trim().to_owned();
+    if destination.is_empty() {
+        return Err(AppError::new(
+            "validationFailed",
+            "Elige dónde guardar el archivo",
+            "history export without destination",
+        ));
+    }
+    let list = get_product_history_inner(
+        connection,
+        now,
+        ProductHistoryFilters {
+            product_id: input.product_id,
+            from_date: input.from_date.clone(),
+            to_date: input.to_date.clone(),
+            types: input.types.clone(),
+        },
+    )?;
+    if list.items.is_empty() {
+        return Err(AppError::new(
+            "invalidState",
+            "No hay movimientos para exportar",
+            "history export with no movements",
+        ));
+    }
+    // El nombre vigente del producto o, si se eliminó, la copia del historial.
+    let product_name: String = connection
+        .query_row(
+            "SELECT COALESCE(
+                (SELECT name FROM products WHERE id = ?1),
+                (SELECT productName FROM productMovements
+                 WHERE productIdOriginal = ?1 ORDER BY id DESC LIMIT 1))",
+            [input.product_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| map_db_error(error, "exportHistory", &[]))?;
+    let header = HistoryHeader {
+        product_name,
+        from_date: input.from_date,
+        to_date: input.to_date,
+        types: input.types,
+        generated_at: now,
+    };
+    let path = std::path::Path::new(&destination);
+    match format {
+        ExportFormat::Xlsx => write_history_xlsx(&list.items, &header, path)?,
+        ExportFormat::Pdf => write_history_pdf(&list.items, &header, path)?,
+    }
+    Ok(ExportHistoryResult {
+        exported_count: list.items.len(),
+        expired_cleanup_warning: list.expired_cleanup_warning,
+    })
+}
+
+pub fn export_history_excel_inner(
+    connection: &Connection,
+    now: DateTime<Utc>,
+    input: ExportHistoryInput,
+) -> Result<ExportHistoryResult, AppError> {
+    export_history_inner(connection, now, input, ExportFormat::Xlsx)
+}
+
+pub fn export_history_pdf_inner(
+    connection: &Connection,
+    now: DateTime<Utc>,
+    input: ExportHistoryInput,
+) -> Result<ExportHistoryResult, AppError> {
+    export_history_inner(connection, now, input, ExportFormat::Pdf)
+}
+
+fn log_export_error(
+    connection: &Connection,
+    operation: &str,
+    now: DateTime<Utc>,
+    result: &Result<ExportHistoryResult, AppError>,
+) {
+    if let Err(error) = result {
+        if error.should_log() {
+            if let Some(app_data_dir) = current_app_data_dir() {
+                log_error(connection, "history", operation, error, now, app_data_dir);
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn export_history_excel(
+    state: State<'_, std::sync::Mutex<Connection>>,
+    input: ExportHistoryInput,
+) -> Result<ExportHistoryResult, AppError> {
+    let connection = lock_conn(&state);
+    let now = Utc::now();
+    let result = export_history_excel_inner(&connection, now, input);
+    log_export_error(&connection, "exportHistoryExcel", now, &result);
+    result
+}
+
+#[tauri::command]
+pub fn export_history_pdf(
+    state: State<'_, std::sync::Mutex<Connection>>,
+    input: ExportHistoryInput,
+) -> Result<ExportHistoryResult, AppError> {
+    let connection = lock_conn(&state);
+    let now = Utc::now();
+    let result = export_history_pdf_inner(&connection, now, input);
+    log_export_error(&connection, "exportHistoryPdf", now, &result);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use crate::commands::auth::require_session;
@@ -303,6 +432,194 @@ mod tests {
 
     use super::*;
     use crate::models::product_movement::ProductHistoryFilters;
+
+    /// Producto con tres movimientos (Inicial, Entrada y Salida Venta).
+    fn export_fixture(username: &str, phone: &str, national_id: &str) -> (Connection, i64) {
+        let connection = setup_test_db();
+        let now = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        let user_id = create_test_user(
+            &connection,
+            username,
+            "contador",
+            phone,
+            national_id,
+            "ValidPass1!",
+        );
+        create_test_session(&connection, user_id, false, now, now);
+        let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        connection
+            .execute(
+                "INSERT INTO products (name, nameNormalized, description, categoryId, unitId, costCents, profitPercentHundredths, expiresOn, quantityMilli, status, discontinuedAt, createdAt, updatedAt) VALUES ('Cable Ñandú', 'cable nandu', NULL, NULL, NULL, 1000, 2500, NULL, 0, 'active', NULL, ?1, ?1)",
+                [&timestamp],
+            )
+            .unwrap();
+        let product_id = connection.last_insert_rowid();
+        for (movement_type, quantity, invoice, invoice_type) in [
+            ("initial", 1000, None, None),
+            ("entry", 3000, Some("E-00001"), Some("E")),
+            ("saleOut", -2000, Some("V-00001"), Some("V")),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO productMovements (createdAt, productId, productIdOriginal, productName, type, quantityMilli, stockAfterMilli, unitPriceCents, totalPriceCents, invoiceId, invoiceNumber, invoiceType, userId, userName) VALUES (?1, ?2, ?2, 'Cable Ñandú', ?3, ?4, 2000, 1250, 2500, NULL, ?5, ?8, ?6, ?7)",
+                    rusqlite::params![
+                        timestamp,
+                        product_id,
+                        movement_type,
+                        quantity,
+                        invoice,
+                        user_id,
+                        username,
+                        invoice_type
+                    ],
+                )
+                .unwrap();
+        }
+        (connection, product_id)
+    }
+
+    fn export_input(
+        product_id: i64,
+        types: &[&str],
+        destination: &std::path::Path,
+    ) -> ExportHistoryInput {
+        ExportHistoryInput {
+            product_id,
+            from_date: None,
+            to_date: None,
+            types: types.iter().map(|value| (*value).to_owned()).collect(),
+            destination_path: destination.to_string_lossy().into_owned(),
+        }
+    }
+
+    fn temp_export_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("goyma-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    #[test]
+    fn export_history_excel_inner_writes_only_the_filtered_movements() {
+        use std::io::Read;
+        let (connection, product_id) = export_fixture("exportxlsx", "+5350000140", "12345678940");
+        let now = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        let path = temp_export_path("historial.xlsx");
+
+        let result = export_history_excel_inner(
+            &connection,
+            now,
+            export_input(product_id, &["entry", "saleOut"], &path),
+        )
+        .unwrap();
+        assert_eq!(result.exported_count, 2);
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!bytes.is_empty());
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut sheet = String::new();
+        archive
+            .by_name("xl/worksheets/sheet1.xml")
+            .unwrap()
+            .read_to_string(&mut sheet)
+            .unwrap();
+        assert!(sheet.contains("Cable Ñandú"));
+        assert!(sheet.contains("Entrada, Salida Venta"));
+        assert!(sheet.contains("E-00001") && sheet.contains("V-00001"));
+        // El movimiento Inicial no pasa el filtro de tipos.
+        assert!(!sheet.contains(">Inicial<"));
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn export_history_pdf_inner_writes_a_pdf_with_the_movements() {
+        let (connection, product_id) = export_fixture("exportpdf", "+5350000141", "12345678941");
+        let now = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        let path = temp_export_path("historial.pdf");
+
+        let result =
+            export_history_pdf_inner(&connection, now, export_input(product_id, &[], &path))
+                .unwrap();
+        assert_eq!(result.exported_count, 3);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+        assert!(printpdf::lopdf::Document::load_mem(&bytes).is_ok());
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn export_history_without_movements_after_filters_is_invalid_state() {
+        let (connection, product_id) = export_fixture("exportempty", "+5350000142", "12345678942");
+        let now = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        let path = temp_export_path("vacio.xlsx");
+        for result in [
+            export_history_excel_inner(
+                &connection,
+                now,
+                export_input(product_id, &["loss"], &path),
+            ),
+            export_history_pdf_inner(&connection, now, export_input(product_id, &["loss"], &path)),
+        ] {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, "invalidState");
+            assert_eq!(error.message, "No hay movimientos para exportar");
+        }
+        // No se crea ningún archivo.
+        assert!(!path.exists());
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn export_history_write_failure_is_internal_with_a_clear_message() {
+        let (connection, product_id) = export_fixture("exportfail", "+5350000143", "12345678943");
+        let now = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        // El directorio de destino no existe: la escritura falla.
+        let path = std::env::temp_dir()
+            .join(format!("goyma-no-existe-{}", uuid::Uuid::new_v4()))
+            .join("historial.xlsx");
+        for result in [
+            export_history_excel_inner(&connection, now, export_input(product_id, &[], &path)),
+            export_history_pdf_inner(&connection, now, export_input(product_id, &[], &path)),
+        ] {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, "internal");
+            assert_eq!(error.message, "No se pudo guardar el archivo");
+            assert!(error.should_log());
+        }
+    }
+
+    #[test]
+    fn export_history_requires_a_destination() {
+        let (connection, product_id) = export_fixture("exportnodest", "+5350000144", "12345678944");
+        let now = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        let mut input = export_input(product_id, &[], std::path::Path::new(""));
+        input.destination_path = "   ".to_owned();
+        let error = export_history_excel_inner(&connection, now, input).unwrap_err();
+        assert_eq!(error.code, "validationFailed");
+    }
+
+    #[test]
+    fn export_history_commands_require_session_and_allow_both_roles() {
+        use crate::test_utils::{assert_allows_both_roles, assert_requires_session};
+        let input = || ExportHistoryInput {
+            product_id: 999,
+            from_date: None,
+            to_date: None,
+            types: vec![],
+            destination_path: "historial.xlsx".to_owned(),
+        };
+        assert_requires_session(|connection, now| {
+            export_history_excel_inner(connection, now, input())
+        });
+        assert_allows_both_roles(|connection, now| {
+            export_history_excel_inner(connection, now, input())
+        });
+        assert_requires_session(|connection, now| {
+            export_history_pdf_inner(connection, now, input())
+        });
+        assert_allows_both_roles(|connection, now| {
+            export_history_pdf_inner(connection, now, input())
+        });
+    }
 
     #[test]
     fn get_product_history_returns_items_in_reverse_chronological_order() {

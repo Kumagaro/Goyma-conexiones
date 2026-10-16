@@ -1,4 +1,6 @@
 import { confirmDialog } from "../components/confirmDialog.js";
+import { renderInvoiceHistory } from "../components/invoiceHistory.js";
+import { showCleanupWarning } from "../utils/cleanupWarning.js";
 import {
   createClient,
   deleteClient,
@@ -43,7 +45,9 @@ function removeLegacyInlineHandlers() {
 }
 
 function removeLegacyDateField() {
-  const field = document.getElementById("cliente-fecha-entrada")?.closest(".field");
+  const field = document
+    .getElementById("cliente-fecha-entrada")
+    ?.closest(".field");
   if (field) field.remove();
 }
 
@@ -63,9 +67,11 @@ function bindTabButtons() {
     showClienteTab("list", document.getElementById("tab-cliente-list"));
   });
 
-  document.getElementById("tab-cliente-create")?.addEventListener("click", () => {
-    showClienteTab("create", document.getElementById("tab-cliente-create"));
-  });
+  document
+    .getElementById("tab-cliente-create")
+    ?.addEventListener("click", () => {
+      showClienteTab("create", document.getElementById("tab-cliente-create"));
+    });
 }
 
 function bindSearch() {
@@ -139,7 +145,8 @@ function bindDetailActions() {
 function showClienteTab(tab, button = null) {
   const tabs = document.querySelectorAll("#page-clientes .view-tabs .tab");
   tabs.forEach((tabButton) => {
-    const isActive = tabButton === button || tabButton.id === `tab-cliente-${tab}`;
+    const isActive =
+      tabButton === button || tabButton.id === `tab-cliente-${tab}`;
     tabButton.classList.toggle("active", isActive);
   });
 
@@ -168,13 +175,12 @@ async function loadClients(query = "") {
   const body = document.getElementById("clientes-body");
   if (!body) return;
 
-  body.innerHTML = '<tr><td colspan="5" class="empty-row">Cargando clientes…</td></tr>';
+  body.innerHTML =
+    '<tr><td colspan="5" class="empty-row">Cargando clientes…</td></tr>';
 
   try {
-    const response = query
-      ? await searchClients(query)
-      : await listClients();
-    const items = Array.isArray(response) ? response : response?.items ?? [];
+    const response = query ? await searchClients(query) : await listClients();
+    const items = Array.isArray(response) ? response : (response?.items ?? []);
     clients = items;
     renderClientList(items);
   } catch (error) {
@@ -229,10 +235,16 @@ async function handleClientSubmit() {
     company: document.getElementById("cliente-empresa")?.value.trim() ?? "",
     position: document.getElementById("cliente-cargo")?.value.trim() ?? "",
     address: document.getElementById("cliente-direccion")?.value.trim() ?? "",
-    invoiceInfo: document.getElementById("cliente-info-factura")?.value.trim() ?? "",
+    invoiceInfo:
+      document.getElementById("cliente-info-factura")?.value.trim() ?? "",
   };
 
-  if (!payload.firstName || !payload.lastName || !payload.nationalId || !payload.phone) {
+  if (
+    !payload.firstName ||
+    !payload.lastName ||
+    !payload.nationalId ||
+    !payload.phone
+  ) {
     showClientFeedback("Completa los campos obligatorios del cliente.");
     return;
   }
@@ -259,9 +271,9 @@ function resetClientForm() {
   editingClientId = null;
   const form = document.getElementById("cliente-form");
   if (form) form.reset();
-  document.getElementById("cliente-form-title")?.replaceChildren(
-    document.createTextNode("Datos de Cliente"),
-  );
+  document
+    .getElementById("cliente-form-title")
+    ?.replaceChildren(document.createTextNode("Datos de Cliente"));
 }
 
 function openClientForm(clientId) {
@@ -270,17 +282,23 @@ function openClientForm(clientId) {
 
   editingClientId = Number(clientId);
   const formTitle = document.getElementById("cliente-form-title");
-  if (formTitle) formTitle.textContent = `Editar cliente: ${client.fullName ?? ""}`;
+  if (formTitle)
+    formTitle.textContent = `Editar cliente: ${client.fullName ?? ""}`;
 
-  document.getElementById("cliente-nombres").value = client.firstName ?? client.fullName?.split(" ")[0] ?? "";
-  document.getElementById("cliente-apellidos").value = client.lastName ?? client.fullName?.replace(client.firstName ?? "", "").trim() ?? "";
+  document.getElementById("cliente-nombres").value =
+    client.firstName ?? client.fullName?.split(" ")[0] ?? "";
+  document.getElementById("cliente-apellidos").value =
+    client.lastName ??
+    client.fullName?.replace(client.firstName ?? "", "").trim() ??
+    "";
   document.getElementById("cliente-ci").value = client.nationalId ?? "";
   document.getElementById("cliente-telefono").value = client.phone ?? "";
   document.getElementById("cliente-correo").value = client.email ?? "";
   document.getElementById("cliente-empresa").value = client.company ?? "";
   document.getElementById("cliente-cargo").value = client.position ?? "";
   document.getElementById("cliente-direccion").value = client.address ?? "";
-  document.getElementById("cliente-info-factura").value = client.invoiceInfo ?? "";
+  document.getElementById("cliente-info-factura").value =
+    client.invoiceInfo ?? "";
 
   showClienteTab("create", document.getElementById("tab-cliente-create"));
 }
@@ -292,59 +310,72 @@ async function openClientDetail(clientId) {
     renderClientDetail(detail);
     showClienteTab("ver", null);
   } catch (error) {
-    showClientFeedback(error?.message || "No se pudo abrir el detalle del cliente.");
+    showClientFeedback(
+      error?.message || "No se pudo abrir el detalle del cliente.",
+    );
   }
 }
 
 function renderClientDetail(detail) {
-  const fullName = [detail?.firstName, detail?.lastName].filter(Boolean).join(" ") || detail?.fullName || "Cliente";
+  const fullName =
+    [detail?.firstName, detail?.lastName].filter(Boolean).join(" ") ||
+    detail?.fullName ||
+    "Cliente";
   const indicators = detail?.indicators ?? {};
 
-  document.getElementById("cliente-ver-id").textContent = formatId(detail?.id ?? "");
+  document.getElementById("cliente-ver-id").textContent = formatId(
+    detail?.id ?? "",
+  );
   document.getElementById("cliente-ver-nombre-completo").textContent = fullName;
-  document.getElementById("cliente-ver-empresa").textContent = detail?.company || "Sin empresa";
-  document.getElementById("cliente-ver-cargo").textContent = detail?.position || "Sin cargo";
-  document.getElementById("cliente-ver-telefono").textContent = detail?.phone || "—";
-  document.getElementById("cliente-ver-correo").textContent = detail?.email || "—";
-  document.getElementById("cliente-ver-ci").textContent = detail?.nationalId || "—";
-  document.getElementById("cliente-ver-direccion").textContent = detail?.address || "—";
-  document.getElementById("cliente-ver-fecha-entrada").textContent = detail?.createdAt ? formatDate(detail.createdAt) : "—";
-  document.getElementById("cliente-ver-info-factura-nota").textContent = detail?.invoiceInfo || "Sin información adicional de factura.";
-  document.getElementById("cliente-ver-total-facturado").textContent = formatMoney(indicators.totalInvoicedCents ?? 0).replace(" USD", "");
-  document.getElementById("cliente-ver-saldo-pendiente").textContent = formatMoney(indicators.pendingBalanceCents ?? 0).replace(" USD", "");
-  document.getElementById("cliente-ver-num-facturas").textContent = String(indicators.invoiceCount ?? 0);
-  document.getElementById("cliente-ver-ultima-compra").textContent = indicators.lastPurchaseDate ? formatDate(indicators.lastPurchaseDate) : "—";
+  document.getElementById("cliente-ver-empresa").textContent =
+    detail?.company || "Sin empresa";
+  document.getElementById("cliente-ver-cargo").textContent =
+    detail?.position || "Sin cargo";
+  document.getElementById("cliente-ver-telefono").textContent =
+    detail?.phone || "—";
+  document.getElementById("cliente-ver-correo").textContent =
+    detail?.email || "—";
+  document.getElementById("cliente-ver-ci").textContent =
+    detail?.nationalId || "—";
+  document.getElementById("cliente-ver-direccion").textContent =
+    detail?.address || "—";
+  document.getElementById("cliente-ver-fecha-entrada").textContent =
+    detail?.createdAt ? formatDate(detail.createdAt) : "—";
+  document.getElementById("cliente-ver-info-factura-nota").textContent =
+    detail?.invoiceInfo || "Sin información adicional de factura.";
+  document.getElementById("cliente-ver-total-facturado").textContent =
+    formatMoney(indicators.totalInvoicedCents ?? 0).replace(" USD", "");
+  document.getElementById("cliente-ver-saldo-pendiente").textContent =
+    formatMoney(indicators.pendingBalanceCents ?? 0).replace(" USD", "");
+  document.getElementById("cliente-ver-num-facturas").textContent = String(
+    indicators.invoiceCount ?? 0,
+  );
+  document.getElementById("cliente-ver-ultima-compra").textContent =
+    indicators.lastPurchaseDate ? formatDate(indicators.lastPurchaseDate) : "—";
 
-  const history = Array.isArray(detail?.invoiceHistory) ? detail.invoiceHistory : [];
-  const historyContainer = document.getElementById("cliente-ver-historial-facturas");
-  if (!history.length) {
-    historyContainer.innerHTML = '<span class="pv-empty-note">Este cliente aún no tiene facturas registradas.</span>';
-  } else {
-    historyContainer.innerHTML = history
-      .map(
-        (invoice) => `
-          <div class="pv-invoice-item">
-            <span>${escapeHtml(invoice.number || "Factura")}</span>
-            <span>${escapeHtml(invoice.type || "")}</span>
-          </div>
-        `,
-      )
-      .join("");
-  }
+  renderInvoiceHistory(
+    document.getElementById("cliente-ver-historial-facturas"),
+    detail?.invoiceHistory,
+    "Este cliente aún no tiene facturas registradas.",
+  );
 
-  const companyTag = document.getElementById("cliente-ver-empresa").closest(".kpi-tag");
-  if (companyTag) companyTag.style.display = detail?.company ? "inline-flex" : "none";
+  const companyTag = document
+    .getElementById("cliente-ver-empresa")
+    .closest(".kpi-tag");
+  if (companyTag)
+    companyTag.style.display = detail?.company ? "inline-flex" : "none";
 
-  const cargoTag = document.getElementById("cliente-ver-cargo").closest(".kpi-tag");
-  if (cargoTag) cargoTag.style.display = detail?.position ? "inline-flex" : "none";
+  const cargoTag = document
+    .getElementById("cliente-ver-cargo")
+    .closest(".kpi-tag");
+  if (cargoTag)
+    cargoTag.style.display = detail?.position ? "inline-flex" : "none";
 
-  if (detail?.expiredCleanupWarning) {
-    const warning = document.getElementById("cliente-ver-warning");
-    if (warning) {
-      warning.textContent = detail.expiredCleanupWarning;
-      warning.hidden = false;
-    }
-  }
+  showCleanupWarning(
+    document.getElementById("cliente-ver"),
+    "cliente-ver-warning",
+    detail?.expiredCleanupWarning,
+  );
 }
 
 async function handleDeleteClient(clientId) {
@@ -354,9 +385,10 @@ async function handleDeleteClient(clientId) {
   const invoiceCount = Number(client.invoiceCount ?? 0);
   const confirmed = await confirmDialog({
     title: "Eliminar cliente",
-    message: invoiceCount > 0
-      ? `Se conservarán ${invoiceCount} facturas asociadas a ${client.fullName ?? "este cliente"}.\n¿Deseas continuar?`
-      : `¿Deseas eliminar a ${client.fullName ?? "este cliente"}?`,
+    message:
+      invoiceCount > 0
+        ? `Se conservarán ${invoiceCount} facturas asociadas a ${client.fullName ?? "este cliente"}.\n¿Deseas continuar?`
+        : `¿Deseas eliminar a ${client.fullName ?? "este cliente"}?`,
     confirmText: "Eliminar",
   });
 
@@ -364,7 +396,8 @@ async function handleDeleteClient(clientId) {
 
   try {
     await deleteClient(clientId);
-    const detailId = currentClientId === Number(clientId) ? null : currentClientId;
+    const detailId =
+      currentClientId === Number(clientId) ? null : currentClientId;
     currentClientId = detailId;
     await loadClients();
     showClienteTab("list", document.getElementById("tab-cliente-list"));

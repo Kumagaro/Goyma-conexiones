@@ -480,6 +480,20 @@ pub fn get_product_associated_invoices_inner(
     limit: Option<usize>,
 ) -> Result<Vec<ProductAssociatedInvoice>, AppError> {
     let _actor = crate::commands::auth::require_session(connection, now)?;
+    // Purga best-effort (spec-03 §7.6). La respuesta es una lista sin campo de
+    // aviso, así que un fallo solo se registra (purge_best_effort ya lo hace).
+    if let Err(error) = purge_best_effort(connection, now) {
+        if let Some(app_data_dir) = current_app_data_dir() {
+            log_error(
+                connection,
+                "products",
+                "getProductAssociatedInvoices",
+                &error,
+                now,
+                app_data_dir,
+            );
+        }
+    }
 
     let limit = limit.unwrap_or(50).min(50) as i64;
     let mut statement = connection

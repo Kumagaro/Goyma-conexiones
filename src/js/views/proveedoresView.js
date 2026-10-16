@@ -1,4 +1,6 @@
 import { confirmDialog } from "../components/confirmDialog.js";
+import { renderInvoiceHistory } from "../components/invoiceHistory.js";
+import { showCleanupWarning } from "../utils/cleanupWarning.js";
 import {
   createSupplier,
   deleteSupplier,
@@ -55,17 +57,29 @@ function bindPageChangeListener() {
 }
 
 function bindTabButtons() {
-  document.getElementById("tab-proveedor-list")?.addEventListener("click", () => {
-    showProveedorTab("list", document.getElementById("tab-proveedor-list"));
-  });
+  document
+    .getElementById("tab-proveedor-list")
+    ?.addEventListener("click", () => {
+      showProveedorTab("list", document.getElementById("tab-proveedor-list"));
+    });
 
-  document.getElementById("tab-proveedor-create")?.addEventListener("click", () => {
-    showProveedorTab("create", document.getElementById("tab-proveedor-create"));
-  });
+  document
+    .getElementById("tab-proveedor-create")
+    ?.addEventListener("click", () => {
+      showProveedorTab(
+        "create",
+        document.getElementById("tab-proveedor-create"),
+      );
+    });
 
-  document.getElementById("tab-proveedor-historial")?.addEventListener("click", () => {
-    showProveedorTab("historial", document.getElementById("tab-proveedor-historial"));
-  });
+  document
+    .getElementById("tab-proveedor-historial")
+    ?.addEventListener("click", () => {
+      showProveedorTab(
+        "historial",
+        document.getElementById("tab-proveedor-historial"),
+      );
+    });
 }
 
 function bindSearch() {
@@ -131,7 +145,8 @@ function bindDetailActions() {
   const deleteButton = document.getElementById("proveedor-ver-eliminar");
   if (deleteButton) {
     deleteButton.addEventListener("click", () => {
-      if (currentSupplierId != null) void handleDeleteSupplier(currentSupplierId);
+      if (currentSupplierId != null)
+        void handleDeleteSupplier(currentSupplierId);
     });
   }
 }
@@ -143,18 +158,35 @@ function bindHistoryControls() {
       renderProveedorHistory();
     });
   }
+  // Sustituye al onclick inline del encabezado "Fecha" (orden de dashboard.js).
+  const dateHeader = document.getElementById("th-fecha-historial-proveedor");
+  if (dateHeader && dateHeader.dataset.sortBound !== "1") {
+    dateHeader.dataset.sortBound = "1";
+    dateHeader.addEventListener("click", () => {
+      if (typeof window.toggleOrdenFecha === "function") {
+        window.toggleOrdenFecha("historialProveedor", renderProveedorHistory);
+      } else {
+        renderProveedorHistory();
+      }
+    });
+  }
 }
 
 function showProveedorTab(tab, button = null) {
   const tabs = document.querySelectorAll("#page-proveedores .view-tabs .tab");
   tabs.forEach((tabButton) => {
-    const isActive = tabButton === button || tabButton.id === `tab-proveedor-${tab}`;
+    const isActive =
+      tabButton === button || tabButton.id === `tab-proveedor-${tab}`;
     tabButton.classList.toggle("active", isActive);
   });
 
-  const subviews = document.querySelectorAll("#page-proveedores .config-subview");
+  const subviews = document.querySelectorAll(
+    "#page-proveedores .config-subview",
+  );
   subviews.forEach((view) => {
-    const isActive = view.id === `proveedor-${tab}` || (tab === "ver" && view.id === "proveedor-ver");
+    const isActive =
+      view.id === `proveedor-${tab}` ||
+      (tab === "ver" && view.id === "proveedor-ver");
     view.classList.toggle("active", isActive);
   });
 
@@ -185,13 +217,14 @@ async function loadSuppliers(query = "") {
   const body = document.getElementById("proveedores-body");
   if (!body) return;
 
-  body.innerHTML = '<tr><td colspan="5" class="empty-row">Cargando proveedores…</td></tr>';
+  body.innerHTML =
+    '<tr><td colspan="5" class="empty-row">Cargando proveedores…</td></tr>';
 
   try {
     const response = query
       ? await searchSuppliers(query)
       : await listSuppliers();
-    const items = Array.isArray(response) ? response : response?.items ?? [];
+    const items = Array.isArray(response) ? response : (response?.items ?? []);
     suppliers = items;
     renderSupplierList(items);
     renderProveedorHistory();
@@ -201,7 +234,9 @@ async function loadSuppliers(query = "") {
         <td colspan="5" class="empty-row">No se pudieron cargar los proveedores.</td>
       </tr>
     `;
-    showSupplierFeedback(error?.message || "No se pudieron cargar los proveedores.");
+    showSupplierFeedback(
+      error?.message || "No se pudieron cargar los proveedores.",
+    );
   }
 }
 
@@ -210,7 +245,8 @@ function renderSupplierList(items) {
   if (!body) return;
 
   if (!items.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-row">Aún no hay proveedores.</td></tr>';
+    body.innerHTML =
+      '<tr><td colspan="5" class="empty-row">Aún no hay proveedores.</td></tr>';
     return;
   }
 
@@ -241,7 +277,8 @@ function renderProveedorHistory() {
 
   if (!suppliers.length) {
     select.innerHTML = '<option value="">No hay proveedores</option>';
-    body.innerHTML = '<tr><td colspan="7" class="empty-row">No hay proveedores para consultar.</td></tr>';
+    body.innerHTML =
+      '<tr><td colspan="7" class="empty-row">No hay proveedores para consultar.</td></tr>';
     return;
   }
 
@@ -256,21 +293,28 @@ function renderProveedorHistory() {
 
   select.innerHTML = options;
 
-  if (currentValue && [...select.options].some((option) => option.value === currentValue)) {
+  if (
+    currentValue &&
+    [...select.options].some((option) => option.value === currentValue)
+  ) {
     select.value = currentValue;
   } else {
     select.selectedIndex = 0;
   }
 
   const selectedId = Number(select.value);
-  const selectedSupplier = suppliers.find((supplier) => Number(supplier.id) === selectedId);
+  const selectedSupplier = suppliers.find(
+    (supplier) => Number(supplier.id) === selectedId,
+  );
 
   if (!selectedSupplier) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-row">No hay proveedores para consultar.</td></tr>';
+    body.innerHTML =
+      '<tr><td colspan="7" class="empty-row">No hay proveedores para consultar.</td></tr>';
     return;
   }
 
-  body.innerHTML = '<tr><td colspan="7" class="empty-row">Este proveedor aún no tiene compras registradas.</td></tr>';
+  body.innerHTML =
+    '<tr><td colspan="7" class="empty-row">Este proveedor aún no tiene compras registradas.</td></tr>';
 }
 
 async function handleSupplierSubmit() {
@@ -279,7 +323,8 @@ async function handleSupplierSubmit() {
 
   const payload = {
     firstName: document.getElementById("proveedor-nombres")?.value.trim() ?? "",
-    lastName: document.getElementById("proveedor-apellidos")?.value.trim() ?? "",
+    lastName:
+      document.getElementById("proveedor-apellidos")?.value.trim() ?? "",
     nationalId: document.getElementById("proveedor-ci")?.value.trim() ?? "",
     phone: document.getElementById("proveedor-telefono")?.value.trim() ?? "",
     email: document.getElementById("proveedor-correo")?.value.trim() ?? "",
@@ -288,7 +333,12 @@ async function handleSupplierSubmit() {
     address: document.getElementById("proveedor-direccion")?.value.trim() ?? "",
   };
 
-  if (!payload.firstName || !payload.lastName || !payload.nationalId || !payload.phone) {
+  if (
+    !payload.firstName ||
+    !payload.lastName ||
+    !payload.nationalId ||
+    !payload.phone
+  ) {
     showSupplierFeedback("Completa los campos obligatorios del proveedor.");
     return;
   }
@@ -314,18 +364,21 @@ function resetSupplierForm() {
   editingSupplierId = null;
   const form = document.getElementById("proveedor-form");
   if (form) form.reset();
-  document.getElementById("proveedor-form-title")?.replaceChildren(
-    document.createTextNode("Datos de Proveedor"),
-  );
+  document
+    .getElementById("proveedor-form-title")
+    ?.replaceChildren(document.createTextNode("Datos de Proveedor"));
 }
 
 function openSupplierForm(supplierId) {
-  const supplier = suppliers.find((item) => Number(item.id) === Number(supplierId));
+  const supplier = suppliers.find(
+    (item) => Number(item.id) === Number(supplierId),
+  );
   if (!supplier) return;
 
   editingSupplierId = Number(supplierId);
   const formTitle = document.getElementById("proveedor-form-title");
-  if (formTitle) formTitle.textContent = `Editar proveedor: ${supplier.fullName ?? ""}`;
+  if (formTitle)
+    formTitle.textContent = `Editar proveedor: ${supplier.fullName ?? ""}`;
 
   document.getElementById("proveedor-nombres").value =
     supplier.firstName ?? supplier.fullName?.split(" ")[0] ?? "";
@@ -350,55 +403,76 @@ async function openSupplierDetail(supplierId) {
     renderSupplierDetail(detail);
     showProveedorTab("ver", null);
   } catch (error) {
-    showSupplierFeedback(error?.message || "No se pudo abrir el detalle del proveedor.");
+    showSupplierFeedback(
+      error?.message || "No se pudo abrir el detalle del proveedor.",
+    );
   }
 }
 
 function renderSupplierDetail(detail) {
-  const fullName = [detail?.firstName, detail?.lastName].filter(Boolean).join(" ") || detail?.fullName || "Proveedor";
+  const fullName =
+    [detail?.firstName, detail?.lastName].filter(Boolean).join(" ") ||
+    detail?.fullName ||
+    "Proveedor";
   const indicators = detail?.indicators ?? {};
 
-  document.getElementById("proveedor-ver-id").textContent = formatId(detail?.id ?? "");
-  document.getElementById("proveedor-ver-nombre-completo").textContent = fullName;
-  document.getElementById("proveedor-ver-empresa").textContent = detail?.company || "Sin empresa";
-  document.getElementById("proveedor-ver-cargo").textContent = detail?.position || "Sin cargo";
-  document.getElementById("proveedor-ver-telefono").textContent = detail?.phone || "—";
-  document.getElementById("proveedor-ver-correo").textContent = detail?.email || "—";
-  document.getElementById("proveedor-ver-ci").textContent = detail?.nationalId || "—";
-  document.getElementById("proveedor-ver-direccion").textContent = detail?.address || "—";
-  document.getElementById("proveedor-ver-total-comprado").textContent = formatMoney(indicators.totalInvoicedCents ?? 0).replace(" USD", "");
-  document.getElementById("proveedor-ver-saldo-pendiente").textContent = formatMoney(indicators.pendingBalanceCents ?? 0).replace(" USD", "");
-  document.getElementById("proveedor-ver-num-facturas").textContent = String(indicators.invoiceCount ?? 0);
-  document.getElementById("proveedor-ver-ultima-compra").textContent = indicators.lastPurchaseDate ? formatDate(indicators.lastPurchaseDate) : "—";
+  document.getElementById("proveedor-ver-id").textContent = formatId(
+    detail?.id ?? "",
+  );
+  document.getElementById("proveedor-ver-nombre-completo").textContent =
+    fullName;
+  document.getElementById("proveedor-ver-empresa").textContent =
+    detail?.company || "Sin empresa";
+  document.getElementById("proveedor-ver-cargo").textContent =
+    detail?.position || "Sin cargo";
+  document.getElementById("proveedor-ver-telefono").textContent =
+    detail?.phone || "—";
+  document.getElementById("proveedor-ver-correo").textContent =
+    detail?.email || "—";
+  document.getElementById("proveedor-ver-ci").textContent =
+    detail?.nationalId || "—";
+  document.getElementById("proveedor-ver-direccion").textContent =
+    detail?.address || "—";
+  // En proveedores el backend llena totalPurchasedCents (PV-03).
+  document.getElementById("proveedor-ver-total-comprado").textContent =
+    formatMoney(indicators.totalPurchasedCents ?? 0).replace(" USD", "");
+  document.getElementById("proveedor-ver-saldo-pendiente").textContent =
+    formatMoney(indicators.pendingBalanceCents ?? 0).replace(" USD", "");
+  document.getElementById("proveedor-ver-num-facturas").textContent = String(
+    indicators.invoiceCount ?? 0,
+  );
+  document.getElementById("proveedor-ver-ultima-compra").textContent =
+    indicators.lastPurchaseDate ? formatDate(indicators.lastPurchaseDate) : "—";
 
-  const historyContainer = document.getElementById("proveedor-ver-historial-facturas");
-  if (historyContainer) {
-    const history = Array.isArray(detail?.invoiceHistory) ? detail.invoiceHistory : [];
-    if (!history.length) {
-      historyContainer.innerHTML = '<span class="pv-empty-note">Este proveedor aún no tiene compras registradas.</span>';
-    } else {
-      historyContainer.innerHTML = history
-        .map(
-          (invoice) => `
-            <div class="pv-invoice-item">
-              <span>${escapeHtml(invoice.number || "Factura")}</span>
-              <span>${escapeHtml(invoice.status || "")}</span>
-            </div>
-          `,
-        )
-        .join("");
-    }
-  }
+  renderInvoiceHistory(
+    document.getElementById("proveedor-ver-historial-facturas"),
+    detail?.invoiceHistory,
+    "Este proveedor aún no tiene compras registradas.",
+  );
 
-  const companyTag = document.getElementById("proveedor-ver-empresa").closest(".kpi-tag");
-  if (companyTag) companyTag.style.display = detail?.company ? "inline-flex" : "none";
+  const companyTag = document
+    .getElementById("proveedor-ver-empresa")
+    .closest(".kpi-tag");
+  if (companyTag)
+    companyTag.style.display = detail?.company ? "inline-flex" : "none";
 
-  const cargoTag = document.getElementById("proveedor-ver-cargo").closest(".kpi-tag");
-  if (cargoTag) cargoTag.style.display = detail?.position ? "inline-flex" : "none";
+  const cargoTag = document
+    .getElementById("proveedor-ver-cargo")
+    .closest(".kpi-tag");
+  if (cargoTag)
+    cargoTag.style.display = detail?.position ? "inline-flex" : "none";
+
+  showCleanupWarning(
+    document.getElementById("proveedor-ver"),
+    "proveedor-ver-warning",
+    detail?.expiredCleanupWarning,
+  );
 }
 
 async function handleDeleteSupplier(supplierId) {
-  const supplier = suppliers.find((item) => Number(item.id) === Number(supplierId));
+  const supplier = suppliers.find(
+    (item) => Number(item.id) === Number(supplierId),
+  );
   if (!supplier) return;
 
   const confirmed = await confirmDialog({
@@ -411,7 +485,8 @@ async function handleDeleteSupplier(supplierId) {
 
   try {
     await deleteSupplier(supplierId);
-    const detailId = currentSupplierId === Number(supplierId) ? null : currentSupplierId;
+    const detailId =
+      currentSupplierId === Number(supplierId) ? null : currentSupplierId;
     currentSupplierId = detailId;
     await loadSuppliers();
     showProveedorTab("list", document.getElementById("tab-proveedor-list"));

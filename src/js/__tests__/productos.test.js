@@ -916,6 +916,25 @@ describe("listados y detalle de productos", () => {
     expect(confirmDialogMock).not.toHaveBeenCalled();
   });
 
+  it("una carga correcta del listado limpia solo su propio error, no el aviso de otra acción", async () => {
+    productServiceMocks.listProducts.mockRejectedValue(
+      new Error("No se pudieron cargar los productos."),
+    );
+    const view = await openProductsView();
+    const feedback = () => document.getElementById("productos-feedback");
+    await view.showProductoTab("list");
+    expect(feedback().textContent).toBe("No se pudieron cargar los productos.");
+    productServiceMocks.listProducts.mockResolvedValue([]);
+    await view.showProductoTab("list");
+    expect(feedback().textContent).toBe("");
+
+    // Una carga que termina después de otro aviso no lo borra.
+    feedback().textContent = "El producto ya no existe";
+    feedback().hidden = false;
+    await view.showProductoTab("list");
+    expect(feedback().textContent).toBe("El producto ya no existe");
+  });
+
   it("muestra errores stale del backend y recarga la lista correspondiente", async () => {
     productServiceMocks.listProducts.mockResolvedValue([activeProducts[1]]);
     productServiceMocks.getProduct.mockRejectedValueOnce(
