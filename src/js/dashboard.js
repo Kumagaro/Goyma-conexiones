@@ -140,6 +140,76 @@ function showPage(pageId, el, label) {
   return false;
 }
 
+// ===== Acciones declarativas del HTML =====
+// spec-04 SG-01: la CSP prohíbe los on* inline; el HTML declara la acción con
+// data-* y estos listeners delegados la ejecutan.
+const ACCIONES_CLICK = {
+  toggleSidebar: () => toggleSidebar(),
+  toggleSubMenu: (el) => toggleSubMenu(el),
+  toggleMobileSidebar: () => toggleMobileSidebar(),
+  closeMobileSidebar: () => toggleMobileSidebar(false),
+  togglePassword: (el) => togglePassword(el.dataset.target, el),
+  showConfigTab: (el) => showConfigTab(el.dataset.tab, el),
+  showNotifTab: (el) => showNotifTab(el.dataset.tab, el),
+  cambiarPeriodoDashboard: (el) =>
+    window.cambiarPeriodoDashboard?.(el.dataset.periodo),
+  alternarSerieIngresos: (el) =>
+    window.alternarSerieIngresos?.(Number(el.dataset.serie), el),
+  guardarTasasCambioDemo: () => guardarTasasCambioDemo(),
+  marcarTodasNotificacionesLeidas: () => marcarTodasNotificacionesLeidas(),
+  marcarNotificacionLeida: (el) =>
+    marcarNotificacionLeida(Number(el.dataset.id)),
+  irAPagina: (el) => irAPagina(el.dataset.tabla, Number(el.dataset.pagina)),
+  ordenarHistorialTasas: () =>
+    toggleOrdenFecha("historialTasas", renderHistorialTasas),
+  limpiarFechaNotificacion: () => {
+    const fecha = document.getElementById("notificacion-fecha");
+    if (fecha) fecha.value = "";
+    renderNotificaciones();
+  },
+  // shortcut: botones de demostración del mockup; la fase 3 (CF) los sustituye.
+  avisoDemo: (el) =>
+    import("./utils/feedback.js").then(({ notifyInfo }) =>
+      notifyInfo(el.dataset.mensaje),
+    ),
+};
+const ACCIONES_CAMPO = {
+  renderNotificaciones: () => renderNotificaciones(),
+  cambiarTamPagina: (el) => cambiarTamPagina(el.value),
+  activarMoneda: (el) => {
+    const moneda = monedasData[Number(el.dataset.indice)];
+    if (moneda) moneda.activo = el.checked;
+  },
+  actualizarEquivalencia: (el) => actualizarEquivalencia(el),
+};
+
+document.addEventListener("click", (event) => {
+  const enlace = event.target.closest?.(
+    "#sidebar [data-page], [data-goto-page]",
+  );
+  if (enlace) {
+    event.preventDefault();
+    const pagina = enlace.dataset.page ?? enlace.dataset.gotoPage;
+    const menu = enlace.dataset.page
+      ? enlace
+      : document.querySelector(`#sidebar [data-page="${pagina}"]`);
+    showPage(pagina, menu, enlace.dataset.pageLabel);
+    return;
+  }
+  const boton = event.target.closest?.("[data-action]");
+  const accion = boton && ACCIONES_CLICK[boton.dataset.action];
+  if (accion) accion(boton);
+});
+for (const [tipo, atributo] of [
+  ["input", "inputAction"],
+  ["change", "changeAction"],
+]) {
+  document.addEventListener(tipo, (event) => {
+    const accion = ACCIONES_CAMPO[event.target?.dataset?.[atributo]];
+    if (accion) accion(event.target);
+  });
+}
+
 // ===== Sub-pestañas: Configuración =====
 function showConfigTab(tab, btn) {
   document
@@ -540,7 +610,7 @@ function renderMonedas() {
                 <label class="currency-item">
                     <span class="code"><span class="currency-flag">${m.codigo.slice(0, 3)}</span>${m.codigo}</span>
                     <span class="switch">
-                        <input type="checkbox" ${m.activo ? "checked" : ""} onchange="monedasData[${i}].activo = this.checked">
+                        <input type="checkbox" ${m.activo ? "checked" : ""} data-change-action="activarMoneda" data-indice="${i}">
                         <span class="track"></span>
                     </span>
                 </label>
@@ -587,7 +657,7 @@ function renderRateCards() {
                     </div>
                     <div class="rate-row">
                         <label>Tasa</label>
-                        <input type="text" placeholder="0.000" oninput="actualizarEquivalencia(this)">
+                        <input type="text" placeholder="0.000" data-input-action="actualizarEquivalencia">
                         <span class="rate-result">1 ${r.codigo} = xxxxxxx ${r.ref}</span>
                     </div>
                 </div>
@@ -724,7 +794,7 @@ function renderNotificaciones() {
   cont.innerHTML = rows
     .map(
       (n) => `
-                <div class="notif-row notif-tipo-${n.tipo} ${n.leida ? "" : "no-leida"}" onclick="marcarNotificacionLeida(${n.id})">
+                <div class="notif-row notif-tipo-${n.tipo} ${n.leida ? "" : "no-leida"}" data-action="marcarNotificacionLeida" data-id="${n.id}">
                     <div class="notif-icon">
                         <svg class="icon" style="width:26px;height:26px"><use href="#${notifIconos[n.tipo] || "icon-bell"}"></use></svg>
                     </div>
@@ -853,16 +923,12 @@ function cambiarTamPagina(valor) {
     aplicarPaginacion(cfg);
   });
 
-  const aviso = document.getElementById("config-paginacion-feedback");
-  if (aviso) {
-    aviso.textContent = `Se mostrarán ${nuevo} elementos por página en todas las tablas.`;
-    aviso.classList.add("is-visible");
-    clearTimeout(cambiarTamPagina._t);
-    cambiarTamPagina._t = setTimeout(
-      () => aviso.classList.remove("is-visible"),
-      2600,
-    );
-  }
+  // spec-04 TO-01: el resultado sale como toast (script clásico: import dinámico).
+  import("./utils/feedback.js").then(({ notifySuccess }) =>
+    notifySuccess(
+      `Se mostrarán ${nuevo} elementos por página en todas las tablas.`,
+    ),
+  );
 }
 
 function sincronizarSelectPaginacion() {
@@ -930,7 +996,7 @@ function pintarPaginador(cfg, total, pagina, totalPaginas, inicio) {
 
   /* Con 20 elementos o menos no se muestra el paginador */
   if (total <= PAGINACION_TAM) {
-    pager.innerHTML = "";
+    pager.replaceChildren();
     pager.hidden = true;
     return;
   }
@@ -938,30 +1004,63 @@ function pintarPaginador(cfg, total, pagina, totalPaginas, inicio) {
 
   const desde = inicio + 1;
   const hasta = Math.min(inicio + PAGINACION_TAM, total);
-  const botones = numerosPaginacion(pagina, totalPaginas)
-    .map((n) => {
-      if (n === "…") return '<span class="pager-gap">…</span>';
-      return (
-        `<button type="button" class="pager-num ${n === pagina ? "is-active" : ""}" ` +
-        `onclick="irAPagina('${cfg.id}', ${n})" ${n === pagina ? 'aria-current="page"' : ""}>${n}</button>`
-      );
-    })
-    .join("");
+  // spec-04 SG-01: el paginador se construye con DOM, sin innerHTML.
+  const boton = (clase, destino, texto) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = clase;
+    b.dataset.action = "irAPagina";
+    b.dataset.tabla = cfg.id;
+    b.dataset.pagina = String(destino);
+    if (texto) b.append(texto);
+    return b;
+  };
+  const chevron = (clase) => {
+    const svgNs = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNs, "svg");
+    svg.setAttribute("class", clase);
+    svg.setAttribute("style", "width:16px;height:16px");
+    svg.setAttribute("aria-hidden", "true");
+    const use = document.createElementNS(svgNs, "use");
+    use.setAttribute("href", "#icon-chevron-left");
+    svg.append(use);
+    return svg;
+  };
 
-  pager.innerHTML = `
-                <span class="pager-info">Mostrando ${desde}–${hasta} de ${total}</span>
-                <div class="pager-controls">
-                    <button type="button" class="pager-btn" onclick="irAPagina('${cfg.id}', ${pagina - 1})" ${pagina === 1 ? "disabled" : ""} aria-label="Página anterior">
-                        <svg class="icon" style="width:16px;height:16px" aria-hidden="true"><use href="#icon-chevron-left"></use></svg>
-                        Anterior
-                    </button>
-                    ${botones}
-                    <button type="button" class="pager-btn" onclick="irAPagina('${cfg.id}', ${pagina + 1})" ${pagina === totalPaginas ? "disabled" : ""} aria-label="Página siguiente">
-                        Siguiente
-                        <svg class="icon pager-chevron-next" style="width:16px;height:16px" aria-hidden="true"><use href="#icon-chevron-left"></use></svg>
-                    </button>
-                </div>
-            `;
+  const info = document.createElement("span");
+  info.className = "pager-info";
+  info.textContent = `Mostrando ${desde}–${hasta} de ${total}`;
+
+  const anterior = boton("pager-btn", pagina - 1);
+  anterior.disabled = pagina === 1;
+  anterior.setAttribute("aria-label", "Página anterior");
+  anterior.append(chevron("icon"), " Anterior");
+
+  const siguiente = boton("pager-btn", pagina + 1);
+  siguiente.disabled = pagina === totalPaginas;
+  siguiente.setAttribute("aria-label", "Página siguiente");
+  siguiente.append("Siguiente ", chevron("icon pager-chevron-next"));
+
+  const numeros = numerosPaginacion(pagina, totalPaginas).map((n) => {
+    if (n === "…") {
+      const hueco = document.createElement("span");
+      hueco.className = "pager-gap";
+      hueco.textContent = "…";
+      return hueco;
+    }
+    const b = boton(
+      n === pagina ? "pager-num is-active" : "pager-num",
+      n,
+      String(n),
+    );
+    if (n === pagina) b.setAttribute("aria-current", "page");
+    return b;
+  });
+
+  const controles = document.createElement("div");
+  controles.className = "pager-controls";
+  controles.append(anterior, ...numeros, siguiente);
+  pager.replaceChildren(info, controles);
 }
 
 function aplicarPaginacion(cfg) {
@@ -1036,7 +1135,7 @@ if (document.readyState === "loading") {
 // ====== Dashboard: KPIs, período y gráfica ===========
 // =====================================================
 // Todo va dentro de una función anónima para no chocar con el resto del archivo.
-// Solo se exponen dos funciones globales (las usan los onclick del HTML):
+// Solo se exponen dos funciones globales (las usan los data-action del HTML):
 //   cambiarPeriodoDashboard(periodo)  y  alternarSerieIngresos(indice, boton)
 (function () {
   "use strict";

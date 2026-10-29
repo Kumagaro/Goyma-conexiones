@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Goyma | Inicio de Sesión</title>
     <link rel="stylesheet" href="./css/auth.css" />
+    <link rel="stylesheet" href="./css/toast.css" />
   </head>
   <body>
     <!-- ===== Sprite de íconos SVG (mismo estilo lineal usado en el dashboard) ===== -->
@@ -241,27 +242,6 @@
       </main>
     </div>
 
-    <script>
-      const togglePassword = document.getElementById("togglePassword");
-      const passwordInput = document.getElementById("password");
-      togglePassword.addEventListener("click", () => {
-        const isHidden = passwordInput.type === "password";
-        passwordInput.type = isHidden ? "text" : "password";
-        togglePassword
-          .querySelector("use")
-          .setAttribute("href", isHidden ? "#icon-eye-off" : "#icon-eye");
-        togglePassword.setAttribute(
-          "aria-label",
-          isHidden ? "Ocultar contraseña" : "Mostrar contraseña",
-        );
-      });
-      togglePassword.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          togglePassword.click();
-        }
-      });
-    </script>
     <script type="module" src="./js/views/loginView.js"></script>
   </body>
 </html>

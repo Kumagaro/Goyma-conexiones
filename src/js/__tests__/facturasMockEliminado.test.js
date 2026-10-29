@@ -196,7 +196,18 @@ describe("mock de facturas de salida eliminado (tarea 4.5.9)", () => {
     // Con isolate:false, los globales que crea el script (showPage, …)
     // llegarían a los demás archivos de test: se quitan al terminar.
     const globalsBefore = new Set(Object.getOwnPropertyNames(window));
+    // Igual con los listeners delegados que el script pone en document.
+    const documentListeners = [];
+    const addListener = document.addEventListener;
+    document.addEventListener = function (...args) {
+      documentListeners.push(args);
+      return addListener.apply(this, args);
+    };
     onTestFinished(() => {
+      document.addEventListener = addListener;
+      for (const args of documentListeners) {
+        document.removeEventListener(...args);
+      }
       for (const name of Object.getOwnPropertyNames(window)) {
         if (!globalsBefore.has(name)) delete window[name];
       }
@@ -235,5 +246,7 @@ describe("mock de facturas de salida eliminado (tarea 4.5.9)", () => {
     expect(
       document.getElementById("facturas-general-body").textContent,
     ).toContain("Aún no hay facturas");
-  });
+    // Parsea y evalúa el HTML y dashboard.js completos: con la máquina cargada
+    // supera los 5 s por defecto.
+  }, 30000);
 });

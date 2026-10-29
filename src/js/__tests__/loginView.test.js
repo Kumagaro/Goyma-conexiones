@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { toastText } from "./helpers/invoiceUi.js";
 
 function renderLoginForm() {
   document.body.innerHTML = `
@@ -27,7 +28,7 @@ describe("vista de inicio de sesión", () => {
     const loginView = await import("../views/loginView.js");
     await loginView.initLoginView();
     const username = document.getElementById("username");
-    expect(document.getElementById("loginFeedback").textContent).toBe("");
+    expect(toastText()).toBe("");
     username.value = "ab";
     document.getElementById("password").value = "ValidPass1!";
     username.dispatchEvent(new Event("invalid", { cancelable: true }));
@@ -63,7 +64,7 @@ describe("vista de inicio de sesión", () => {
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
     await vi.waitFor(() => {
-      expect(document.getElementById("loginFeedback").textContent).toBe(
+      expect(toastText()).toContain(
         "El nombre de usuario o la contraseña son incorrectos",
       );
     });
@@ -141,7 +142,7 @@ describe("vista de inicio de sesión", () => {
 
     await loginView.initLoginView();
 
-    expect(document.getElementById("loginFeedback").textContent).toBe(
+    expect(toastText()).toContain(
       "Tu sesión ya no es válida. Inicia sesión de nuevo",
     );
     expect(document.getElementById("loginForm").hidden).toBe(false);

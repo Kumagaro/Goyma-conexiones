@@ -9,7 +9,7 @@ import {
 } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { chooseFromCombobox } from "./helpers/invoiceUi.js";
+import { chooseFromCombobox, toastText } from "./helpers/invoiceUi.js";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -281,9 +281,7 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
     submit();
     await Promise.resolve();
     expect(createGuaranteeInvoice).not.toHaveBeenCalled();
-    expect(
-      document.getElementById("factura-garantia-feedback").textContent,
-    ).toContain("factura original");
+    expect(toastText()).toContain("factura original");
 
     document.getElementById("factura-garantia-original").value = "2";
     submit();

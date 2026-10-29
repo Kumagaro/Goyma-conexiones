@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { toastText } from "./helpers/invoiceUi.js";
 
 const { createUser, deleteUser, listUsers, updateUser, resetUserPassword } =
   vi.hoisted(() => ({
@@ -198,7 +199,7 @@ describe("vista de usuarios", () => {
       "12345678902",
     );
     expect(resetUserPassword).toHaveBeenCalledWith(2, "weakpassword2!");
-    expect(document.getElementById("usuarios-feedback").textContent).toContain(
+    expect(toastText()).toContain(
       "Los datos se guardaron, pero la contraseña no se cambió",
     );
     expect(
@@ -282,9 +283,7 @@ describe("vista de usuarios", () => {
 
     await vi.waitFor(() => expect(updateUser).toHaveBeenCalledOnce());
     expect(resetUserPassword).not.toHaveBeenCalled();
-    expect(document.getElementById("usuario-feedback").textContent).toContain(
-      "El teléfono ya está registrado",
-    );
+    expect(toastText()).toContain("El teléfono ya está registrado");
   });
 
   it.each([
@@ -394,9 +393,7 @@ describe("vista de usuarios", () => {
       "12345678902",
       "ValidPass1!",
     );
-    expect(document.getElementById("usuario-feedback").textContent).toContain(
-      "contador1",
-    );
+    expect(toastText()).toContain("contador1");
   });
 
   it("no envía el usuario si las contraseñas de creación no coinciden", async () => {
@@ -517,9 +514,7 @@ describe("vista de usuarios", () => {
         '¿Estás seguro de que quieres eliminar al usuario "counterone"?',
       ),
     );
-    expect(document.getElementById("usuarios-feedback").textContent).toContain(
-      "Usuario counterone eliminado correctamente",
-    );
+    expect(toastText()).toContain("Usuario counterone eliminado correctamente");
     expect(
       document.querySelector("#usuarios-body tr[data-username='counterone']"),
     ).toBeNull();

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toastsOfType, toastText } from "./helpers/invoiceUi.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -229,7 +230,7 @@ describe("formulario de productos", () => {
       .getElementById("producto-form")
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => {
-      expect(document.getElementById("producto-feedback").textContent).toBe(
+      expect(toastText()).toContain(
         "Elige una opción de la lista o vacía el campo",
       );
     });
@@ -347,7 +348,7 @@ describe("formulario de productos", () => {
     expect(updateInput).not.toHaveProperty("cost");
     expect(updateInput).not.toHaveProperty("quantity");
     expect(updateInput).not.toHaveProperty("sellingPrice");
-    expect(document.getElementById("producto-feedback").textContent).toContain(
+    expect(toastText()).toContain(
       "No se pudieron limpiar 1 productos vencidos",
     );
   });
@@ -446,9 +447,7 @@ describe("formulario de productos", () => {
       .getElementById("producto-form")
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => {
-      expect(document.getElementById("producto-feedback").textContent).toBe(
-        "Ya existe un producto con ese nombre",
-      );
+      expect(toastText()).toContain("Ya existe un producto con ese nombre");
     });
 
     view.openProductForm({
@@ -465,9 +464,7 @@ describe("formulario de productos", () => {
       .getElementById("producto-form")
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await vi.waitFor(() => {
-      expect(document.getElementById("producto-feedback").textContent).toBe(
-        "El producto ya no existe",
-      );
+      expect(toastText()).toContain("El producto ya no existe");
     });
   });
 });
@@ -745,9 +742,9 @@ describe("listados y detalle de productos", () => {
     expect(rows[1].textContent).toContain("Sin categoría");
     expect(rows[1].textContent).toContain("—");
     expect(rows[1].textContent).not.toContain("días");
-    expect(
-      document.getElementById("producto-condiciones-feedback").textContent,
-    ).toContain("No se pudieron limpiar 1 productos vencidos");
+    expect(toastText()).toContain(
+      "No se pudieron limpiar 1 productos vencidos",
+    );
 
     document.getElementById("producto-condiciones-filter").value =
       "discontinued";
@@ -916,23 +913,19 @@ describe("listados y detalle de productos", () => {
     expect(confirmDialogMock).not.toHaveBeenCalled();
   });
 
-  it("una carga correcta del listado limpia solo su propio error, no el aviso de otra acción", async () => {
+  it("TO-01: un error al cargar el listado sale como toast de error y una carga correcta no añade avisos", async () => {
     productServiceMocks.listProducts.mockRejectedValue(
       new Error("No se pudieron cargar los productos."),
     );
     const view = await openProductsView();
-    const feedback = () => document.getElementById("productos-feedback");
     await view.showProductoTab("list");
-    expect(feedback().textContent).toBe("No se pudieron cargar los productos.");
+    const errors = toastsOfType("error").length;
+    expect(errors).toBeGreaterThan(0);
+    expect(toastText()).toContain("No se pudieron cargar los productos.");
     productServiceMocks.listProducts.mockResolvedValue([]);
     await view.showProductoTab("list");
-    expect(feedback().textContent).toBe("");
-
-    // Una carga que termina después de otro aviso no lo borra.
-    feedback().textContent = "El producto ya no existe";
-    feedback().hidden = false;
-    await view.showProductoTab("list");
-    expect(feedback().textContent).toBe("El producto ya no existe");
+    expect(toastsOfType("error")).toHaveLength(errors);
+    expect(toastsOfType("warning")).toHaveLength(0);
   });
 
   it("muestra errores stale del backend y recarga la lista correspondiente", async () => {
@@ -971,9 +964,7 @@ describe("listados y detalle de productos", () => {
       .querySelector('#productos-body [data-product-action="view"]')
       .click();
     await vi.waitFor(() => {
-      expect(document.getElementById("productos-feedback").textContent).toBe(
-        "El producto ya no existe",
-      );
+      expect(toastText()).toContain("El producto ya no existe");
     });
     expect(productServiceMocks.listProducts.mock.calls.length).toBeGreaterThan(
       listCallsBeforeDetail,
@@ -983,9 +974,7 @@ describe("listados y detalle de productos", () => {
       .querySelector('#productos-body [data-product-action="discontinue"]')
       .click();
     await vi.waitFor(() => {
-      expect(document.getElementById("productos-feedback").textContent).toBe(
-        "El producto ya está descontinuado",
-      );
+      expect(toastText()).toContain("El producto ya está descontinuado");
     });
 
     await view.showProductoTab("agotados");
@@ -995,9 +984,7 @@ describe("listados y detalle de productos", () => {
       )
       .click();
     await vi.waitFor(() => {
-      expect(
-        document.getElementById("producto-condiciones-feedback").textContent,
-      ).toBe("El producto ya está activo");
+      expect(toastText()).toContain("El producto ya está activo");
     });
     expect(
       productServiceMocks.listOutOfStockAndDiscontinued,

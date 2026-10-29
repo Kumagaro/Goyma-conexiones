@@ -5,6 +5,7 @@ import {
   loadInvoicePagesHtml,
   setValue,
   submitForm,
+  toastText,
   typeInCombobox,
 } from "./helpers/invoiceUi.js";
 
@@ -180,8 +181,8 @@ const TYPES = [
 ];
 
 const linesBody = (t) => `${t.field}-lineas-body`;
-const feedback = (t) =>
-  document.getElementById(`${t.view}-feedback`)?.textContent ?? "";
+// spec-04 TO-01: los mensajes del formulario salen como toast.
+const feedback = () => toastText();
 const openDetail = (t, id) =>
   ({
     E: view.__testHooks.openEntryDetail,
@@ -350,7 +351,7 @@ describe.each(TYPES)("formulario de $name (§7.1)", (t) => {
     setValue(`${t.field}-fecha-emision`, "2026-02-10");
     submitForm(`${t.view}-form`);
     await vi.waitFor(() =>
-      expect(feedback(t)).toBe("No hay stock suficiente de «Cable UTP»"),
+      expect(feedback(t)).toContain("No hay stock suficiente de «Cable UTP»"),
     );
     expect(lineInputs(linesBody(t), "quantity")[0].value).toBe("99");
     expect(document.getElementById(t.contactInput).value).toBe("Ana Pérez");
@@ -546,11 +547,7 @@ describe("editar facturas (§7.3)", () => {
       ],
     });
     // §5 bis: el aviso de la purga tras editar.
-    await vi.waitFor(() =>
-      expect(
-        document.getElementById("facturas-venta-cleanup-warning")?.textContent,
-      ).toBe(warning),
-    );
+    await vi.waitFor(() => expect(toastText()).toContain(warning));
   });
 
   it("la entrada edita el costo y la garantía conserva su factura asociada", async () => {
@@ -673,11 +670,7 @@ describe("cambiar el estado desde el detalle (§7.3)", () => {
         "zelle",
       ),
     );
-    await vi.waitFor(() =>
-      expect(
-        document.getElementById("facturas-venta-cleanup-warning")?.textContent,
-      ).toBe(warning),
-    );
+    await vi.waitFor(() => expect(toastText()).toContain(warning));
     await vi.waitFor(() =>
       expect(invoices.getInvoice).toHaveBeenCalledTimes(2),
     );
@@ -713,9 +706,9 @@ describe("cambiar el estado desde el detalle (§7.3)", () => {
     await view.__testHooks.openSaleDetail(1);
     statusButtons(TYPES[1])[0].click();
     await vi.waitFor(() =>
-      expect(
-        document.getElementById("factura-venta-ver-feedback")?.textContent,
-      ).toBe("La transición de estado no es válida para este tipo de factura"),
+      expect(toastText()).toContain(
+        "La transición de estado no es válida para este tipo de factura",
+      ),
     );
   });
 });
@@ -783,7 +776,7 @@ describe("alta rápida de contacto (§7.4)", () => {
     }
     dialog().querySelector('button[type="submit"]').click();
     await vi.waitFor(() =>
-      expect(dialog().querySelector('[role="alert"]').textContent).toBe(
+      expect(toastText()).toContain(
         "El carnet de identidad ya está registrado",
       ),
     );
@@ -945,7 +938,9 @@ describe("huecos de la revisión contra spec-03", () => {
       await view.initEntryInvoicesView();
       document.getElementById("tab-factura-entrada-create").click();
       onDrop({ payload: { paths: ["C:\\Fotos\\recibo.png"] } });
-      expect(feedback(TYPES[0])).toBe("Solo se puede adjuntar un archivo PDF.");
+      expect(feedback(TYPES[0])).toContain(
+        "Solo se puede adjuntar un archivo PDF.",
+      );
       onDrop({ payload: { paths: ["C:\\Compras\\recibo.pdf"] } });
       expect(
         document.getElementById("factura-archivo-nombre").textContent,

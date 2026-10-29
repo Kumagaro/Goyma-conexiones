@@ -7,6 +7,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { toastText } from "./helpers/invoiceUi.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -201,9 +202,7 @@ describe("facturasView submódulo loss (HTML de producción)", () => {
     submit();
     await Promise.resolve();
     expect(createLossInvoice).not.toHaveBeenCalled();
-    expect(
-      document.getElementById("factura-perdidas-feedback").textContent,
-    ).toContain("producto");
+    expect(toastText()).toContain("producto");
 
     __testHooks.getLossCombobox().setSelected({ id: 3, name: "Cable" });
     submit();

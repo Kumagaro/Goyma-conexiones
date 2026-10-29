@@ -1,0 +1,187 @@
+/* Toasts (spec-04 TO-01): arriba a la derecha, apilados hacia abajo.
+   Colores de la paleta existente de dashboard.css (tonos de .kpi-tag). */
+
+.toast-region {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(380px, calc(100vw - 40px));
+  pointer-events: none;
+}
+
+.toast {
+  --tone: #2563eb;
+  --tone-soft: #2563eb14;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid #020f1e1f;
+  border-left: 4px solid var(--tone);
+  border-radius: 10px;
+  background-color: #fff;
+  box-shadow: 0 12px 32px #020f1e29;
+  color: #020f1e;
+  font-family: "Poppins", Helvetica, sans-serif;
+  pointer-events: auto;
+  animation: toast-enter 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+}
+
+.toast-success {
+  --tone: #16a34a;
+  --tone-soft: #16a34a14;
+}
+
+.toast-info {
+  --tone: #2563eb;
+  --tone-soft: #2563eb14;
+}
+
+.toast-warning {
+  --tone: #f48430;
+  --tone-soft: #f4843020;
+}
+
+.toast-error,
+.toast-critical {
+  --tone: #ef4444;
+  --tone-soft: #ef444414;
+}
+
+.toast-critical {
+  background-color: #fff7f7;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 50%;
+  background-color: var(--tone-soft);
+  color: var(--tone);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-title {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.toast-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #020f1ebf;
+  overflow-wrap: anywhere;
+}
+
+.toast-action {
+  margin-top: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--tone);
+  border-radius: 6px;
+  background: none;
+  color: var(--tone);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background-color: var(--tone-soft);
+}
+
+.toast-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: #020f1e80;
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  background-color: #020f1e0d;
+  color: #020f1e;
+}
+
+.toast-close-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.toast-action:focus-visible,
+.toast-close:focus-visible {
+  outline: 2px solid var(--tone);
+  outline-offset: 2px;
+}
+
+.toast.is-leaving {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Movimiento reducido: sin desplazamientos, solo aparece y desaparece. */
+.toast-region.reduce-motion .toast {
+  animation: none;
+  transition: opacity 120ms linear;
+}
+
+.toast-region.reduce-motion .toast.is-leaving {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+    transition: opacity 120ms linear;
+  }
+  .toast.is-leaving {
+    transform: none;
+  }
+}
+
+/* Error junto a un campo (spec-04 TO-01): se conserva bajo el campo. */
+.field-error {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #ef4444;
+}

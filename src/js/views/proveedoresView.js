@@ -1,6 +1,13 @@
 import { confirmDialog } from "../components/confirmDialog.js";
 import { renderInvoiceHistory } from "../components/invoiceHistory.js";
-import { showCleanupWarning } from "../utils/cleanupWarning.js";
+import {
+  clearFieldErrors,
+  notifyError,
+  notifySuccess,
+  notifyWarning,
+  reportError,
+  requireFields,
+} from "../utils/feedback.js";
 import {
   createSupplier,
   deleteSupplier,
@@ -11,6 +18,7 @@ import {
 } from "../services/suppliersService.js";
 import { formatDate, formatId, formatMoney } from "../utils/formatters.js";
 import { ENTRY_STATUS_LABELS } from "../utils/invoiceLabels.js";
+import { el, messageRow, setOptions } from "../utils/dom.js";
 import { debounce } from "../utils/requestGuard.js";
 
 let suppliers = [];
@@ -24,7 +32,6 @@ export function initProveedoresView() {
 }
 
 async function initializeProveedoresView() {
-  removeLegacyInlineHandlers();
   bindPageChangeListener();
   // Cada page:change vuelve a inicializar la vista: los listeners se enlazan
   // una sola vez para que un envío no cree el proveedor dos veces.
@@ -40,18 +47,6 @@ async function initializeProveedoresView() {
   }
   await loadSuppliers();
   showProveedorTab("list", document.getElementById("tab-proveedor-list"));
-}
-
-function removeLegacyInlineHandlers() {
-  document
-    .querySelectorAll("#page-proveedores [onclick]")
-    .forEach((element) => element.removeAttribute("onclick"));
-  document
-    .querySelectorAll("#page-proveedores [oninput]")
-    .forEach((element) => element.removeAttribute("oninput"));
-
-  const form = document.getElementById("proveedor-form");
-  if (form) form.removeAttribute("onsubmit");
 }
 
 function bindPageChangeListener() {
@@ -240,21 +235,11 @@ function showProveedorTab(tab, button = null) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 async function loadSuppliers(query = "") {
   const body = document.getElementById("proveedores-body");
   if (!body) return;
 
-  body.innerHTML =
-    '<tr><td colspan="5" class="empty-row">Cargando proveedores…</td></tr>';
+  messageRow(body, "Cargando proveedores…", 5);
 
   try {
     const response = query
@@ -265,14 +250,8 @@ async function loadSuppliers(query = "") {
     renderSupplierList(items);
     renderProveedorHistory();
   } catch (error) {
-    body.innerHTML = `
-      <tr>
-        <td colspan="5" class="empty-row">No se pudieron cargar los proveedores.</td>
-      </tr>
-    `;
-    showSupplierFeedback(
-      error?.message || "No se pudieron cargar los proveedores.",
-    );
+    messageRow(body, "No se pudieron cargar los proveedores.", 5);
+    notifyError(error, "No se pudieron cargar los proveedores.");
   }
 }
 
@@ -281,29 +260,45 @@ function renderSupplierList(items) {
   if (!body) return;
 
   if (!items.length) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Aún no hay proveedores.</td></tr>';
+    messageRow(body, "Aún no hay proveedores.", 5);
     return;
   }
 
-  body.innerHTML = items
-    .map(
-      (supplier) => `
-        <tr data-supplier-id="${Number(supplier.id)}">
-          <td>${escapeHtml(formatId(supplier.id))}</td>
-          <td>${escapeHtml(supplier.fullName ?? "")}</td>
-          <td>${escapeHtml(supplier.company ?? "—")}</td>
-          <td>${escapeHtml(supplier.phone ?? "—")}</td>
-          <td>
-            <button type="button" class="action-link" data-supplier-action="detail" data-supplier-id="${Number(supplier.id)}">Ver</button>
-            <button type="button" class="action-link" data-supplier-action="edit" data-supplier-id="${Number(supplier.id)}">Editar</button>
-            <button type="button" class="action-link danger" data-supplier-action="delete" data-supplier-id="${Number(supplier.id)}">Eliminar</button>
-          </td>
-        </tr>
-      `,
-    )
-    .join("");
+  body.replaceChildren(
+    ...items.map((supplier) => {
+      const id = Number(supplier.id);
+      return el(
+        "tr",
+        { dataset: { supplierId: id } },
+        el("td", {}, formatId(supplier.id)),
+        el("td", {}, supplier.fullName ?? ""),
+        el("td", {}, supplier.company ?? "—"),
+        el("td", {}, supplier.phone ?? "—"),
+        el(
+          "td",
+          {},
+          ROW_ACTIONS.map(([action, label, extra]) =>
+            el(
+              "button",
+              {
+                type: "button",
+                class: `action-link${extra}`,
+                dataset: { supplierAction: action, supplierId: id },
+              },
+              label,
+            ),
+          ),
+        ),
+      );
+    }),
+  );
 }
+
+const ROW_ACTIONS = [
+  ["detail", "Ver", ""],
+  ["edit", "Editar", ""],
+  ["delete", "Eliminar", " danger"],
+];
 
 // Historial de compras (PV-07): las facturas de entrada del proveedor salen
 // de getSupplierDetail; el rango de fechas y el orden se aplican aquí.
@@ -314,22 +309,20 @@ function renderProveedorHistory() {
   if (!select || !body) return;
 
   if (!suppliers.length) {
-    select.innerHTML = '<option value="">No hay proveedores</option>';
+    setOptions(select, [["", "No hay proveedores"]]);
     historyItems = [];
     historyMessage(body, "No hay proveedores para consultar.");
     return;
   }
 
   const currentValue = select.value;
-  const options = suppliers
-    .map(
-      (supplier) => `
-        <option value="${Number(supplier.id)}">${escapeHtml(supplier.fullName || "Proveedor")}</option>
-      `,
-    )
-    .join("");
-
-  select.innerHTML = options;
+  setOptions(
+    select,
+    suppliers.map((supplier) => [
+      Number(supplier.id),
+      supplier.fullName || "Proveedor",
+    ]),
+  );
 
   if (
     currentValue &&
@@ -349,13 +342,7 @@ function renderProveedorHistory() {
 }
 
 function historyMessage(body, text) {
-  const row = document.createElement("tr");
-  const cell = document.createElement("td");
-  cell.colSpan = 7;
-  cell.className = "empty-row";
-  cell.textContent = text;
-  row.append(cell);
-  body.replaceChildren(row);
+  messageRow(body, text, 7);
 }
 
 async function loadSupplierHistory() {
@@ -458,32 +445,47 @@ async function handleSupplierSubmit() {
     address: document.getElementById("proveedor-direccion")?.value.trim() ?? "",
   };
 
+  clearFieldErrors(form);
   if (
-    !payload.firstName ||
-    !payload.lastName ||
-    !payload.nationalId ||
-    !payload.phone
+    !requireFields([
+      "proveedor-nombres",
+      "proveedor-apellidos",
+      "proveedor-ci",
+      "proveedor-telefono",
+    ])
   ) {
-    showSupplierFeedback("Completa los campos obligatorios del proveedor.");
+    notifyError(null, "Completa los campos obligatorios del proveedor.");
     return;
   }
 
   try {
     if (editingSupplierId !== null) {
       await updateSupplier(editingSupplierId, payload);
-      showSupplierFeedback("Proveedor actualizado correctamente.");
+      notifySuccess("Proveedor actualizado correctamente.");
     } else {
       await createSupplier(payload);
-      showSupplierFeedback("Proveedor creado correctamente.");
+      notifySuccess("Proveedor creado correctamente.");
     }
 
     resetSupplierForm();
     await loadSuppliers();
     showProveedorTab("list", document.getElementById("tab-proveedor-list"));
   } catch (error) {
-    showSupplierFeedback(error?.message || "No se pudo guardar el proveedor.");
+    reportError(error, "No se pudo guardar el proveedor.", SUPPLIER_FIELDS);
   }
 }
+
+// Campo al que se refiere cada rechazo de validación del backend (TO-01).
+const SUPPLIER_FIELDS = [
+  [/apellidos/i, "proveedor-apellidos"],
+  [/nombre/i, "proveedor-nombres"],
+  [/carnet/i, "proveedor-ci"],
+  [/teléfono/i, "proveedor-telefono"],
+  [/correo/i, "proveedor-correo"],
+  [/empresa/i, "proveedor-empresa"],
+  [/cargo/i, "proveedor-cargo"],
+  [/dirección/i, "proveedor-direccion"],
+];
 
 function resetSupplierForm() {
   editingSupplierId = null;
@@ -528,9 +530,7 @@ async function openSupplierDetail(supplierId) {
     renderSupplierDetail(detail);
     showProveedorTab("ver", null);
   } catch (error) {
-    showSupplierFeedback(
-      error?.message || "No se pudo abrir el detalle del proveedor.",
-    );
+    notifyError(error, "No se pudo abrir el detalle del proveedor.");
   }
 }
 
@@ -587,11 +587,7 @@ function renderSupplierDetail(detail) {
   if (cargoTag)
     cargoTag.style.display = detail?.position ? "inline-flex" : "none";
 
-  showCleanupWarning(
-    document.getElementById("proveedor-ver"),
-    "proveedor-ver-warning",
-    detail?.expiredCleanupWarning,
-  );
+  notifyWarning(detail?.expiredCleanupWarning);
 }
 
 async function handleDeleteSupplier(supplierId) {
@@ -630,24 +626,8 @@ async function handleDeleteSupplier(supplierId) {
     await loadSuppliers();
     showProveedorTab("list", document.getElementById("tab-proveedor-list"));
   } catch (error) {
-    showSupplierFeedback(error?.message || "No se pudo eliminar el proveedor.");
+    notifyError(error, "No se pudo eliminar el proveedor.");
   }
-}
-
-function showSupplierFeedback(message) {
-  const form = document.getElementById("proveedor-form");
-  if (!form) return;
-
-  let feedback = document.getElementById("proveedor-feedback");
-  if (!feedback) {
-    feedback = document.createElement("div");
-    feedback.id = "proveedor-feedback";
-    feedback.className = "form-feedback";
-    form.appendChild(feedback);
-  }
-
-  feedback.textContent = message;
-  feedback.hidden = !message;
 }
 
 window.renderProveedores = () => {

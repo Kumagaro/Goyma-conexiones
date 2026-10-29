@@ -1,8 +1,8 @@
 # Constitution — Goyma Conexiones
 
-**Versión:** 1.2.0
+**Versión:** 1.3.0
 **Ratificada:** 2026-09-20
-**Última modificación:** 2026-09-30
+**Última modificación:** 2026-10-28
 
 Este documento define los principios no negociables del proyecto Goyma Conexiones. Toda especificación (`spec.md`), plan técnico (`plan.md`) y lista de tareas (`tasks.md`) dentro de `specs/` debe cumplir estos principios. Cualquier violación debe justificarse explícitamente en el plan correspondiente (sección "Complexity Tracking") o la spec debe rediseñarse.
 
@@ -76,7 +76,7 @@ Todo error **inesperado o de sistema** —sin importar su severidad— se regist
 ## 4. Base de datos
 
 - Una **única base de datos SQLite** para todo el proyecto.
-- En esta etapa de desarrollo inicial, **no se requieren migraciones versionadas**: el esquema puede recrearse libremente mientras no haya datos reales de producción que preservar. Este principio se revisará y formalizará (con migraciones) cuando el proyecto pase a uso real.
+- **El esquema está versionado** (desde `cierre-del-mvp`): la versión vive en la propia base (`PRAGMA user_version`) y todo cambio de esquema es una **migración** numerada, con su test, que se aplica en orden al arrancar dentro de su propia transacción. La versión 1 es el esquema de las tres primeras specs. Si una migración falla, la base queda en la versión anterior y la aplicación no arranca a medias; una base de una versión mayor que la conocida no se abre. No se edita el esquema base para añadir cambios: se escribe una migración nueva.
 - Todo acceso a la base de datos ocurre exclusivamente desde el backend de Rust.
 - Toda regla de negocio que el esquema pueda expresar (`UNIQUE`, `CHECK`, `COLLATE`, claves foráneas) se declara **en el esquema**, no solo en el código Rust: la base de datos es la última línea de defensa de la integridad (§2.I) y no debe depender de que cada comando recuerde aplicar la regla. Ejemplo: la unicidad sin distinguir mayúsculas de `username` usa `COLLATE NOCASE` en la columna, además de normalizar en el código.
 - **Alcance de `COLLATE NOCASE`:** solo pliega mayúsculas y minúsculas ASCII; no equipara letras con acento (`Á` y `á` son distintas) ni `Ñ` con `ñ`. Por eso se usa únicamente en campos ASCII como `username`. Para texto con acentos (por ejemplo nombres de categorías, unidades o productos), la unicidad se declara con `UNIQUE` (o índice parcial cuando aplique) sobre una columna normalizada que el código rellena con la misma función de normalización, en lugar de depender de `COLLATE NOCASE`.
@@ -111,6 +111,7 @@ Las modificaciones a este documento requieren actualizar el número de versión 
 
 ## 7. Historial de versiones
 
+- **1.3.0 (2026-10-28):** §4 sustituye "no se requieren migraciones versionadas" por el versionado del esquema con migraciones numeradas. Motivo: `cierre-del-mvp` introduce el respaldo y la restauración de toda la información (PEN-15), que deben sobrevivir a una actualización de la aplicación; sin migraciones, una copia de una versión anterior no se podría usar. Cambia una regla de §4, no un principio de fondo.
 - **1.2.0 (2026-09-30):** §2.VI acota el registro de errores a los inesperados o de sistema y fija la excepción de los rechazos esperados de una acción del usuario (credenciales incorrectas y datos que no pasan la validación); añade que ningún registro contiene contraseñas, hashes, datos personales ni valores ingresados. También aclara que el mensaje al usuario es específico cuando debe corregir algo y genérico ante errores internos o de autenticación (antes decía "siempre genérico"). Motivo: la regla anterior ("todo error se registra") no coincidía con la política real de las specs `autenticacion-y-usuarios` e `inventario-productos` y obligaba a documentar la misma desviación en cada `plan.md`; la redacción de los mensajes tampoco reflejaba que las specs muestran mensajes específicos de validación. Cambia el alcance de una regla, no un principio de fondo.
 - **1.1.1 (2026-09-30):** se aclara en §4 que `COLLATE NOCASE` solo pliega ASCII y que, para texto con acentos, la unicidad se declara con `UNIQUE` (o índice parcial) sobre una columna normalizada. Motivo: la regla de §4 podía leerse como suficiente para cualquier texto, pero no detecta duplicados como `Café` y `cafe`. No cambia ningún principio ni la regla de `username`.
 - **1.1.0 (2026-09-23):** se reemplaza la regla "`camelCase` también en Rust" por `snake_case` idiomático en Rust con conversión automática de Tauri/serde hacia `camelCase` en JS (§3). Motivo: la regla anterior era incompatible con "sin warnings" (el lint `non_snake_case` de `rustc` es warn-by-default) y con el principio de simplicidad (§2.II), ya que Tauri resuelve la conversión de forma nativa. Se agrega a §4 que las reglas expresables en el esquema se declaran en el esquema.

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { toastText } from "./helpers/invoiceUi.js";
 
 describe("vista de perfil", () => {
   afterEach(() => {
@@ -312,9 +313,7 @@ describe("vista de perfil", () => {
     );
     expect(passwordForm.elements.namedItem("newPassword").value).toBe("");
     expect(passwordForm.elements.namedItem("confirmPassword").value).toBe("");
-    expect(document.getElementById("perfil-feedback").textContent).toBe(
-      "La contraseña se cambió correctamente.",
-    );
+    expect(toastText()).toContain("La contraseña se cambió correctamente.");
   });
 
   it("no cambia contraseña si la confirmación no coincide", async () => {

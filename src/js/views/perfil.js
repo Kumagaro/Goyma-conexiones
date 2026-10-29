@@ -9,6 +9,7 @@ import {
   getUserProfile,
   updateOwnProfile,
 } from "../services/usersService.js";
+import { notifyError, notifySuccess, reportError } from "../utils/feedback.js";
 import { installFormValidation } from "../utils/formValidation.js";
 
 let profile = null;
@@ -60,20 +61,6 @@ function renderReservedDataWarning(hasReservedContactData) {
     ?.classList.toggle("is-visible", hasReservedContactData);
 }
 
-function showProfileFeedback(message) {
-  const feedback = document.getElementById("perfil-feedback");
-  if (!feedback) return;
-  feedback.textContent = message;
-  feedback.classList.add("is-visible");
-}
-
-function clearProfileFeedback() {
-  const feedback = document.getElementById("perfil-feedback");
-  if (!feedback) return;
-  feedback.textContent = "";
-  feedback.classList.remove("is-visible");
-}
-
 function closeProfileModal() {
   document.getElementById("modal-ver-perfil")?.classList.remove("active");
 }
@@ -111,11 +98,10 @@ async function handleUpdateOwnProfile(event) {
       form.elements.namedItem("nationalId").value.trim(),
     );
     renderProfileData(updatedProfile);
-    clearProfileFeedback();
     await refreshSession();
-    showProfileFeedback("Tus datos se actualizaron correctamente.");
+    notifySuccess("Tus datos se actualizaron correctamente.");
   } catch (error) {
-    showProfileFeedback(error?.message || "No se pudo actualizar tu perfil.");
+    reportError(error, "No se pudo actualizar tu perfil.", PROFILE_FIELDS);
   }
 }
 
@@ -139,10 +125,9 @@ async function handleChangeOwnPassword(event) {
   try {
     await changeOwnPassword(currentPassword.value, newPassword.value);
     form.reset();
-    clearProfileFeedback();
-    showProfileFeedback("La contraseña se cambió correctamente.");
+    notifySuccess("La contraseña se cambió correctamente.");
   } catch (error) {
-    showProfileFeedback(error?.message || "No se pudo cambiar la contraseña.");
+    reportError(error, "No se pudo cambiar la contraseña.", PASSWORD_FIELDS);
   }
 }
 
@@ -160,7 +145,7 @@ async function initializeProfileView() {
   try {
     renderProfileData(await getUserProfile());
   } catch {
-    showProfileFeedback("No se pudo cargar tu perfil.");
+    notifyError(null, "No se pudo cargar tu perfil.");
   }
 
   const profileButton = document.querySelector(".usuario");
@@ -196,3 +181,11 @@ async function initializeProfileView() {
 }
 
 void initProfileView();
+
+// Campo al que se refiere cada rechazo de validación del backend (TO-01).
+const PROFILE_FIELDS = [
+  [/nombre de usuario/i, "perfil-username"],
+  [/teléfono/i, "perfil-telefono"],
+  [/carnet/i, "perfil-national-id"],
+];
+const PASSWORD_FIELDS = [[/actual/i, "perfil-pass-actual"]];

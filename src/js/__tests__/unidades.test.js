@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toastText } from "./helpers/invoiceUi.js";
 
 const listUnitsMock = vi.hoisted(() => vi.fn());
 const searchUnitsMock = vi.hoisted(() => vi.fn());
@@ -139,6 +140,7 @@ describe("vista de unidades", () => {
     await vi.waitFor(() => {
       expect(searchUnitsMock).toHaveBeenCalledWith("Kilogramo");
     });
+    // Aviso en vivo del modal: sigue junto al formulario, no es un toast.
     expect(document.getElementById("unidad-feedback").textContent).toContain(
       "ya existe",
     );
@@ -148,9 +150,7 @@ describe("vista de unidades", () => {
     await vi.waitFor(() => {
       expect(deleteUnitMock).toHaveBeenCalledWith(1);
     });
-    expect(document.getElementById("unidad-feedback").textContent).toContain(
-      "2",
-    );
+    expect(toastText()).toContain("2");
   });
 
   it("abre la unidad desde el formulario de producto y cancelar no crea ni selecciona", async () => {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toastText } from "./helpers/invoiceUi.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -231,6 +232,7 @@ describe("vista de categorías", () => {
     await vi.waitFor(() => {
       expect(searchCategoriesMock).toHaveBeenCalledWith("Laptops");
     });
+    // Aviso en vivo del formulario: sigue junto al campo, no es un toast.
     expect(document.getElementById("categoria-feedback").textContent).toContain(
       "ya existe",
     );
@@ -298,8 +300,6 @@ describe("vista de categorías", () => {
     await vi.waitFor(() => {
       expect(deleteCategoryMock).toHaveBeenCalledWith(7);
     });
-    expect(document.getElementById("categoria-feedback").textContent).toContain(
-      "3",
-    );
+    expect(toastText()).toContain("3");
   });
 });

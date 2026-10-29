@@ -24,6 +24,7 @@ import {
 import { initClientesView } from "../views/clientesView.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import { formatDate, formatMoney } from "../utils/formatters.js";
+import { toastsOfType } from "./helpers/invoiceUi.js";
 
 function seedClientPage() {
   document.body.innerHTML = `
@@ -348,7 +349,7 @@ describe("clientesView", () => {
     expect(window.irAFacturaDesdeGeneral).toHaveBeenCalledWith("V", 11);
     delete window.irAFacturaDesdeGeneral;
   });
-  it("H-7: muestra el aviso de purga del detalle con role=status y lo limpia con null", async () => {
+  it("H-7: el aviso de purga del detalle sale como toast de advertencia; con null no sale", async () => {
     listClients.mockResolvedValue([
       { id: 6, fullName: "Rosa Díaz", company: null, phone: "+5355550009" },
     ]);
@@ -381,21 +382,73 @@ describe("clientesView", () => {
       ).not.toBeNull(),
     );
     open();
-    const status = () => document.getElementById("cliente-ver-warning");
+    const warnings = () =>
+      toastsOfType("warning").map((toast) => toast.textContent);
     await vi.waitFor(() =>
-      expect(status()?.textContent).toBe(
+      expect(warnings().join(" ")).toContain(
         "No se pudieron limpiar 2 productos vencidos; se reintentará en la próxima operación",
       ),
     );
-    expect(status().getAttribute("role")).toBe("status");
-    expect(status().hidden).toBe(false);
+    const before = warnings().length;
 
+    // Con null no aparece ningún aviso nuevo.
     getClientDetail.mockResolvedValue({
       ...detail,
       expiredCleanupWarning: null,
     });
     open();
-    await vi.waitFor(() => expect(status().textContent).toBe(""));
-    expect(status().hidden).toBe(true);
+    await vi.waitFor(() => expect(getClientDetail).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    expect(warnings()).toHaveLength(before);
+  });
+
+  it("TO-01: obligatorios junto al campo, éxito como toast y CI duplicado junto al CI", async () => {
+    listClients.mockResolvedValue([]);
+    await initClientesView();
+    const form = document.getElementById("cliente-form");
+    const submit = () =>
+      form.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+
+    submit();
+    expect(toastsOfType("error").at(-1).textContent).toContain(
+      "Completa los campos obligatorios del cliente.",
+    );
+    expect(document.getElementById("cliente-nombres-error").textContent).toBe(
+      "Completa este campo",
+    );
+    expect(createClient).not.toHaveBeenCalled();
+
+    for (const [id, value] of [
+      ["cliente-nombres", "Luis"],
+      ["cliente-apellidos", "García"],
+      ["cliente-ci", "90010112345"],
+      ["cliente-telefono", "+5355512345"],
+    ]) {
+      document.getElementById(id).value = value;
+    }
+    createClient.mockRejectedValueOnce({
+      code: "duplicateField",
+      message: "Ya existe un cliente con ese carnet de identidad",
+    });
+    submit();
+    await vi.waitFor(() =>
+      expect(document.getElementById("cliente-ci-error")?.textContent).toBe(
+        "Ya existe un cliente con ese carnet de identidad",
+      ),
+    );
+    expect(toastsOfType("error").at(-1).textContent).toContain(
+      "Ya existe un cliente con ese carnet de identidad",
+    );
+
+    createClient.mockResolvedValueOnce({ id: 12 });
+    submit();
+    await vi.waitFor(() =>
+      expect(toastsOfType("success").at(-1)?.textContent).toContain(
+        "Cliente creado correctamente.",
+      ),
+    );
+    expect(document.querySelector("#cliente-form .form-feedback")).toBeNull();
   });
 });

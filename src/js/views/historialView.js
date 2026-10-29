@@ -4,7 +4,11 @@ import {
   getProductHistory,
   listHistoryProducts,
 } from "../services/historyService.js";
-import { showCleanupWarning } from "../utils/cleanupWarning.js";
+import {
+  notifyError,
+  notifySuccess,
+  notifyWarning,
+} from "../utils/feedback.js";
 import { bindDateSort, isAscending, sortByDate } from "../utils/dateSort.js";
 import { formatId, formatMoney, formatTimestamp } from "../utils/formatters.js";
 
@@ -148,7 +152,7 @@ async function loadHistoryOptions() {
     select.append(activeGroup, deletedGroup);
     if (previous) select.value = previous;
   } catch {
-    showHistoryFeedback("No se pudieron cargar los productos.");
+    notifyError(null, "No se pudieron cargar los productos.");
   }
 }
 
@@ -187,17 +191,11 @@ async function loadProductHistory() {
     const items = Array.isArray(response) ? response : (response?.items ?? []);
     renderHistoryList(items);
     setExportAvailable(items.length > 0);
-    showCleanupWarning(
-      document.getElementById("producto-historial"),
-      "historial-cleanup-warning",
-      response?.expiredCleanupWarning,
-    );
+    notifyWarning(response?.expiredCleanupWarning);
   } catch (error) {
     renderHistoryList([]);
     setExportAvailable(false);
-    showHistoryFeedback(
-      error?.message || "No se pudo cargar el historial del producto.",
-    );
+    notifyError(error, "No se pudo cargar el historial del producto.");
   } finally {
     setHistoryLoading(false);
   }
@@ -363,7 +361,6 @@ async function handleExport(format) {
   const destinationPath = await chooseDestination(config);
   // Si el usuario cancela el diálogo, no ocurre nada.
   if (!destinationPath) return;
-  const status = document.getElementById("historial-exportar-estado");
   try {
     const result = await config.run({
       productId,
@@ -375,28 +372,12 @@ async function handleExport(format) {
       destinationPath,
     });
     const count = result?.exportedCount ?? 0;
-    if (status) {
-      status.textContent = `Historial exportado (${count} ${count === 1 ? "movimiento" : "movimientos"}).`;
-    }
+    notifySuccess(
+      `Historial exportado (${count} ${count === 1 ? "movimiento" : "movimientos"}).`,
+    );
   } catch (error) {
-    showHistoryFeedback(error?.message || "No se pudo guardar el archivo.");
+    notifyError(error, "No se pudo guardar el archivo.");
   }
-}
-
-function showHistoryFeedback(message) {
-  const toolbar = document.querySelector(
-    "#producto-historial .historial-toolbar",
-  );
-  if (!toolbar) return;
-  let feedback = document.getElementById("historial-feedback");
-  if (!feedback) {
-    feedback = document.createElement("div");
-    feedback.id = "historial-feedback";
-    feedback.className = "form-feedback";
-    feedback.setAttribute("role", "status");
-    toolbar.append(feedback);
-  }
-  feedback.textContent = message;
 }
 
 export const __testHooks = {

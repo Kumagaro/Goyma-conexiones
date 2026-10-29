@@ -36,7 +36,14 @@ import {
   SALE_STATUS_LABELS,
   invoiceStatusLabel,
 } from "../utils/invoiceLabels.js";
-import { showCleanupWarning } from "../utils/cleanupWarning.js";
+import {
+  clearFieldErrors,
+  notifyError,
+  notifySuccess,
+  notifyWarning,
+  requireFields,
+  setFieldError,
+} from "../utils/feedback.js";
 import { bindDateSort, sortByDate } from "../utils/dateSort.js";
 import { debounce } from "../utils/requestGuard.js";
 
@@ -84,39 +91,6 @@ function associatedLabel(item) {
 
 function toItems(response) {
   return Array.isArray(response) ? response : (response?.items ?? []);
-}
-
-function removeInlineHandlers(root) {
-  if (!root) return;
-  for (const attr of [
-    "onclick",
-    "oninput",
-    "onchange",
-    "onsubmit",
-    "ondragover",
-    "ondragleave",
-    "ondrop",
-  ]) {
-    root
-      .querySelectorAll(`[${attr}]`)
-      .forEach((el) => el.removeAttribute(attr));
-  }
-}
-
-// Mensaje con role="status" dentro de un contenedor; vacío lo oculta.
-function showMessage(container, id, message, prepend = false) {
-  if (!container) return;
-  let feedback = document.getElementById(id);
-  if (!feedback) {
-    feedback = document.createElement("div");
-    feedback.id = id;
-    feedback.className = "form-feedback";
-    feedback.setAttribute("role", "status");
-    if (prepend) container.prepend(feedback);
-    else container.append(feedback);
-  }
-  feedback.textContent = message ?? "";
-  feedback.hidden = !message;
 }
 
 // Solo los rechazos de validación (p. ej. rango de fechas invertido) traen un
@@ -306,11 +280,9 @@ function createInvoiceSubmodule(cfg) {
   const field = (suffix) => document.getElementById(`${cfg.field}-${suffix}`);
   const button = (suffix) =>
     document.getElementById(`${cfg.buttons}-${suffix}`);
-  const page = () => document.getElementById(cfg.pageId);
   const form = () => document.getElementById(`${cfg.view}-form`);
   const listTab = () => document.getElementById(`tab-${cfg.view}-list`);
   const createTab = () => document.getElementById(`tab-${cfg.view}-create`);
-  const warningId = `${cfg.pageKey}-cleanup-warning`;
 
   function claim(el) {
     if (!el || el.dataset.invoiceBound === "1") return false;
@@ -319,7 +291,6 @@ function createInvoiceSubmodule(cfg) {
   }
 
   function init() {
-    removeInlineHandlers(page());
     if (!window[cfg.windowFlag]) {
       window.addEventListener("page:change", (event) => {
         if (event.detail?.pageId !== cfg.pageKey) return;
@@ -526,11 +497,11 @@ function createInvoiceSubmodule(cfg) {
           line.productId === productId || line.productIdOriginal === productId,
       )
     ) {
-      showFeedback(`«${name}» ya está en la factura.`);
+      notifyError(null, `«${name}» ya está en la factura.`);
       return;
     }
     if (!isEntry && item?.isOutOfStock) {
-      showFeedback(`«${name}» está agotado y no se puede agregar.`);
+      notifyError(null, `«${name}» está agotado y no se puede agregar.`);
       return;
     }
     lines.push({
@@ -546,7 +517,6 @@ function createInvoiceSubmodule(cfg) {
         : null,
       productStatus: item?.isDiscontinued ? "discontinued" : "active",
     });
-    showFeedback("");
     renderLines();
     field("lineas-body")
       ?.querySelector(`[data-line-index="${lines.length - 1}"] input`)
@@ -558,7 +528,8 @@ function createInvoiceSubmodule(cfg) {
   async function startNewProduct(query) {
     if (editing) {
       // updateEntryInvoice no admite productos nuevos.
-      showFeedback(
+      notifyError(
+        null,
         "Al editar solo se usan productos existentes. Registra el producto nuevo en una compra nueva.",
       );
       return null;
@@ -567,7 +538,7 @@ function createInvoiceSubmodule(cfg) {
     if (!product) return null;
     const key = product.name.trim().toLowerCase();
     if (lines.some((line) => line.productName.trim().toLowerCase() === key)) {
-      showFeedback(`«${product.name}» ya está en la factura.`);
+      notifyError(null, `«${product.name}» ya está en la factura.`);
       return null;
     }
     lines.push({
@@ -588,7 +559,6 @@ function createInvoiceSubmodule(cfg) {
       priceCents: null,
       productStatus: "active",
     });
-    showFeedback("");
     productCombobox?.setSelected(null);
     renderLines();
     field("lineas-body")
@@ -740,13 +710,12 @@ function createInvoiceSubmodule(cfg) {
   function setAttachmentPath(path) {
     if (!path) return;
     if (!/\.pdf$/i.test(path)) {
-      showFeedback("Solo se puede adjuntar un archivo PDF.");
+      notifyError(null, "Solo se puede adjuntar un archivo PDF.");
       return;
     }
     pendingAttachmentPath = path;
     removeAttachment = false;
     setAttachmentLabel(path.split(/[\\/]/).pop());
-    showFeedback("");
   }
 
   async function pickAttachment() {
@@ -764,7 +733,7 @@ function createInvoiceSubmodule(cfg) {
       });
       if (typeof path === "string") setAttachmentPath(path);
     } catch {
-      showFeedback("No se pudo abrir el selector de archivos.");
+      notifyError(null, "No se pudo abrir el selector de archivos.");
     }
   }
 
@@ -830,9 +799,7 @@ function createInvoiceSubmodule(cfg) {
     try {
       await saveInvoiceAttachment(invoiceId, path ?? null);
     } catch {
-      showCleanupWarning(
-        page(),
-        `${cfg.pageKey}-attachment-warning`,
+      notifyWarning(
         path
           ? "La factura se guardó pero no se pudo adjuntar el PDF."
           : "La factura se guardó pero no se pudo quitar el PDF.",
@@ -888,7 +855,6 @@ function createInvoiceSubmodule(cfg) {
     if (isEntry) setAttachmentLabel("");
     setFormMode(null);
     renderLines();
-    showFeedback("");
   }
 
   async function startEdit() {
@@ -994,6 +960,7 @@ function createInvoiceSubmodule(cfg) {
 
   async function submit() {
     if (saving) return;
+    clearFieldErrors(form());
     const contactId = selectedContact?.id ?? null;
     const associatedId = associated
       ? (document.getElementById(associated.selectId)?.value ?? "")
@@ -1005,12 +972,17 @@ function createInvoiceSubmodule(cfg) {
       !lines.length ||
       (associated && !associatedId)
     ) {
-      showFeedback(cfg.missingMessage);
+      if (contactId == null) {
+        setFieldError(contactCombobox?.getInput(), "Elige un contacto");
+      }
+      if (!invoiceDate)
+        setFieldError(field("fecha-emision"), "Completa este campo");
+      notifyError(null, cfg.missingMessage);
       return;
     }
     const lineProblem = validateLines();
     if (lineProblem) {
-      showFeedback(lineProblem);
+      notifyError(null, lineProblem);
       return;
     }
 
@@ -1024,22 +996,23 @@ function createInvoiceSubmodule(cfg) {
         : await cfg.create(input);
       const invoiceId = wasEditing ? wasEditing.id : result?.invoiceId;
       await saveAttachmentChanges(invoiceId);
-      showCleanupWarning(page(), warningId, result?.expiredCleanupWarning);
+      notifySuccess(
+        wasEditing
+          ? "Factura actualizada correctamente."
+          : "Factura registrada correctamente.",
+      );
+      notifyWarning(result?.expiredCleanupWarning);
       resetForm();
       await loadInvoices();
       if (wasEditing) await openDetail(invoiceId);
       else showTab("list", listTab());
     } catch (error) {
       // Lo tecleado se conserva para que el usuario corrija y reintente.
-      showFeedback(error?.message || "No se pudo guardar la factura.");
+      notifyError(error, "No se pudo guardar la factura.");
     } finally {
       saving = false;
       setSubmitting(false);
     }
-  }
-
-  function showFeedback(message) {
-    showMessage(form(), `${cfg.view}-feedback`, message);
   }
 
   // ---------- Listado ----------
@@ -1079,7 +1052,7 @@ function createInvoiceSubmodule(cfg) {
         `No se pudieron cargar las facturas de ${cfg.noun}.`,
       );
       messageRow(body, message);
-      showFeedback(message);
+      notifyError(null, message);
     }
   }
 
@@ -1165,10 +1138,9 @@ function createInvoiceSubmodule(cfg) {
       currentId = Number(invoiceId);
       currentDetail = detail;
       renderDetail(detail);
-      showDetailFeedback("");
       showTab("ver", null);
     } catch (error) {
-      showFeedback(error?.message || "No se pudo abrir la factura.");
+      notifyError(error, "No se pudo abrir la factura.");
     }
   }
 
@@ -1313,23 +1285,13 @@ function createInvoiceSubmodule(cfg) {
         target,
         target === "completed" && hasPayment ? paymentSelect?.value : undefined,
       );
-      showCleanupWarning(page(), warningId, result?.expiredCleanupWarning);
+      notifySuccess("Estado de la factura actualizado.");
+      notifyWarning(result?.expiredCleanupWarning);
       await loadInvoices();
       await openDetail(invoiceId);
     } catch (error) {
-      showDetailFeedback(
-        error?.message || "No se pudo cambiar el estado de la factura.",
-      );
+      notifyError(error, "No se pudo cambiar el estado de la factura.");
     }
-  }
-
-  function showDetailFeedback(message) {
-    showMessage(
-      document.getElementById(`${cfg.view}-ver`),
-      `${cfg.view}-ver-feedback`,
-      message,
-      true,
-    );
   }
 
   async function handleDownloadAttachment() {
@@ -1338,8 +1300,9 @@ function createInvoiceSubmodule(cfg) {
     if (!destination) return;
     try {
       await downloadInvoiceAttachment(currentId, destination);
+      notifySuccess("PDF guardado.");
     } catch (error) {
-      showDetailFeedback(error?.message || "No se pudo guardar el archivo.");
+      notifyError(error, "No se pudo guardar el archivo.");
     }
   }
 
@@ -1364,7 +1327,8 @@ function createInvoiceSubmodule(cfg) {
     if (!confirmed) return;
     try {
       const deleted = await deleteInvoice(Number(invoiceId));
-      showCleanupWarning(page(), warningId, deleted?.expiredCleanupWarning);
+      notifySuccess("Factura eliminada.");
+      notifyWarning(deleted?.expiredCleanupWarning);
       if (currentId === Number(invoiceId)) {
         currentId = null;
         currentDetail = null;
@@ -1372,7 +1336,7 @@ function createInvoiceSubmodule(cfg) {
       await loadInvoices();
       showTab("list", listTab());
     } catch (error) {
-      showFeedback(error?.message || "No se pudo eliminar la factura.");
+      notifyError(error, "No se pudo eliminar la factura.");
     }
   }
 
@@ -1576,7 +1540,6 @@ let generalItems = [];
 export function initLossInvoicesView() {
   const root = document.getElementById("page-facturas-perdidas");
   if (!root) return Promise.resolve();
-  removeInlineHandlers(root);
   if (!window.__facturasLossPageChangeBound) {
     window.addEventListener("page:change", (event) => {
       if (event.detail?.pageId !== "facturas-perdidas") return;
@@ -1729,7 +1692,7 @@ async function loadLossInvoices() {
       "No se pudieron cargar las facturas de pérdidas.",
     );
     messageRow(body, message);
-    showLossFeedback(message);
+    notifyError(null, message);
   }
 }
 
@@ -1784,8 +1747,13 @@ async function handleLossSubmit() {
     document.getElementById("factura-perdida-descripcion")?.value.trim() ||
     undefined;
 
+  clearFieldErrors(document.getElementById("factura-perdidas-form"));
   if (!product || !quantity || !invoiceDate) {
-    showLossFeedback("Completa el producto, la cantidad y la fecha.");
+    if (!product) {
+      setFieldError(lossProductCombobox?.getInput(), "Elige un producto");
+    }
+    requireFields(["factura-perdida-cantidad", "factura-perdida-fecha"]);
+    notifyError(null, "Completa el producto, la cantidad y la fecha.");
     return;
   }
 
@@ -1804,22 +1772,18 @@ async function handleLossSubmit() {
   if (submitButton) submitButton.disabled = true;
   try {
     const result = await createLossInvoice(input);
-    showCleanupWarning(
-      document.getElementById("page-facturas-perdidas"),
-      "facturas-perdidas-cleanup-warning",
-      result?.expiredCleanupWarning,
-    );
+    notifySuccess("Pérdida registrada correctamente.");
+    notifyWarning(result?.expiredCleanupWarning);
     lossProductCombobox?.setSelected(null);
     const cantidad = document.getElementById("factura-perdida-cantidad");
     if (cantidad) cantidad.value = "1";
     const descripcion = document.getElementById("factura-perdida-descripcion");
     if (descripcion) descripcion.value = "";
-    showLossFeedback("");
     await loadLossInvoices();
     // Tras guardar se abre el detalle, que ya trae el costo real.
     if (result?.invoiceId != null) await openLossDetail(result.invoiceId);
   } catch (error) {
-    showLossFeedback(error?.message || "No se pudo guardar la pérdida.");
+    notifyError(error, "No se pudo guardar la pérdida.");
   } finally {
     savingLoss = false;
     if (submitButton) submitButton.disabled = false;
@@ -1834,7 +1798,7 @@ export async function openLossDetail(invoiceId) {
     renderLossDetail(detail);
     showLossTab("ver", null);
   } catch (error) {
-    showLossFeedback(error?.message || "No se pudo abrir la pérdida.");
+    notifyError(error, "No se pudo abrir la pérdida.");
   }
 }
 
@@ -1878,11 +1842,8 @@ async function handleDeleteLoss(invoiceId) {
   if (!confirmed) return;
   try {
     const deleted = await deleteInvoice(Number(invoiceId));
-    showCleanupWarning(
-      document.getElementById("page-facturas-perdidas"),
-      "facturas-perdidas-cleanup-warning",
-      deleted?.expiredCleanupWarning,
-    );
+    notifySuccess("Pérdida eliminada.");
+    notifyWarning(deleted?.expiredCleanupWarning);
     if (currentLossId === Number(invoiceId)) {
       currentLossId = null;
       currentLossDetail = null;
@@ -1890,16 +1851,8 @@ async function handleDeleteLoss(invoiceId) {
     await loadLossInvoices();
     showLossTab("list", document.getElementById("tab-factura-perdidas-list"));
   } catch (error) {
-    showLossFeedback(error?.message || "No se pudo eliminar la pérdida.");
+    notifyError(error, "No se pudo eliminar la pérdida.");
   }
-}
-
-function showLossFeedback(message) {
-  showMessage(
-    document.getElementById("factura-perdidas-form"),
-    "factura-perdidas-feedback",
-    message,
-  );
 }
 
 // ===================== Submódulo: lista general =====================
@@ -2040,7 +1993,7 @@ export async function irAFacturaDesdeGeneral(type, invoiceId) {
   if (typeof window.showPage === "function") {
     window.showPage(
       target.page,
-      document.querySelector(`#sidebar a[onclick*="'${target.page}'"]`),
+      document.querySelector(`#sidebar [data-page="${target.page}"]`),
     );
   }
   await target.open(invoiceId);

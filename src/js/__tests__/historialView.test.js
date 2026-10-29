@@ -7,6 +7,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { toastsOfType, toastText } from "./helpers/invoiceUi.js";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -479,9 +480,7 @@ describe("historialView exportación (HTML de producción)", () => {
         }),
       );
       await vi.waitFor(() =>
-        expect(
-          document.getElementById("historial-exportar-estado").textContent,
-        ).toBe("Historial exportado (1 movimiento)."),
+        expect(toastText()).toContain("Historial exportado (1 movimiento)."),
       );
     },
   );
@@ -514,25 +513,23 @@ describe("historialView exportación (HTML de producción)", () => {
     await vi.waitFor(() => expect(button.disabled).toBe(false));
     button.click();
     await vi.waitFor(() =>
-      expect(document.getElementById("historial-feedback").textContent).toBe(
-        "No se pudo guardar el archivo",
-      ),
+      expect(toastText()).toContain("No se pudo guardar el archivo"),
     );
   });
-  it("H-7: muestra el aviso de purga del historial y lo limpia con null", async () => {
+  it("H-7: el aviso de purga del historial sale como toast de advertencia; con null no sale", async () => {
     getProductHistory.mockResolvedValue({
       items: [MOVEMENT],
       expiredCleanupWarning:
         "No se pudieron limpiar 2 productos vencidos; se reintentará en la próxima operación",
     });
     await openWithProduct();
-    const status = () => document.getElementById("historial-cleanup-warning");
     await vi.waitFor(() =>
-      expect(status()?.textContent).toBe(
-        "No se pudieron limpiar 2 productos vencidos; se reintentará en la próxima operación",
-      ),
+      expect(toastsOfType("warning").length).toBeGreaterThan(0),
     );
-    expect(status().getAttribute("role")).toBe("status");
+    const warnings = toastsOfType("warning").length;
+    expect(toastText()).toContain(
+      "No se pudieron limpiar 2 productos vencidos",
+    );
     // El listado se pinta igual.
     expect(
       document.getElementById("historial-producto-body").textContent,
@@ -543,7 +540,6 @@ describe("historialView exportación (HTML de producción)", () => {
       expiredCleanupWarning: null,
     });
     await __testHooks.loadProductHistory();
-    expect(status().textContent).toBe("");
-    expect(status().hidden).toBe(true);
+    expect(toastsOfType("warning")).toHaveLength(warnings);
   });
 });

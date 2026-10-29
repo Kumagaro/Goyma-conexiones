@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use tauri::{Manager, State};
 
+use super::migrations::run_migrations;
 use super::schema::{clear_non_persistent_sessions, init_schema, purge_error_logs};
 use crate::attachments::sweep_orphans;
 use crate::errors::append_error_log;
@@ -28,19 +29,34 @@ pub fn open_database(app_data_dir: &Path) -> rusqlite::Result<Connection> {
 }
 
 pub fn initialize_database(app_data_dir: &Path, now: DateTime<Utc>) -> Result<Connection, String> {
-    let initialization = (|| -> rusqlite::Result<Connection> {
+    let opened = (|| -> rusqlite::Result<Connection> {
         let conn = open_database(app_data_dir)?;
         init_schema(&conn, now)?;
+        Ok(conn)
+    })();
+    let mut conn = opened.map_err(|error| {
+        append_error_log(app_data_dir, &error.to_string());
+        "No se pudo abrir la base de datos".to_owned()
+    })?;
+
+    // MG-01: la base llega a la última versión antes de usarse. Si no puede,
+    // la aplicación no arranca a medias.
+    run_migrations(&mut conn).map_err(|error| {
+        append_error_log(app_data_dir, &format!("migrations: {}", error.cause));
+        error.message
+    })?;
+
+    let maintenance = (|| -> rusqlite::Result<()> {
         clear_non_persistent_sessions(&conn)?;
         purge_error_logs(&conn, now)?;
         let _ = sweep_orphans(app_data_dir, &conn);
-        Ok(conn)
+        Ok(())
     })();
-
-    initialization.map_err(|error| {
+    maintenance.map_err(|error| {
         append_error_log(app_data_dir, &error.to_string());
         "No se pudo abrir la base de datos".to_owned()
-    })
+    })?;
+    Ok(conn)
 }
 
 pub fn lock_conn<'a>(state: &State<'a, Mutex<Connection>>) -> MutexGuard<'a, Connection> {

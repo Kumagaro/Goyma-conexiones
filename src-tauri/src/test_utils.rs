@@ -13,6 +13,9 @@ pub fn setup_test_db() -> Connection {
         .pragma_update(None, "foreign_keys", "ON")
         .expect("activa claves foráneas");
     create_schema(&connection).expect("crea el esquema de test");
+    // Los tests usan siempre la última versión del esquema (plan-04 §2.1).
+    let mut connection = connection;
+    crate::db::migrations::run_migrations(&mut connection).expect("aplica las migraciones");
     connection
 }
 

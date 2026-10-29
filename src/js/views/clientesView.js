@@ -1,6 +1,13 @@
 import { confirmDialog } from "../components/confirmDialog.js";
 import { renderInvoiceHistory } from "../components/invoiceHistory.js";
-import { showCleanupWarning } from "../utils/cleanupWarning.js";
+import {
+  clearFieldErrors,
+  notifyError,
+  notifySuccess,
+  notifyWarning,
+  reportError,
+  requireFields,
+} from "../utils/feedback.js";
 import {
   createClient,
   deleteClient,
@@ -10,6 +17,7 @@ import {
   updateClient,
 } from "../services/clientsService.js";
 import { formatDate, formatId, formatMoney } from "../utils/formatters.js";
+import { el, messageRow } from "../utils/dom.js";
 import { debounce } from "../utils/requestGuard.js";
 
 let clients = [];
@@ -21,7 +29,6 @@ export function initClientesView() {
 }
 
 async function initializeClientesView() {
-  removeLegacyInlineHandlers();
   removeLegacyDateField();
   bindPageChangeListener();
   // Cada page:change vuelve a inicializar la vista: los listeners se enlazan
@@ -37,17 +44,6 @@ async function initializeClientesView() {
   }
   await loadClients();
   showClienteTab("list", document.getElementById("tab-cliente-list"));
-}
-
-function removeLegacyInlineHandlers() {
-  document
-    .querySelectorAll("#page-clientes [onclick]")
-    .forEach((element) => element.removeAttribute("onclick"));
-  document
-    .querySelectorAll("#page-clientes [oninput]")
-    .forEach((element) => element.removeAttribute("oninput"));
-  const form = document.getElementById("cliente-form");
-  if (form) form.removeAttribute("onsubmit");
 }
 
 function removeLegacyDateField() {
@@ -172,21 +168,11 @@ function showClienteTab(tab, button = null) {
   if (tab === "create" && editingClientId === null) resetClientForm();
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 async function loadClients(query = "") {
   const body = document.getElementById("clientes-body");
   if (!body) return;
 
-  body.innerHTML =
-    '<tr><td colspan="5" class="empty-row">Cargando clientes…</td></tr>';
+  messageRow(body, "Cargando clientes…", 5);
 
   try {
     const response = query ? await searchClients(query) : await listClients();
@@ -194,12 +180,8 @@ async function loadClients(query = "") {
     clients = items;
     renderClientList(items);
   } catch (error) {
-    body.innerHTML = `
-      <tr>
-        <td colspan="5" class="empty-row">No se pudieron cargar los clientes.</td>
-      </tr>
-    `;
-    showClientFeedback(error?.message || "No se pudieron cargar los clientes.");
+    messageRow(body, "No se pudieron cargar los clientes.", 5);
+    notifyError(error, "No se pudieron cargar los clientes.");
   }
 }
 
@@ -208,29 +190,45 @@ function renderClientList(items) {
   if (!body) return;
 
   if (!items.length) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Aún no hay clientes.</td></tr>';
+    messageRow(body, "Aún no hay clientes.", 5);
     return;
   }
 
-  body.innerHTML = items
-    .map(
-      (client) => `
-        <tr data-client-id="${Number(client.id)}">
-          <td>${escapeHtml(formatId(client.id))}</td>
-          <td>${escapeHtml(client.fullName ?? "")}</td>
-          <td>${escapeHtml(client.company ?? "—")}</td>
-          <td>${escapeHtml(client.phone ?? "—")}</td>
-          <td>
-            <button type="button" class="action-link" data-client-action="detail" data-client-id="${Number(client.id)}">Ver</button>
-            <button type="button" class="action-link" data-client-action="edit" data-client-id="${Number(client.id)}">Editar</button>
-            <button type="button" class="action-link danger" data-client-action="delete" data-client-id="${Number(client.id)}">Eliminar</button>
-          </td>
-        </tr>
-      `,
-    )
-    .join("");
+  body.replaceChildren(
+    ...items.map((client) => {
+      const id = Number(client.id);
+      return el(
+        "tr",
+        { dataset: { clientId: id } },
+        el("td", {}, formatId(client.id)),
+        el("td", {}, client.fullName ?? ""),
+        el("td", {}, client.company ?? "—"),
+        el("td", {}, client.phone ?? "—"),
+        el(
+          "td",
+          {},
+          ROW_ACTIONS.map(([action, label, extra]) =>
+            el(
+              "button",
+              {
+                type: "button",
+                class: `action-link${extra}`,
+                dataset: { clientAction: action, clientId: id },
+              },
+              label,
+            ),
+          ),
+        ),
+      );
+    }),
+  );
 }
+
+const ROW_ACTIONS = [
+  ["detail", "Ver", ""],
+  ["edit", "Editar", ""],
+  ["delete", "Eliminar", " danger"],
+];
 
 async function handleClientSubmit() {
   const form = document.getElementById("cliente-form");
@@ -249,33 +247,48 @@ async function handleClientSubmit() {
       document.getElementById("cliente-info-factura")?.value.trim() ?? "",
   };
 
+  clearFieldErrors(form);
   if (
-    !payload.firstName ||
-    !payload.lastName ||
-    !payload.nationalId ||
-    !payload.phone
+    !requireFields([
+      "cliente-nombres",
+      "cliente-apellidos",
+      "cliente-ci",
+      "cliente-telefono",
+    ])
   ) {
-    showClientFeedback("Completa los campos obligatorios del cliente.");
+    notifyError(null, "Completa los campos obligatorios del cliente.");
     return;
   }
 
   try {
     if (editingClientId !== null) {
       await updateClient(editingClientId, payload);
-      showClientFeedback("Cliente actualizado correctamente.");
+      notifySuccess("Cliente actualizado correctamente.");
     } else {
       await createClient(payload);
-      showClientFeedback("Cliente creado correctamente.");
+      notifySuccess("Cliente creado correctamente.");
     }
 
     resetClientForm();
     await loadClients();
     showClienteTab("list", document.getElementById("tab-cliente-list"));
   } catch (error) {
-    const message = error?.message || "No se pudo guardar el cliente.";
-    showClientFeedback(message);
+    reportError(error, "No se pudo guardar el cliente.", CLIENT_FIELDS);
   }
 }
+
+// Campo al que se refiere cada rechazo de validación del backend (TO-01).
+const CLIENT_FIELDS = [
+  [/apellidos/i, "cliente-apellidos"],
+  [/nombre/i, "cliente-nombres"],
+  [/carnet/i, "cliente-ci"],
+  [/teléfono/i, "cliente-telefono"],
+  [/correo/i, "cliente-correo"],
+  [/empresa/i, "cliente-empresa"],
+  [/cargo/i, "cliente-cargo"],
+  [/dirección/i, "cliente-direccion"],
+  [/factura/i, "cliente-info-factura"],
+];
 
 function resetClientForm() {
   editingClientId = null;
@@ -320,9 +333,7 @@ async function openClientDetail(clientId) {
     renderClientDetail(detail);
     showClienteTab("ver", null);
   } catch (error) {
-    showClientFeedback(
-      error?.message || "No se pudo abrir el detalle del cliente.",
-    );
+    notifyError(error, "No se pudo abrir el detalle del cliente.");
   }
 }
 
@@ -381,11 +392,7 @@ function renderClientDetail(detail) {
   if (cargoTag)
     cargoTag.style.display = detail?.position ? "inline-flex" : "none";
 
-  showCleanupWarning(
-    document.getElementById("cliente-ver"),
-    "cliente-ver-warning",
-    detail?.expiredCleanupWarning,
-  );
+  notifyWarning(detail?.expiredCleanupWarning);
 }
 
 async function handleDeleteClient(clientId) {
@@ -421,24 +428,8 @@ async function handleDeleteClient(clientId) {
     await loadClients();
     showClienteTab("list", document.getElementById("tab-cliente-list"));
   } catch (error) {
-    showClientFeedback(error?.message || "No se pudo eliminar el cliente.");
+    notifyError(error, "No se pudo eliminar el cliente.");
   }
-}
-
-function showClientFeedback(message) {
-  const form = document.getElementById("cliente-form");
-  if (!form) return;
-
-  let feedback = document.getElementById("cliente-feedback");
-  if (!feedback) {
-    feedback = document.createElement("div");
-    feedback.id = "cliente-feedback";
-    feedback.className = "form-feedback";
-    form.appendChild(feedback);
-  }
-
-  feedback.textContent = message;
-  feedback.hidden = !message;
 }
 
 window.showClienteTab = showClienteTab;

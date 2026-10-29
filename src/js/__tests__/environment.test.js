@@ -50,6 +50,149 @@ describe("Vitest con jsdom", () => {
     );
   });
 
+  it("TO-01: ninguna vista de producción usa .form-feedback ni contenedores de resultado generales", async () => {
+    const sourceFiles = await collectSourceFiles(sourceRoot);
+    const productionFiles = sourceFiles.filter(
+      (filePath) => !filePath.includes(`${path.sep}__tests__${path.sep}`),
+    );
+    const contents = await Promise.all(
+      productionFiles.map((filePath) => readFile(filePath, "utf8")),
+    );
+    const source = contents.join("\n");
+
+    expect(source).not.toMatch(/form-feedback/);
+    expect(source).not.toMatch(/cleanupWarning\.js|cleanup-warning/);
+    // Los avisos en vivo de categoría y unidad y la vista previa del precio
+    // son ayudas junto al campo, no resultados: se conservan.
+    for (const id of [
+      "productos-feedback",
+      "producto-condiciones-feedback",
+      "producto-feedback",
+      "producto-detalle-feedback",
+      "usuarios-feedback",
+      "usuario-feedback",
+      "perfil-feedback",
+      "historial-feedback",
+      "config-paginacion-feedback",
+    ]) {
+      expect(source, id).not.toContain(`"${id}"`);
+    }
+  });
+
+  it("SG-01: ni el HTML ni las plantillas del JS de producción tienen atributos on*", async () => {
+    for (const page of [
+      "dashboard-unificado.html",
+      "index.html",
+      "recovery.html",
+    ]) {
+      const html = await readFile(path.join(sourceRoot, page), "utf8");
+      expect(html.match(/\son[a-z]+\s*=/gi) ?? [], page).toEqual([]);
+    }
+    const sourceFiles = await collectSourceFiles(path.join(sourceRoot, "js"));
+    const productionJs = sourceFiles.filter(
+      (filePath) =>
+        filePath.endsWith(".js") &&
+        !filePath.includes(`${path.sep}__tests__${path.sep}`) &&
+        !filePath.includes(`${path.sep}libs${path.sep}`),
+    );
+    for (const filePath of productionJs) {
+      const source = await readFile(filePath, "utf8");
+      expect(
+        source.match(/\son[a-z]+="/g) ?? [],
+        path.basename(filePath),
+      ).toEqual([]);
+    }
+  });
+
+  it("SG-01: tauri.conf.json fija la CSP de plan-04 y el HTML no trae scripts inline ni recursos externos", async () => {
+    const config = JSON.parse(
+      await readFile(
+        path.resolve(process.cwd(), "src-tauri", "tauri.conf.json"),
+        "utf8",
+      ),
+    );
+    expect(config.app.security.csp).toBe(
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
+    );
+    for (const page of [
+      "dashboard-unificado.html",
+      "index.html",
+      "recovery.html",
+    ]) {
+      const doc = new DOMParser().parseFromString(
+        await readFile(path.join(sourceRoot, page), "utf8"),
+        "text/html",
+      );
+      const inline = [...doc.querySelectorAll("script")].filter(
+        (script) => !script.getAttribute("src"),
+      );
+      expect(inline, page).toHaveLength(0);
+      const external = [...doc.querySelectorAll("[src], link[href]")]
+        .map((node) => node.getAttribute("src") ?? node.getAttribute("href"))
+        .filter((url) => /^(?:https?:)?\/\//i.test(url));
+      expect(external, page).toEqual([]);
+    }
+  });
+
+  it("SG-01: ningún innerHTML del JS de producción recibe una plantilla o concatenación", async () => {
+    // Renderizadores de datos de prueba del mockup que su fase sustituye al
+    // conectar datos reales; cada fase quita aquí sus líneas.
+    const pendingByPhase = {
+      "dashboard.js": [
+        // Fase 3 (CF-02): monedas, historial de tasas y tarjetas de tasas.
+        "grid.innerHTML = monedasData",
+        "body.innerHTML = filas",
+        "wrap.innerHTML = rateCardsData",
+        // Fase 2 (NT-01): pestaña de notificaciones.
+        "cont.innerHTML = rows",
+        // Fase 4 (DB-01): KPIs, listas y gastos del dashboard.
+        "valor.innerHTML = valorHtml(def, k);",
+        "$('[data-role=\"delta\"]', fila).innerHTML = variacion(",
+        "$('[data-role=\"spark\"]', fila).innerHTML = sparkInterior(k.tendencia);",
+        "$(idCuerpo).innerHTML = items.length",
+        '$("#dash-frecuentes").innerHTML = datos.clientesFrecuentes.length',
+        '$("#dash-gasto-garantia").innerHTML = dineroUnidad(g.garantia);',
+        '$("#dash-gasto-insumos").innerHTML = dineroUnidad(g.insumos);',
+        '$("#dash-gasto-total").innerHTML = dineroUnidad(total);',
+        '$("#dash-vendidos-a").innerHTML = items',
+        '$("#dash-vendidos-b").innerHTML = items',
+      ],
+    };
+    const sourceFiles = await collectSourceFiles(path.join(sourceRoot, "js"));
+    const productionJs = sourceFiles.filter(
+      (filePath) =>
+        filePath.endsWith(".js") &&
+        !filePath.includes(`${path.sep}__tests__${path.sep}`) &&
+        !filePath.includes(`${path.sep}libs${path.sep}`),
+    );
+    const violations = [];
+    const pendingSeen = new Set();
+    for (const filePath of productionJs) {
+      const name = path.basename(filePath);
+      const source = (await readFile(filePath, "utf8")).replace(/\r\n/g, "\n");
+      for (const match of source.matchAll(/innerHTML\s*\+?=\s*/g)) {
+        const rest = source.slice(match.index + match[0].length);
+        // Un literal fijo (sin datos) sí se admite.
+        if (/^(['"])(?:\\.|(?!\1)[^\n])*\1\s*;/.test(rest)) continue;
+        const lineStart = source.lastIndexOf("\n", match.index) + 1;
+        const line = source
+          .slice(lineStart, source.indexOf("\n", match.index))
+          .trim();
+        if (pendingByPhase[name]?.includes(line)) {
+          pendingSeen.add(`${name}: ${line}`);
+          continue;
+        }
+        violations.push(`${name}: ${line}`);
+      }
+    }
+    expect(violations).toEqual([]);
+    // Una línea pendiente que ya no existe se quita de la lista.
+    const pending = Object.entries(pendingByPhase).flatMap(([name, lines]) =>
+      lines.map((line) => `${name}: ${line}`),
+    );
+    expect(pending.filter((entry) => !pendingSeen.has(entry))).toEqual([]);
+  });
+
   it("las secciones migradas de contactos y facturas no tienen manejadores inline", async () => {
     const html = await readFile(
       path.join(sourceRoot, "dashboard-unificado.html"),

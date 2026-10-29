@@ -7,6 +7,14 @@ import {
   searchCategories,
   updateCategory,
 } from "../services/categoriesService.js";
+import {
+  clearFieldErrors,
+  notifyError,
+  notifySuccess,
+  reportError,
+  requireFields,
+} from "../utils/feedback.js";
+import { el, messageRow } from "../utils/dom.js";
 import { formatMoney } from "../utils/formatters.js";
 
 let categories = [];
@@ -79,8 +87,7 @@ async function loadCategories(searchTerm = "") {
   const body = document.getElementById("categorias-body");
 
   if (body) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Cargando categorías…</td></tr>';
+    messageRow(body, "Cargando categorías…", 5);
   }
 
   try {
@@ -94,17 +101,9 @@ async function loadCategories(searchTerm = "") {
     }
   } catch (error) {
     if (body) {
-      body.innerHTML = `
-        <tr>
-          <td colspan="5" class="empty-row">No se pudieron cargar las categorías.</td>
-        </tr>
-      `;
+      messageRow(body, "No se pudieron cargar las categorías.", 5);
     }
-    if (feedback) {
-      feedback.textContent =
-        error?.message || "No se pudieron cargar las categorías.";
-      feedback.hidden = false;
-    }
+    notifyError(error, "No se pudieron cargar las categorías.");
   }
 }
 
@@ -112,15 +111,6 @@ function normalizeCategoryName(value) {
   return String(value ?? "")
     .trim()
     .toLowerCase();
-}
-
-function normalizeCategoryFeedbackMessage(message) {
-  const text = String(message ?? "").trim();
-  if (!text) return "";
-  if (/ya existe una categoría con ese nombre/i.test(text)) {
-    return "ya existe una categoría con ese nombre.";
-  }
-  return text;
 }
 
 function handleCategorySearch(event) {
@@ -177,8 +167,9 @@ async function handleCategorySubmit(event) {
   const name = nameInput?.value?.trim();
   const description = descriptionInput?.value?.trim();
 
-  if (!name) {
-    showCategoryFeedback("El nombre es obligatorio.");
+  clearFieldErrors(form);
+  if (!requireFields([nameInput])) {
+    notifyError(null, "El nombre es obligatorio.");
     return;
   }
 
@@ -188,7 +179,7 @@ async function handleCategorySubmit(event) {
       const successMessage = "Categoría actualizada correctamente.";
       resetCategoryForm();
       await loadCategories();
-      showCategoryFeedback(successMessage);
+      notifySuccess(successMessage);
       showCategoryTab("list");
       return;
     } else {
@@ -196,16 +187,15 @@ async function handleCategorySubmit(event) {
       const successMessage = "Categoría creada correctamente.";
       resetCategoryForm();
       await loadCategories();
-      showCategoryFeedback(successMessage);
+      notifySuccess(successMessage);
       showCategoryTab("list");
       return;
     }
   } catch (error) {
-    showCategoryFeedback(
-      normalizeCategoryFeedbackMessage(
-        error?.message || "No se pudo guardar la categoría.",
-      ),
-    );
+    reportError(error, "No se pudo guardar la categoría.", [
+      [/descripción/i, descriptionInput],
+      [/nombre/i, nameInput],
+    ]);
   }
 }
 
@@ -244,38 +234,56 @@ function renderCategoryList(items) {
   if (ingresosHeader) ingresosHeader.hidden = false;
 
   if (!items.length) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Aún no hay categorías.</td></tr>';
+    messageRow(body, "Aún no hay categorías.", 5);
     return;
   }
 
-  body.innerHTML = items
-    .map(
-      (category) => `
-        <tr data-category-id="${category.id}">
-          <td>${escapeHtml(String(category.name ?? ""))}</td>
-          <td>${escapeHtml(String(category.description ?? "")) || "—"}</td>
-          <td style="text-align:center">${Number(category.productCount ?? 0)}</td>
-          <td style="text-align:right">${formatMoney(category.ingresosCents)}</td>
-          <td>
-            <div class="col-acciones">
-              <button type="button" class="action-link" data-categoria-action="view" data-category-id="${category.id}">Ver</button>
-              <button type="button" class="action-link" data-categoria-action="edit" data-category-id="${category.id}">Editar</button>
-              <button type="button" class="action-link danger" data-categoria-action="delete" data-category-id="${category.id}">Eliminar</button>
-            </div>
-          </td>
-        </tr>
-      `,
-    )
-    .join("");
+  body.replaceChildren(
+    ...items.map((category) =>
+      el(
+        "tr",
+        { dataset: { categoryId: category.id } },
+        el("td", {}, String(category.name ?? "")),
+        el("td", {}, String(category.description ?? "") || "—"),
+        el(
+          "td",
+          { style: "text-align:center" },
+          String(Number(category.productCount ?? 0)),
+        ),
+        el(
+          "td",
+          { style: "text-align:right" },
+          formatMoney(category.ingresosCents),
+        ),
+        el(
+          "td",
+          {},
+          el(
+            "div",
+            { class: "col-acciones" },
+            CATEGORY_ACTIONS.map(([action, label, extra]) =>
+              el(
+                "button",
+                {
+                  type: "button",
+                  class: `action-link${extra}`,
+                  dataset: { categoriaAction: action, categoryId: category.id },
+                },
+                label,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
-function showCategoryFeedback(message) {
-  const feedback = document.getElementById("categoria-feedback");
-  if (!feedback) return;
-  feedback.textContent = normalizeCategoryFeedbackMessage(message);
-  feedback.hidden = false;
-}
+const CATEGORY_ACTIONS = [
+  ["view", "Ver", ""],
+  ["edit", "Editar", ""],
+  ["delete", "Eliminar", " danger"],
+];
 
 function showCategoryTab(tab) {
   document
@@ -354,27 +362,30 @@ async function openCategoryDetail(categoryId) {
     if (productList) {
       const items = Array.isArray(category.products) ? category.products : [];
       if (!items.length) {
-        productList.innerHTML =
-          "<p>Esta categoría no tiene productos asociados.</p>";
+        productList.replaceChildren(
+          el("p", {}, "Esta categoría no tiene productos asociados."),
+        );
       } else {
-        productList.innerHTML = items
-          .map(
-            (product) => `
-              <div class="pv-invoice-card">
-                <div>
-                  <span class="pv-invoice-label">#${product.id}</span>
-                  <div class="pv-invoice-value">${escapeHtml(product.name ?? "")}</div>
-                </div>
-              </div>
-            `,
-          )
-          .join("");
+        productList.replaceChildren(
+          ...items.map((product) =>
+            el(
+              "div",
+              { class: "pv-invoice-card" },
+              el(
+                "div",
+                {},
+                el("span", { class: "pv-invoice-label" }, `#${product.id}`),
+                el("div", { class: "pv-invoice-value" }, product.name ?? ""),
+              ),
+            ),
+          ),
+        );
       }
     }
 
     showCategoryTab("ver");
   } catch (error) {
-    showCategoryFeedback(error?.message || "No se pudo abrir la categoría.");
+    notifyError(error, "No se pudo abrir la categoría.");
   }
 }
 
@@ -393,22 +404,13 @@ async function handleDeleteCategory(categoryId) {
   try {
     const result = await deleteCategory(categoryId);
     await loadCategories();
-    showCategoryFeedback(
+    notifySuccess(
       `La categoría se eliminó correctamente. ${Number(result?.affectedProducts ?? category.productCount ?? 0)} producto(s) quedaron sin categoría.`,
     );
     showCategoryTab("list");
   } catch (error) {
-    showCategoryFeedback(error?.message || "No se pudo eliminar la categoría.");
+    notifyError(error, "No se pudo eliminar la categoría.");
   }
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 if (document.readyState === "loading") {

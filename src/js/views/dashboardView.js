@@ -1,4 +1,5 @@
 import { getDashboardSummary } from "../services/dashboardService.js";
+import { el } from "../utils/dom.js";
 
 let initPromise = null;
 
@@ -58,15 +59,13 @@ export function renderDashboardSummary(summary = {}) {
 
   const categoriesNode = document.getElementById("dash-agotados-categorias");
   if (categoriesNode) {
-    categoriesNode.innerHTML = categories.length
-      ? categories
-          .slice(0, 3)
-          .map(
-            ({ name, count }) =>
-              `<span>${escapeHtml(String(name ?? ""))} (${Number(count ?? 0)})</span>`,
-          )
-          .join("")
-      : "";
+    categoriesNode.replaceChildren(
+      ...categories
+        .slice(0, 3)
+        .map(({ name, count }) =>
+          el("span", {}, `${String(name ?? "")} (${Number(count ?? 0)})`),
+        ),
+    );
   }
 
   const withoutCategoryNode = document.getElementById(
@@ -109,20 +108,11 @@ function hideLegacyDashboardMetrics() {
 
   ["dash-vendidos-a", "dash-vendidos-b"].forEach((id) => {
     const node = document.getElementById(id);
-    if (node) node.innerHTML = "";
+    if (node) node.replaceChildren();
   });
 
   const slowMovementNode = document.getElementById("dash-lento");
-  if (slowMovementNode) slowMovementNode.innerHTML = "";
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  if (slowMovementNode) slowMovementNode.replaceChildren();
 }
 
 if (document.readyState === "loading") {

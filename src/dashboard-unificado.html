@@ -4,6 +4,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta charset="utf-8" />
     <link rel="stylesheet" href="./css/dashboard.css" />
+    <link rel="stylesheet" href="./css/toast.css" />
   </head>
   <body>
     <!-- ===== Sprite de íconos SVG (uso: <svg class="icon"><use href="#icon-x"></use></svg>) ===== -->
@@ -996,55 +997,38 @@
       <ul>
         <li class="logo-containder">
           <img class="logo" src="./img/Logo.svg" />
-          <button onclick="toggleSidebar()" id="toggle-button">
+          <button data-action="toggleSidebar" id="toggle-button">
             <svg class="icon close-menu">
               <use href="#icon-chevron-left"></use>
             </svg>
           </button>
         </li>
         <li>
-          <a
-            href="#"
-            class="active"
-            data-page="dashboard"
-            onclick="return showPage('dashboard', this);"
-          >
+          <a href="#" class="active" data-page="dashboard">
             <svg class="icon"><use href="#icon-home"></use></svg>
             <span class="text">Dashboard</span>
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="productos"
-            onclick="return showPage('productos', this);"
-          >
+          <a href="#" data-page="productos">
             <svg class="icon"><use href="#icon-cube-scan"></use></svg>
             <span class="text">Productos</span>
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="clientes"
-            onclick="return showPage('clientes', this);"
-          >
+          <a href="#" data-page="clientes">
             <svg class="icon"><use href="#icon-users-two"></use></svg>
             <span class="text">Clientes</span>
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="proveedores"
-            onclick="return showPage('proveedores', this);"
-          >
+          <a href="#" data-page="proveedores">
             <svg class="icon"><use href="#icon-users-group"></use></svg>
             <span class="text">Proveedores</span>
           </a>
         </li>
         <li id="sidebar-facturas">
-          <button onclick="toggleSubMenu(this)" class="dropsown-button">
+          <button data-action="toggleSubMenu" class="dropsown-button">
             <svg class="icon"><use href="#icon-receipt"></use></svg>
             <span class="text">Facturas</span>
             <svg class="icon arrow"><use href="#icon-chevron-down"></use></svg>
@@ -1054,87 +1038,56 @@
               <li>
                 <a
                   href="#"
-                  onclick="
-                    return showPage('facturas-general', this, 'Facturas');
-                  "
+                  data-page="facturas-general"
+                  data-page-label="Facturas"
                   >General</a
                 >
               </li>
               <li>
                 <a
                   href="#"
-                  onclick="
-                    return showPage(
-                      'facturas-entrada',
-                      this,
-                      'Facturas de Entrada',
-                    );
-                  "
+                  data-page="facturas-entrada"
+                  data-page-label="Facturas de Entrada"
                   >Entrada</a
                 >
               </li>
               <li>
                 <a
                   href="#"
-                  onclick="
-                    return showPage(
-                      'facturas-venta',
-                      this,
-                      'Facturas de Venta',
-                    );
-                  "
+                  data-page="facturas-venta"
+                  data-page-label="Facturas de Venta"
                   >Ventas</a
                 >
               </li>
               <li>
                 <a
                   href="#"
-                  onclick="
-                    return showPage(
-                      'facturas-servicios',
-                      this,
-                      'Facturas de Servicios',
-                    );
-                  "
+                  data-page="facturas-servicios"
+                  data-page-label="Facturas de Servicios"
                   >Servicios</a
                 >
               </li>
               <li>
                 <a
                   href="#"
-                  onclick="
-                    return showPage(
-                      'facturas-garantia',
-                      this,
-                      'Facturas de Garantías',
-                    );
-                  "
+                  data-page="facturas-garantia"
+                  data-page-label="Facturas de Garantías"
                   >Garantías</a
                 >
               </li>
               <li>
                 <a
                   href="#"
-                  onclick="
-                    return showPage(
-                      'facturas-insumos',
-                      this,
-                      'Facturas de Insumos',
-                    );
-                  "
+                  data-page="facturas-insumos"
+                  data-page-label="Facturas de Insumos"
                   >Insumos</a
                 >
               </li>
               <li>
                 <a
                   href="#"
-                  onclick="
-                    return showPage(
-                      'facturas-perdidas',
-                      this,
-                      'Facturas de Pérdidas',
-                    );
-                  "
+                  data-page="facturas-perdidas"
+                  data-page-label="Facturas de Pérdidas"
                   >Pérdidas</a
                 >
               </li>
@@ -1142,31 +1095,19 @@
           </ul>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="categorias"
-            onclick="return showPage('categorias', this);"
-          >
+          <a href="#" data-page="categorias">
             <svg class="icon"><use href="#icon-3square"></use></svg>
             <span class="text">Categorías</span>
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="unidades"
-            onclick="return showPage('unidades', this);"
-          >
+          <a href="#" data-page="unidades">
             <svg class="icon"><use href="#icon-color-swatch"></use></svg>
             <span class="text">Unidades</span>
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="notificaciones"
-            onclick="return showPage('notificaciones', this);"
-          >
+          <a href="#" data-page="notificaciones">
             <svg class="icon"><use href="#icon-bell"></use></svg>
             <span class="text">Notificaciones</span>
             <span
@@ -1178,31 +1119,19 @@
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="usuarios"
-            onclick="return showPage('usuarios', this);"
-          >
+          <a href="#" data-page="usuarios">
             <svg class="icon"><use href="#icon-people"></use></svg>
             <span class="text">Usuarios</span>
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="configuracion"
-            onclick="return showPage('configuracion', this);"
-          >
+          <a href="#" data-page="configuracion">
             <svg class="icon"><use href="#icon-setting"></use></svg>
             <span class="text">Configuración</span>
           </a>
         </li>
         <li>
-          <a
-            href="#"
-            data-page="perfil"
-            onclick="return showPage('perfil', this);"
-          >
+          <a href="#" data-page="perfil">
             <svg class="icon"><use href="#icon-user-circle"></use></svg>
             <span class="text">Perfil</span>
           </a>
@@ -1220,7 +1149,7 @@
         <button
           type="button"
           class="mobile-menu-btn"
-          onclick="toggleMobileSidebar()"
+          data-action="toggleMobileSidebar"
           aria-label="Abrir menú"
         >
           <svg
@@ -1240,7 +1169,7 @@
       <div
         id="sidebar-backdrop"
         class="sidebar-backdrop"
-        onclick="toggleMobileSidebar(false)"
+        data-action="closeMobileSidebar"
       ></div>
       <div class="panel-main">
         <div id="page-dashboard" class="page active">
@@ -1252,14 +1181,7 @@
             </div>
             <div
               class="notificaciones"
-              onclick="
-                return showPage(
-                  'notificaciones',
-                  document.querySelector(
-                    '#sidebar a[data-page=\'notificaciones\']',
-                  ),
-                );
-              "
+              data-goto-page="notificaciones"
               title="Ver notificaciones"
             >
               <svg class="icon vuesax-linear">
@@ -1295,7 +1217,8 @@
                 class="tab"
                 data-periodo="hoy"
                 aria-pressed="false"
-                onclick="cambiarPeriodoDashboard('hoy')"
+                data-action="cambiarPeriodoDashboard"
+                data-periodo="hoy"
               >
                 Hoy
               </button>
@@ -1304,7 +1227,8 @@
                 class="tab"
                 data-periodo="7d"
                 aria-pressed="false"
-                onclick="cambiarPeriodoDashboard('7d')"
+                data-action="cambiarPeriodoDashboard"
+                data-periodo="7d"
               >
                 7 Días
               </button>
@@ -1313,7 +1237,8 @@
                 class="tab active"
                 data-periodo="mes"
                 aria-pressed="true"
-                onclick="cambiarPeriodoDashboard('mes')"
+                data-action="cambiarPeriodoDashboard"
+                data-periodo="mes"
               >
                 Mes
               </button>
@@ -1322,7 +1247,8 @@
                 class="tab"
                 data-periodo="anio"
                 aria-pressed="false"
-                onclick="cambiarPeriodoDashboard('anio')"
+                data-action="cambiarPeriodoDashboard"
+                data-periodo="anio"
               >
                 Año
               </button>
@@ -1335,7 +1261,7 @@
             <button
               type="button"
               class="btn-secondary"
-              onclick="cambiarPeriodoDashboard()"
+              data-action="cambiarPeriodoDashboard"
             >
               Reintentar
             </button>
@@ -1536,7 +1462,8 @@
                     type="button"
                     class="legend-item legend-toggle"
                     aria-pressed="true"
-                    onclick="alternarSerieIngresos(0, this)"
+                    data-action="alternarSerieIngresos"
+                    data-serie="0"
                   >
                     <div class="legend-color legend-color-ventas"></div>
                     <span>Ventas</span>
@@ -1545,7 +1472,8 @@
                     type="button"
                     class="legend-item legend-toggle"
                     aria-pressed="true"
-                    onclick="alternarSerieIngresos(1, this)"
+                    data-action="alternarSerieIngresos"
+                    data-serie="1"
                   >
                     <div class="legend-color legend-color-servicios"></div>
                     <span>Servicios</span>
@@ -1554,7 +1482,8 @@
                     type="button"
                     class="legend-item legend-toggle"
                     aria-pressed="true"
-                    onclick="alternarSerieIngresos(2, this)"
+                    data-action="alternarSerieIngresos"
+                    data-serie="2"
                   >
                     <div class="legend-color legend-color-total"></div>
                     <span>Total</span>
@@ -1627,17 +1556,7 @@
                 <h3 class="header-title">Clientes Frecuentes</h3>
               </header>
               <div class="customer-list" id="dash-frecuentes"></div>
-              <button
-                class="view-all-btn"
-                onclick="
-                  return showPage(
-                    'clientes',
-                    document.querySelector(
-                      '#sidebar a[data-page=\'clientes\']',
-                    ),
-                  );
-                "
-              >
+              <button class="view-all-btn" data-goto-page="clientes">
                 Ver Todos
               </button>
             </article>
@@ -1661,30 +1580,10 @@
                     <span id="dash-agotados-sin-categoria">0</span>
                   </div>
                   <div class="inv-actions">
-                    <button
-                      class="action-btn"
-                      onclick="
-                        return showPage(
-                          'productos',
-                          document.querySelector(
-                            '#sidebar a[data-page=\'productos\']',
-                          ),
-                        );
-                      "
-                    >
+                    <button class="action-btn" data-goto-page="productos">
                       Ver Agotados
                     </button>
-                    <button
-                      class="action-btn"
-                      onclick="
-                        return showPage(
-                          'productos',
-                          document.querySelector(
-                            '#sidebar a[data-page=\'productos\']',
-                          ),
-                        );
-                      "
-                    >
+                    <button class="action-btn" data-goto-page="productos">
                       Ver Descontinuados
                     </button>
                   </div>
@@ -1699,14 +1598,7 @@
                   </div>
                   <button
                     class="action-btn action-btn-full"
-                    onclick="
-                      return showPage(
-                        'productos',
-                        document.querySelector(
-                          '#sidebar a[data-page=\'productos\']',
-                        ),
-                      );
-                    "
+                    data-goto-page="productos"
                   >
                     Todos Los Productos
                   </button>
@@ -1803,7 +1695,6 @@
 
           <!-- Vista: listado -->
           <div id="producto-list" class="config-subview active">
-            <div id="productos-feedback" role="status" hidden></div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -1841,7 +1732,7 @@
                 <option value="discontinued">Descontinuados</option>
               </select>
             </div>
-            <div id="producto-condiciones-feedback" role="status" hidden></div>
+
             <table class="list-table">
               <thead>
                 <tr>
@@ -1998,7 +1889,6 @@
                 <div id="producto-facturas-asociadas-lista"></div>
               </div>
 
-              <div id="producto-feedback" role="status" hidden></div>
               <div class="form-actions">
                 <button
                   type="button"
@@ -2178,7 +2068,6 @@
             <p id="producto-ver-dias-wrap" hidden>
               Días restantes: <span id="producto-ver-dias-restantes"></span>
             </p>
-            <div id="producto-detalle-feedback" role="status" hidden></div>
 
             <!-- Resumen ejecutivo: lo que más importa, arriba y grande -->
             <div class="kpi-hero-grid pv-hero-grid">
@@ -6005,12 +5894,6 @@
 
           <!-- Vista: listado -->
           <div id="usuario-list" class="config-subview active">
-            <p
-              id="usuarios-feedback"
-              class="feedback-inline"
-              role="status"
-              aria-live="polite"
-            ></p>
             <table class="list-table">
               <thead>
                 <tr>
@@ -6119,7 +6002,8 @@
                     />
                     <button
                       type="button"
-                      onclick="togglePassword('usuario-password', this)"
+                      data-action="togglePassword"
+                      data-target="usuario-password"
                     >
                       <svg class="icon" style="width: 18px; height: 18px">
                         <use href="#icon-eye"></use>
@@ -6143,7 +6027,8 @@
                     />
                     <button
                       type="button"
-                      onclick="togglePassword('usuario-password-confirm', this)"
+                      data-action="togglePassword"
+                      data-target="usuario-password-confirm"
                     >
                       <svg class="icon" style="width: 18px; height: 18px">
                         <use href="#icon-eye"></use>
@@ -6153,12 +6038,6 @@
                 </div>
               </div>
 
-              <p
-                id="usuario-feedback"
-                class="feedback-inline"
-                role="status"
-                aria-live="polite"
-              ></p>
               <div class="form-actions">
                 <button
                   type="button"
@@ -6185,28 +6064,32 @@
             <button
               class="tab active"
               id="cfgtab-facturacion"
-              onclick="showConfigTab('facturacion', this)"
+              data-action="showConfigTab"
+              data-tab="facturacion"
             >
               Facturación
             </button>
             <button
               class="tab"
               id="cfgtab-moneda"
-              onclick="showConfigTab('moneda', this)"
+              data-action="showConfigTab"
+              data-tab="moneda"
             >
               Moneda
             </button>
             <button
               class="tab"
               id="cfgtab-tasas"
-              onclick="showConfigTab('tasas', this)"
+              data-action="showConfigTab"
+              data-tab="tasas"
             >
               Tasas
             </button>
             <button
               class="tab"
               id="cfgtab-general"
-              onclick="showConfigTab('general', this)"
+              data-action="showConfigTab"
+              data-tab="general"
             >
               General
             </button>
@@ -6227,7 +6110,7 @@
                 >
                 <select
                   id="config-elementos-pagina"
-                  onchange="cambiarTamPagina(this.value)"
+                  data-change-action="cambiarTamPagina"
                 >
                   <option value="10">10 elementos</option>
                   <option value="20" selected>20 elementos</option>
@@ -6240,12 +6123,6 @@
                 proveedores, usuarios, facturas, históricos, unidades y líneas
                 de factura. La preferencia se recuerda en este navegador.
               </p>
-              <div
-                class="feedback-inline"
-                id="config-paginacion-feedback"
-                role="status"
-                aria-live="polite"
-              ></div>
             </div>
           </div>
 
@@ -6264,13 +6141,14 @@
                 <div class="logo-upload-row">
                   <div
                     class="logo-drop"
-                    onclick="alert('Selecciona un archivo de logo para subir.')"
+                    data-action="avisoDemo"
+                    data-mensaje="Selecciona un archivo de logo para subir."
                   >
                     <svg class="icon"><use href="#icon-upload"></use></svg>
                   </div>
                   <div class="logo-current">
                     <img
-                      src="https://placehold.co/117x89/020f1e/ffffff?text=LOGO"
+                      src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='117' height='89'%3E%3Crect width='117' height='89' fill='%23020f1e'/%3E%3Ctext x='58.5' y='50' fill='%23fff' font-family='sans-serif' font-size='16' text-anchor='middle'%3ELOGO%3C/text%3E%3C/svg%3E"
                       alt="Logo actual"
                     />
                   </div>
@@ -6392,7 +6270,8 @@
                   <button
                     type="button"
                     class="btn-primary"
-                    onclick="alert('Cambios de facturación guardados (demo).')"
+                    data-action="avisoDemo"
+                    data-mensaje="Cambios de facturación guardados (demo)."
                   >
                     Guardar Cambios
                   </button>
@@ -6413,7 +6292,8 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="alert('Cambios de moneda aplicados (demo).')"
+                data-action="avisoDemo"
+                data-mensaje="Cambios de moneda aplicados (demo)."
               >
                 Aplicar Cambios
               </button>
@@ -6433,9 +6313,7 @@
                     <th
                       id="th-fecha-historial-tasas"
                       class="th-sortable"
-                      onclick="
-                        toggleOrdenFecha('historialTasas', renderHistorialTasas)
-                      "
+                      data-action="ordenarHistorialTasas"
                     >
                       Fecha y Hora
                     </th>
@@ -6459,7 +6337,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick="guardarTasasCambioDemo()"
+                data-action="guardarTasasCambioDemo"
               >
                 Guardar Tasas de Cambio
               </button>
@@ -6474,14 +6352,16 @@
               <button
                 class="tab active"
                 id="tab-notif-todas"
-                onclick="showNotifTab('todas', this)"
+                data-action="showNotifTab"
+                data-tab="todas"
               >
                 Todas
               </button>
               <button
                 class="tab"
                 id="tab-notif-no-leidas"
-                onclick="showNotifTab('no-leidas', this)"
+                data-action="showNotifTab"
+                data-tab="no-leidas"
               >
                 No Leídas
                 <span
@@ -6497,7 +6377,7 @@
                 type="text"
                 id="notificacion-search"
                 placeholder="Buscar notificación..."
-                oninput="renderNotificaciones()"
+                data-input-action="renderNotificaciones"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -6512,16 +6392,13 @@
               <input
                 type="date"
                 id="notificacion-fecha"
-                onchange="renderNotificaciones()"
+                data-change-action="renderNotificaciones"
               />
             </label>
             <button
               type="button"
               class="btn-secondary"
-              onclick="
-                document.getElementById('notificacion-fecha').value = '';
-                renderNotificaciones();
-              "
+              data-action="limpiarFechaNotificacion"
             >
               Limpiar fecha
             </button>
@@ -6529,7 +6406,7 @@
               type="button"
               class="btn-secondary"
               style="margin-left: auto"
-              onclick="marcarTodasNotificacionesLeidas()"
+              data-action="marcarTodasNotificacionesLeidas"
             >
               <svg class="icon" style="width: 16px; height: 16px">
                 <use href="#icon-check"></use>
@@ -6542,12 +6419,6 @@
 
         <!-- ===================== PERFIL ===================== -->
         <div id="page-perfil" class="page">
-          <p
-            class="feedback-inline"
-            id="perfil-feedback"
-            role="alert"
-            aria-live="assertive"
-          ></p>
           <div
             class="feedback-inline"
             id="reserved-data-warning"
@@ -6652,7 +6523,8 @@
                 />
                 <button
                   type="button"
-                  onclick="togglePassword('perfil-pass-actual', this)"
+                  data-action="togglePassword"
+                  data-target="perfil-pass-actual"
                 >
                   <svg class="icon" style="width: 18px; height: 18px">
                     <use href="#icon-eye"></use>
@@ -6672,7 +6544,8 @@
                 />
                 <button
                   type="button"
-                  onclick="togglePassword('perfil-pass-nueva', this)"
+                  data-action="togglePassword"
+                  data-target="perfil-pass-nueva"
                 >
                   <svg class="icon" style="width: 18px; height: 18px">
                     <use href="#icon-eye"></use>
@@ -6694,7 +6567,8 @@
                 />
                 <button
                   type="button"
-                  onclick="togglePassword('perfil-pass-confirmar', this)"
+                  data-action="togglePassword"
+                  data-target="perfil-pass-confirmar"
                 >
                   <svg class="icon" style="width: 18px; height: 18px">
                     <use href="#icon-eye"></use>

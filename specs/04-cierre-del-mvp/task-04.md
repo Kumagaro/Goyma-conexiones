@@ -14,42 +14,52 @@
 
 - [x] Confirmar con el dueño los supuestos S-01 a S-11 de `spec-04` §11 y anotar las respuestas en la spec.
   - Confirmados tal como están (2026-10-28).
-- [ ] Línea base: `cargo test` (373), `npm test` (303), clippy, fmt y prettier en verde antes de tocar nada.
-- [ ] Inventario con `grep` (sin números de línea): manejadores inline y `innerHTML` con datos en `dashboard-unificado.html` y `dashboard.js`; mensajes `form-feedback`/`showMessage`/`showStatus`/`showFeedback` por vista; datos simulados de Notificaciones, Dashboard y Configuración en `dashboard.js`.
-- [ ] Comprobar que `printpdf` 0.7 con `embedded_images` e `image` 0.25 (`png`, `jpeg`) compilan sin warnings y sin arrastrar `tokio` (spike, `plan-04` §1).
+- [x] Línea base: `cargo test` (373), `npm test` (303), clippy, fmt y prettier en verde antes de tocar nada.
+  - Tomada del commit `8af651e` (sin cambios de código desde entonces): 373/373, 303/303, clippy, fmt y prettier limpios.
+- [x] Inventario con `grep` (sin números de línea): manejadores inline y `innerHTML` con datos en `dashboard-unificado.html` y `dashboard.js`; mensajes `form-feedback`/`showMessage`/`showStatus`/`showFeedback` por vista; datos simulados de Notificaciones, Dashboard y Configuración en `dashboard.js`.
+  - 2026-10-28: **55** manejadores `on*` en `dashboard-unificado.html` (0 en `index.html` y `recovery.html`). `innerHTML` con asignación en `dashboard.js` (17), `unidadesView` (12), `categoriasView` (6), `proveedoresView` (6), `clientesView` (4), `usuarios` (4) y `dashboardView` (3). Mensajes de texto en `facturasView`, `productosView`, `clientesView`, `proveedoresView`, `historialView`, `usuarios`, `perfil`, `loginView`, `recoveryView`, `categoriasView`, `unidadesView`, `formDialog` y `cleanupWarning`. Datos simulados: `monedasData`, `historialTasasData` y `rateCardsData` (`notificacionesData` ya arranca vacío).
+- [x] Comprobar que `printpdf` 0.7 con `embedded_images` e `image` 0.25 (`png`, `jpeg`) compilan sin warnings y sin arrastrar `tokio` (spike, `plan-04` §1).
+  - **Resultado:** no hace falta. `embedded_images` arrastra `image` 0.24 con ocho formatos; en cambio, `ImageXObject` con `ImageFilter::DCT` incrusta un JPEG sin decodificarlo y no depende de esa *feature*. Decisión D-17 de `plan-04`: logo siempre en JPEG, convertido en el frontend con un `<canvas>`. Se comprobará al implementar IM-02 (fase 3).
 - [ ] Comprobar en `tauri:dev` que `window.print()` abre el diálogo de impresión del sistema en WebView2 (spike de D-06). Si no, anotar la alternativa antes de la fase 3.
+  - **Pendiente del dueño:** necesita operar la ventana de la app; no bloquea las fases 1 y 2.
 
 ## 1. Fase 1 — Base: migraciones, toasts y endurecimiento
 
 ### 1.1 Migraciones (MG-01)
 
-- [ ] Test (Rust): una base vacía queda en la última versión; una base de las specs 1 a 3 (`user_version = 0` con `users`) se marca como versión 1 y migra; ejecutar dos veces no cambia nada.
-- [ ] Test (Rust): una migración que falla deja la base en la versión anterior y devuelve `migrationFailed`; una base con versión mayor devuelve `schemaTooNew`.
-- [ ] Implementación: `db/migrations.rs` (`run_migrations`, lista ordenada), llamada en el `setup` después de abrir la conexión; pantalla de error si falla.
-- [ ] Constitution v1.3.0: §4 con migraciones versionadas y entrada en el historial de versiones (`spec-04` §7.8).
+- [x] Test (Rust): una base vacía queda en la última versión; una base de las specs 1 a 3 (`user_version = 0` con `users`) se marca como versión 1 y migra; ejecutar dos veces no cambia nada.
+- [x] Test (Rust): una migración que falla deja la base en la versión anterior y devuelve `migrationFailed`; una base con versión mayor devuelve `schemaTooNew`.
+- [x] Implementación: `db/migrations.rs` (`run_migrations`, lista ordenada), llamada en el `setup` después de abrir la conexión; pantalla de error si falla.
+  - `initialize_database` aplica `run_migrations` tras `init_schema`; si falla, registra la causa en `errors.log` y el diálogo de arranque muestra el mensaje de `migrationFailed`/`schemaTooNew`. `setup_test_db` también migra. Tests: 4 en `db/migrations.rs`; `cargo test` 377/377.
+- [x] Constitution v1.3.0: §4 con migraciones versionadas y entrada en el historial de versiones (`spec-04` §7.8).
+  - Hecho; `Agents.md` alineado con v1.3.0 y una regla nueva "Cambios de esquema".
 
 ### 1.2 Toasts (TO-01)
 
-- [ ] Test (Vitest): `showToast` crea la región una sola vez; cada tipo tiene su icono, clase y rol (`status`/`alert`); éxito/info se cierran a los ~4 s, advertencia a los ~7 s, error/crítico no (temporizadores falsos); `mouseenter`/`focusin` pausan; máximo 4 visibles; botón cerrar con `aria-label`; el mensaje con HTML se pinta como texto; sin animación con `prefers-reduced-motion`.
-- [ ] Test (Vitest): `utils/feedback.js` traduce un `AppError` de validación a su mensaje, un error interno a uno genérico, y `setFieldError` pone el texto bajo el campo con `aria-describedby` y `aria-invalid`; `clearFieldError` lo quita al escribir.
-- [ ] Implementación: `components/toast.js`, `css/toast.css` (paleta de `dashboard.css`, S-01), `utils/feedback.js`.
-- [ ] Migración de vistas, una casilla por vista y su test (resultado como toast, error de campo junto al campo, aviso de purga como toast de advertencia):
-  - [ ] `loginView`, `recoveryView` (solo errores generales; los de campo se conservan).
-  - [ ] `usuarios`, `perfil`.
-  - [ ] `categoriasView`, `unidadesView`, `productosView`.
-  - [ ] `clientesView`, `proveedoresView`, `historialView`.
-  - [ ] `facturasView` (los seis submódulos y la lista general), `quickContactDialog`, `quickProductDialog`.
-- [ ] Test (Vitest, `environment.test.js`): ninguna vista de producción usa ya `.form-feedback` para resultados generales.
+- [x] Test (Vitest): `showToast` crea la región una sola vez; cada tipo tiene su icono, clase y rol (`status`/`alert`); éxito/info se cierran a los ~4 s, advertencia a los ~7 s, error/crítico no (temporizadores falsos); `mouseenter`/`focusin` pausan; máximo 4 visibles; botón cerrar con `aria-label`; el mensaje con HTML se pinta como texto; sin animación con `prefers-reduced-motion`.
+- [x] Test (Vitest): `utils/feedback.js` traduce un `AppError` de validación a su mensaje, un error interno a uno genérico, y `setFieldError` pone el texto bajo el campo con `aria-describedby` y `aria-invalid`; `clearFieldError` lo quita al escribir.
+- [x] Implementación: `components/toast.js`, `css/toast.css` (paleta de `dashboard.css`, S-01), `utils/feedback.js`.
+- [x] Migración de vistas, una casilla por vista y su test (resultado como toast, error de campo junto al campo, aviso de purga como toast de advertencia):
+  - [x] `loginView`, `recoveryView` (solo errores generales; los de campo se conservan).
+  - [x] `usuarios`, `perfil`.
+  - [x] `categoriasView`, `unidadesView`, `productosView`.
+  - [x] `clientesView`, `proveedoresView`, `historialView`.
+  - [x] `facturasView` (los seis submódulos y la lista general), `quickContactDialog`, `quickProductDialog`.
+- [x] Test (Vitest, `environment.test.js`): ninguna vista de producción usa ya `.form-feedback` para resultados generales. Hecho: se quitaron además los contenedores sin uso (`productos-feedback`, `producto-*-feedback`, `usuario(s)-feedback`, `perfil-feedback`, `config-paginacion-feedback`); se conservan como ayudas junto al campo los avisos en vivo de `categoria-feedback`/`unidad-feedback` y la vista previa del precio. `formDialog` (altas rápidas) marca el campo y avisa por toast. Suite: 329/329.
 
 ### 1.3 Endurecimiento y CSP (SG-01)
 
-- [ ] Test (Vitest, `environment.test.js`): cero atributos `on*` en todo `dashboard-unificado.html`, `index.html` y `recovery.html`; ningún `innerHTML =` con plantilla o concatenación en el JS de producción; `tauri.conf.json` tiene la CSP de `plan-04` §1.
-- [ ] Implementación: sidebar con `data-page` y un listener; `irAFacturaDesdeGeneral` sin `a[onclick*=…]`; resto de `onclick` del mockup a listeners; `innerHTML` con datos a DOM/`textContent` (incluidos `clientesView` y `proveedoresView`, que aún lo usan en sus listados).
+- [x] Test (Vitest, `environment.test.js`): cero atributos `on*` en todo `dashboard-unificado.html`, `index.html` y `recovery.html`; ningún `innerHTML =` con plantilla o concatenación en el JS de producción; `tauri.conf.json` tiene la CSP de `plan-04` §1.
+  - Hecho: además, cero `on*` en las plantillas del JS, ningún `<script>` inline ni recurso externo (`http(s)://`) en los tres HTML. Los `innerHTML` con literal fijo (iconos de `usuarios.js`) se admiten.
+  - **Desviación (justificada):** los renderizadores de datos de prueba de `dashboard.js` quedan en una lista de pendientes del test, cada uno con la fase que lo sustituye al conectar datos reales: monedas y tasas (fase 3, CF-02), notificaciones (fase 2, NT-01), KPIs/listas/gastos del dashboard (fase 4, DB-01). Hoy solo pintan constantes del propio código, sin datos del usuario; convertirlos ahora se reescribiría en su fase. El test falla si aparece un `innerHTML` nuevo con datos o si una línea pendiente desaparece sin quitarla de la lista, así que cada fase debe vaciar la suya.
+- [x] Implementación: sidebar con `data-page` y un listener; `irAFacturaDesdeGeneral` sin `a[onclick*=…]`; resto de `onclick` del mockup a listeners; `innerHTML` con datos a DOM/`textContent` (incluidos `clientesView` y `proveedoresView`, que aún lo usan en sus listados).
+  - Hecho: los 55 `on*` del HTML y los 6 de las plantillas de `dashboard.js` pasan a `data-page`/`data-goto-page`/`data-action`/`data-input-action`/`data-change-action` con listeners delegados en `dashboard.js`; fuera `removeInlineHandlers`/`removeLegacyInlineHandlers`. Nuevo `utils/dom.js` (`el`, `messageRow`, `setOptions`) sustituye las cinco copias de `escapeHtml`: listados de clientes, proveedores, categorías (y su detalle), unidades, conversiones y sus selectores, `dashboardView` y el paginador global se construyen con DOM.
 - [ ] Implementación: activar la CSP. Comprobar en `tauri:dev` que la app arranca y navega sin errores de CSP en la consola.
+  - Hecho (falta la comprobación en la app): CSP de `plan-04` §1 en `tauri.conf.json`; el script inline de `index.html` (mostrar contraseña) pasa a `loginView.js`; el logo de ejemplo de Configuración deja `placehold.co` por un SVG `data:` (la fase 3 pone el logo real). Chart.js y jsPDF no usan `eval`/`new Function`. **Pendiente: arrancar `npm run tauri:dev` y revisar la consola en login, recuperación y cada página del menú.**
 
 ### 1.4 Cierre de la fase 1
 
-- [ ] Suites, lint, formato y commit.
+- [x] Suites, lint, formato y commit. `cargo test` 377/377, `npm test` 332/332 (38 archivos), `clippy --all-targets -D warnings` y `cargo fmt --check` limpios, `prettier --check .` limpio (`dashboard-unificado.html`, que ya venía sin formatear, queda formateado). Falta la comprobación de la CSP en `tauri:dev` (§1.3), que se hará junto a la verificación manual final.
 
 ## 2. Fase 2 — Notificaciones y reservas
 

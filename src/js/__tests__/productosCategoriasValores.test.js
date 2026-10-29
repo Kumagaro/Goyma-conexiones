@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toastsOfType } from "./helpers/invoiceUi.js";
 
 vi.mock("../services/productsService.js", () => ({
   activateProduct: vi.fn(),
@@ -589,10 +590,8 @@ describe("valores de Fase 2 en productos y categorías", () => {
           "Café",
         ),
       );
-      // Sin aviso, el estado queda vacío y oculto (no "undefined").
-      const feedback = document.getElementById("producto-detalle-feedback");
-      expect(feedback.textContent).toBe("");
-      expect(feedback.hidden).toBe(true);
+      // Sin aviso no aparece ningún toast (ni uno con "undefined").
+      expect(toastsOfType("warning")).toHaveLength(0);
     },
   );
 

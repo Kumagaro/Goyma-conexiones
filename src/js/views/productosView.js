@@ -29,6 +29,15 @@ import {
   INVOICE_TYPE_LABELS,
   invoiceStatusLabel,
 } from "../utils/invoiceLabels.js";
+import {
+  clearFieldErrors,
+  notifyError,
+  notifySuccess,
+  notifyWarning,
+  reportError,
+  requireFields,
+  setFieldError,
+} from "../utils/feedback.js";
 import { openUnitModalForProduct } from "./unidadesView.js";
 
 let initPromise = null;
@@ -258,7 +267,6 @@ function scheduleProductListReload() {
 // Mensaje de error que puso la propia carga del listado. Al cargar bien solo se
 // limpia ese: una carga que termina tarde no debe borrar el aviso de otra
 // acción (p. ej. "El producto ya no existe").
-let activeListLoadError = "";
 
 async function loadActiveProducts() {
   const body = document.getElementById("productos-body");
@@ -268,16 +276,9 @@ async function loadActiveProducts() {
     const result = await listProducts(readProductFilters());
     productList = Array.isArray(result) ? result : [];
     renderProductList(productList);
-    const feedback = document.getElementById("productos-feedback");
-    if (activeListLoadError && feedback?.textContent === activeListLoadError) {
-      showStatus("productos-feedback", "");
-    }
-    activeListLoadError = "";
   } catch (error) {
     renderLoadingRow(body, 9, "No se pudieron cargar los productos.");
-    activeListLoadError =
-      error?.message || "No se pudieron cargar los productos.";
-    showStatus("productos-feedback", activeListLoadError);
+    notifyError(error, "No se pudieron cargar los productos.");
   }
 }
 
@@ -354,16 +355,10 @@ async function loadConditionProducts() {
     const response = await listOutOfStockAndDiscontinued(search, condition);
     conditionList = Array.isArray(response?.items) ? response.items : [];
     renderConditionList(conditionList);
-    showStatus(
-      "producto-condiciones-feedback",
-      response?.expiredCleanupWarning ?? "",
-    );
+    notifyWarning(response?.expiredCleanupWarning);
   } catch (error) {
     renderLoadingRow(body, 7, "No se pudieron cargar los productos.");
-    showStatus(
-      "producto-condiciones-feedback",
-      error?.message || "No se pudieron cargar los productos.",
-    );
+    notifyError(error, "No se pudieron cargar los productos.");
   }
 }
 
@@ -459,13 +454,6 @@ function renderLoadingRow(body, columnCount, message) {
   body.append(row);
 }
 
-function showStatus(id, message) {
-  const status = document.getElementById(id);
-  if (!status) return;
-  status.textContent = message;
-  status.hidden = !message;
-}
-
 function handleProductListClick(event) {
   const button = event.target.closest("button[data-product-action]");
   if (!button) return;
@@ -512,14 +500,8 @@ async function openProductDetail(productId) {
     renderProductDetail(detail);
     await showProductoTab("ver");
   } catch (error) {
-    const statusId =
-      currentTab === "agotados"
-        ? "producto-condiciones-feedback"
-        : currentTab === "ver"
-          ? "producto-detalle-feedback"
-          : "productos-feedback";
     await refreshCurrentList();
-    showStatus(statusId, error?.message || "No se pudo abrir el producto.");
+    notifyError(error, "No se pudo abrir el producto.");
   }
 }
 
@@ -607,7 +589,7 @@ function renderProductDetail(detail) {
     );
     if (button) button.hidden = hidden;
   }
-  showStatus("producto-detalle-feedback", detail.expiredCleanupWarning ?? "");
+  notifyWarning(detail.expiredCleanupWarning);
   void renderAssociatedInvoices(
     detail.id,
     "producto-ver-facturas",
@@ -712,8 +694,8 @@ async function handleProductAction(action, productId) {
     try {
       const detail = await getProduct(productId);
       if (detail.isDiscontinued) {
-        showStatus(
-          "productos-feedback",
+        notifyError(
+          null,
           "Un producto descontinuado no se puede editar. Actívalo primero",
         );
         await refreshCurrentList();
@@ -725,10 +707,7 @@ async function handleProductAction(action, productId) {
         document.getElementById("tab-producto-create"),
       );
     } catch (error) {
-      showStatus(
-        "productos-feedback",
-        error?.message || "No se pudo abrir el producto.",
-      );
+      notifyError(error, "No se pudo abrir el producto.");
       await refreshCurrentList();
     }
     return;
@@ -772,28 +751,20 @@ async function handleProductAction(action, productId) {
     } else {
       await refreshCurrentList();
     }
-    const warning = result?.expiredCleanupWarning ?? "";
-    if (currentTab === "ver") showStatus("producto-detalle-feedback", warning);
-    else
-      showStatus(
-        currentTab === "agotados"
-          ? "producto-condiciones-feedback"
-          : "productos-feedback",
-        warning,
-      );
+    notifySuccess(ACTION_SUCCESS[action](item.name));
+    notifyWarning(result?.expiredCleanupWarning);
   } catch (error) {
-    const statusId =
-      currentTab === "ver"
-        ? "producto-detalle-feedback"
-        : currentTab === "agotados"
-          ? "producto-condiciones-feedback"
-          : "productos-feedback";
-    showStatus(statusId, error?.message || "No se pudo completar la acción.");
     if (currentTab === "ver") await openProductDetail(productId);
     else await refreshCurrentList();
-    showStatus(statusId, error?.message || "No se pudo completar la acción.");
+    notifyError(error, "No se pudo completar la acción.");
   }
 }
+
+const ACTION_SUCCESS = {
+  discontinue: (name) => `Producto «${name}» descontinuado.`,
+  activate: (name) => `Producto «${name}» activado.`,
+  delete: (name) => `Producto «${name}» eliminado.`,
+};
 
 function findProduct(productId) {
   return (
@@ -817,10 +788,9 @@ function setText(id, value) {
 async function createCategoryFromProduct(name) {
   try {
     const category = await createCategory(name, "");
-    showProductFeedback("");
     return { id: category.id, nombre: category.name };
   } catch (error) {
-    showProductFeedback(error?.message || "No se pudo crear la categoría.");
+    notifyError(error, "No se pudo crear la categoría.");
     return null;
   }
 }
@@ -943,7 +913,6 @@ export function openProductForm(product = null) {
   clearTimeout(previewTimer);
   previewRequestId += 1;
   setPricePreviewFeedback("");
-  clearProductFeedback();
 }
 
 export function cancelProductForm() {
@@ -957,7 +926,6 @@ export function cancelProductForm() {
   unitCombobox?.setSelected(null);
   updateExpiryVisibility();
   clearSellingPricePreview();
-  clearProductFeedback();
   window.showProductoTab?.(
     "list",
     document.getElementById("tab-producto-list"),
@@ -968,11 +936,18 @@ async function handleProductSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
 
-  if (
-    categoryCombobox.hasUnselectedValue() ||
-    unitCombobox.hasUnselectedValue()
-  ) {
-    showProductFeedback("Elige una opción de la lista o vacía el campo");
+  clearFieldErrors(form);
+  const unselected = [categoryCombobox, unitCombobox].filter((combobox) =>
+    combobox.hasUnselectedValue(),
+  );
+  if (unselected.length) {
+    for (const combobox of unselected) {
+      setFieldError(
+        combobox.getInput(),
+        "Elige una opción de la lista o vacía el campo",
+      );
+    }
+    notifyError(null, "Elige una opción de la lista o vacía el campo");
     return;
   }
 
@@ -980,12 +955,12 @@ async function handleProductSubmit(event) {
   const cost = getValue("producto-precio-entrada");
   const quantity = getValue("producto-stock");
   const profitPercent = getValue("producto-ganancia");
-  if (
-    !name ||
-    (editingProductId === null && (!cost.trim() || !quantity.trim())) ||
-    !profitPercent.trim()
-  ) {
-    showProductFeedback("Completa los campos obligatorios.");
+  const required = ["producto-nombre", "producto-ganancia"];
+  if (editingProductId === null) {
+    required.push("producto-precio-entrada", "producto-stock");
+  }
+  if (!requireFields(required)) {
+    notifyError(null, "Completa los campos obligatorios.");
     return;
   }
 
@@ -1008,22 +983,30 @@ async function handleProductSubmit(event) {
     if (editingProductId === null) {
       await createProduct({ ...input, cost, quantity });
       openProductForm();
-      showProductFeedback("Producto creado correctamente.");
+      notifySuccess("Producto creado correctamente.");
     } else {
       const result = await updateProduct({
         productId: editingProductId,
         ...input,
       });
       openProductForm();
-      showProductFeedback(
-        result?.expiredCleanupWarning || "Producto actualizado correctamente.",
-      );
+      notifySuccess("Producto actualizado correctamente.");
+      notifyWarning(result?.expiredCleanupWarning);
     }
   } catch (error) {
-    showProductFeedback(error?.message || "No se pudo guardar el producto.");
-    form.querySelector("#producto-nombre")?.focus();
+    reportError(error, "No se pudo guardar el producto.", PRODUCT_FIELDS);
   }
 }
+
+// Campo al que se refiere cada rechazo de validación del backend (TO-01).
+const PRODUCT_FIELDS = [
+  [/nombre/i, "producto-nombre"],
+  [/descripción/i, "producto-descripcion"],
+  [/ganancia|porcentaje/i, "producto-ganancia"],
+  [/costo/i, "producto-precio-entrada"],
+  [/cantidad|stock/i, "producto-stock"],
+  [/caducidad/i, "producto-caducidad-fecha"],
+];
 
 function scheduleSellingPricePreview() {
   clearTimeout(previewTimer);
@@ -1078,17 +1061,6 @@ function updateExpiryVisibility() {
     wrapper.hidden = !hasExpiry;
     wrapper.classList.toggle("field-oculto", !hasExpiry);
   }
-}
-
-function showProductFeedback(message) {
-  const feedback = document.getElementById("producto-feedback");
-  if (!feedback) return;
-  feedback.textContent = message;
-  feedback.hidden = !message;
-}
-
-function clearProductFeedback() {
-  showProductFeedback("");
 }
 
 function setPricePreviewFeedback(message) {

@@ -6,6 +6,12 @@ import {
   resetUserPassword,
   updateUser,
 } from "../services/usersService.js";
+import {
+  notifyError,
+  notifySuccess,
+  notifyWarning,
+  reportError,
+} from "../utils/feedback.js";
 import { installFormValidation } from "../utils/formValidation.js";
 
 let users = [];
@@ -88,7 +94,7 @@ async function loadUsers() {
     users = await listUsers();
     renderUserList(users);
   } catch {
-    showUserListFeedback("No se pudieron cargar los usuarios.");
+    notifyError(null, "No se pudieron cargar los usuarios.");
   }
 }
 
@@ -152,14 +158,6 @@ function renderUserList(userList) {
   }
 }
 
-function showUserListFeedback(message) {
-  const feedback = document.getElementById("usuarios-feedback");
-  if (!feedback) return;
-  feedback.textContent = message;
-  feedback.hidden = false;
-  feedback.classList.add("is-visible");
-}
-
 async function handleCreateUser(event) {
   event.preventDefault();
   if (getSession()?.role !== "administrador") return;
@@ -192,10 +190,10 @@ async function handleCreateUser(event) {
       nationalId,
       password,
     );
-    showUserFeedback(`Usuario ${created.username} creado correctamente.`);
+    notifySuccess(`Usuario ${created.username} creado correctamente.`);
     form.reset();
   } catch (error) {
-    showUserFeedback(error?.message || "No se pudo crear el usuario.");
+    reportError(error, "No se pudo crear el usuario.", USER_FIELDS);
   }
 }
 
@@ -229,9 +227,9 @@ async function handleDeleteUser(userId) {
     await deleteUser(userId);
     users = users.filter((item) => item.id !== userId);
     renderUserList(users);
-    showUserListFeedback(`Usuario ${user.username} eliminado correctamente.`);
+    notifySuccess(`Usuario ${user.username} eliminado correctamente.`);
   } catch (error) {
-    showUserListFeedback(error?.message || "No se pudo eliminar el usuario.");
+    notifyError(error, "No se pudo eliminar el usuario.");
   }
 }
 
@@ -294,7 +292,7 @@ async function handleUpdateUser(event) {
       try {
         await resetUserPassword(editingUserId, newPassword);
       } catch (error) {
-        showUserListFeedback(
+        notifyWarning(
           `Los datos se guardaron, pero la contraseña no se cambió. ${error?.message || "No se pudo cambiar la contraseña."}`,
         );
         resetUserForm();
@@ -303,15 +301,21 @@ async function handleUpdateUser(event) {
       }
     }
 
-    showUserListFeedback(
-      "Los datos del usuario se actualizaron correctamente.",
-    );
+    notifySuccess("Los datos del usuario se actualizaron correctamente.");
     resetUserForm();
     showUserTab("list");
   } catch (error) {
-    showUserFeedback(error?.message || "No se pudo actualizar el usuario.");
+    reportError(error, "No se pudo actualizar el usuario.", USER_FIELDS);
   }
 }
+
+// Campo al que se refiere cada rechazo de validación del backend (TO-01).
+const USER_FIELDS = [
+  [/nombre de usuario/i, "usuario-username"],
+  [/teléfono/i, "usuario-telefono"],
+  [/carnet/i, "usuario-ci"],
+  [/contraseña/i, "usuario-password"],
+];
 
 function resetUserForm() {
   const form = document.getElementById("usuario-form");
@@ -348,14 +352,6 @@ function setEditPasswordMode(isEditing) {
         'Confirmar Contraseña <span class="required">*</span>';
     }
   }
-}
-
-function showUserFeedback(message) {
-  const feedback = document.getElementById("usuario-feedback");
-  if (!feedback) return;
-  feedback.textContent = message;
-  feedback.hidden = false;
-  feedback.classList.add("is-visible");
 }
 
 void initUsersView();

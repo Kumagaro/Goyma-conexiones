@@ -12,8 +12,8 @@
 | Dependencia | Para qué | Justificación |
 |---|---|---|
 | `csv` 1.x (sin `serde` derive obligatorio) | Leer y escribir CSV (CSV-01, CSV-02) | Comillas, separadores dentro de campos y saltos de línea hacen frágil un parser propio; el crate es Rust puro, pequeño y maduro. Se configura con `;` y se escribe el BOM a mano. |
-| `image` 0.25 con `default-features = false`, `features = ["png", "jpeg"]` | Validar el logo por su contenido (CF-03) e incrustarlo en el PDF de facturas (IM-02) | `printpdf` 0.7 necesita los píxeles decodificados para incrustar un PNG; con solo PNG y JPEG el crate queda acotado. Se activa la *feature* `embedded_images` de `printpdf`. |
-| `printpdf` 0.7 (existente) + `embedded_images` | PDF formal de facturas (IM-02) | Ya se usa para el historial (`plan-03` §3.10, D-18). |
+| ~~`image`~~ **descartada en el spike de §0 (D-17)** | — | `printpdf` 0.7 incrusta un JPEG tal cual (`ImageXObject` con `ImageFilter::DCT`) sin la *feature* `embedded_images`, que además arrastraría `image` 0.24 con ocho formatos. |
+| `printpdf` 0.7 (existente, sin *features* nuevas) | PDF formal de facturas (IM-02) | Ya se usa para el historial (`plan-03` §3.10, D-18). |
 | `tauri-plugin-dialog` (existente) | "Guardar como" (PDF, CSV, copia) y "Abrir" (logo, CSV, copia) | Ya se usa para adjuntos y exportación del historial. |
 
 - **Se retira jsPDF** (`src/js/libs/jspdf.umd.min.js`) y su `<script>`: lo sustituye IM-02.
@@ -104,7 +104,7 @@ Todas las tablas nuevas siguen las reglas de §4 de la Constitution (restriccion
 ### 3.7 Impresión y PDF (`invoice_print.rs`, nuevo)
 
 - `build_invoice_document(detail, company) -> InvoiceDocument`: modelo intermedio (títulos por tipo, encabezado, filas, totales) que usan **los dos** caminos: el PDF de `printpdf` y la vista previa HTML (vía el comando `getInvoicePrintModel`), para que impresión y PDF no diverjan (D-05).
-- `exportInvoicePdf(invoiceId, destinationPath)`: escribe el PDF A4 con Helvetica integrada y el logo (`image` → `printpdf::Image`). Fallo de escritura → `exportFailed`.
+- `exportInvoicePdf(invoiceId, destinationPath)`: escribe el PDF A4 con Helvetica integrada y el logo JPEG incrustado sin decodificar (D-17). Fallo de escritura → `exportFailed`.
 - Vista previa: `views/printPreview.js` monta el documento en `#print-area` y llama a `window.print()`; `css/print.css` con `@media print` oculta todo salvo `#print-area`. El logo llega como `data:` URL desde `getCompanyProfile`.
 
 ### 3.8 Borradores (`commands/drafts.rs`)
@@ -245,7 +245,7 @@ src/
 | Desviación | Motivo | Alternativa descartada |
 |---|---|---|
 | `Constitution.md` §4 cambia a v1.3.0 (migraciones) | Respaldo y restauración entre versiones (PEN-15) | Restaurar solo en la misma versión: rompe al actualizar la app. |
-| Dependencias `csv` e `image` | Ver §1 | Parser CSV y decodificador PNG propios: más código y más riesgo. |
+| Dependencia `csv` | Ver §1 | Parser CSV propio: más código y más riesgo. |
 | `style-src 'unsafe-inline'` en la CSP | Los `style=` del mockup no ejecutan código | Reescribir cientos de estilos inline sin beneficio de seguridad. |
 | Cambio visual transversal (toasts) | Decisión del dueño; Constitution §2.V lo permite si se documenta | Mantener el texto plano. |
 | Excepción a `spec-03` §3.2 (las reservas vencen) | RF-119, RF-120, decisión del dueño | Solo avisar sin cancelar. |
@@ -271,6 +271,7 @@ src/
 | D-14 | CSV: `SAVEPOINT` por fila y el mismo `create_*_inner` que el formulario (§3.10). |
 | D-15 | Copias con `VACUUM INTO`; restauración sustituyendo la conexión dentro del `Mutex` (§3.11). |
 | D-16 | Preferencias por usuario y ajustes globales en tablas separadas con claves cerradas (§2.4). |
+| D-17 | **Logo siempre en JPEG** (spike de `task-04` §0): el frontend lee el PNG o JPG elegido con `<input type="file">` y `FileReader`, lo dibuja en un `<canvas>` (fondo blanco) y envía el JPEG en base64 a `saveCompanyLogo`. Rust valida la firma y el marcador SOF (ancho, alto, 1 o 3 componentes), el tamaño (≤ 2 MB) y guarda `app_data_dir/company/logo.jpg`. El PDF lo incrusta con `ImageXObject` + `ImageFilter::DCT`. Sin dependencias nuevas. |
 
 ## 11. Siguiente paso
 

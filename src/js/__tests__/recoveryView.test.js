@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { toastText } from "./helpers/invoiceUi.js";
 import { beforeEach } from "vitest";
 
 const { verifyRecoveryIdentity, recoverPassword } = vi.hoisted(() => ({
@@ -105,9 +106,7 @@ describe("vista de recuperación de contraseña", () => {
     await vi.waitFor(() =>
       expect(verifyRecoveryIdentity).toHaveBeenCalledOnce(),
     );
-    expect(document.getElementById("recoveryFeedback").textContent).toContain(
-      "Los datos no coinciden",
-    );
+    expect(toastText()).toContain("Los datos no coinciden");
     expect(
       document
         .getElementById("changePasswordForm")
@@ -158,9 +157,7 @@ describe("vista de recuperación de contraseña", () => {
       "12345678901",
       "NewPassword2!",
     );
-    expect(
-      document.getElementById("changePasswordFeedback").textContent,
-    ).toContain("Contraseña restablecida correctamente");
+    expect(toastText()).toContain("Contraseña restablecida correctamente");
     vi.advanceTimersByTime(2000);
     expect(mockReplace).toHaveBeenCalledWith("./index.html");
   });

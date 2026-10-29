@@ -1,7 +1,13 @@
 // Formulario modal pequeño (alta rápida desde una factura): campos con
-// etiqueta visible, foco atrapado, Escape para cancelar y el error del
-// backend dentro del diálogo. Devuelve lo que resuelva `onSubmit`, o null si
-// se cancela.
+// etiqueta visible, foco atrapado y Escape para cancelar; los errores salen
+// junto al campo y como toast (spec-04 TO-01). Devuelve lo que resuelva
+// `onSubmit`, o null si se cancela.
+
+import {
+  clearFieldErrors,
+  notifyError,
+  requireFields,
+} from "../utils/feedback.js";
 
 let nextDialogId = 0;
 
@@ -77,11 +83,6 @@ export function openFormDialog({
     controls[field.name] = control;
   }
 
-  const feedback = document.createElement("p");
-  feedback.className = "form-feedback";
-  feedback.setAttribute("role", "alert");
-  feedback.hidden = true;
-
   const actions = document.createElement("div");
   actions.className = "form-actions";
   const cancelButton = document.createElement("button");
@@ -93,7 +94,7 @@ export function openFormDialog({
   saveButton.className = "btn-primary";
   saveButton.textContent = submitText;
   actions.append(cancelButton, saveButton);
-  form.append(feedback, actions);
+  form.append(actions);
 
   card.append(header, form);
   overlay.append(card);
@@ -109,11 +110,6 @@ export function openFormDialog({
       overlay.remove();
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
       resolve(result);
-    };
-
-    const showError = (message) => {
-      feedback.textContent = message;
-      feedback.hidden = false;
     };
 
     const handleKeydown = (event) => {
@@ -141,12 +137,13 @@ export function openFormDialog({
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (saving) return;
-      const missing = Object.values(controls).find(
-        (control) => control.required && !control.value.trim(),
+      clearFieldErrors(form);
+      const required = Object.values(controls).filter(
+        (control) => control.required,
       );
-      if (missing) {
-        showError(missingMessage);
-        missing.focus();
+      // spec-04 TO-01: el campo vacío se marca junto a él y el resumen, en toast.
+      if (!requireFields(required)) {
+        notifyError(null, missingMessage);
         return;
       }
       const values = Object.fromEntries(
@@ -160,7 +157,7 @@ export function openFormDialog({
       try {
         finish((await onSubmit(values)) ?? null);
       } catch (error) {
-        showError(error?.message || "No se pudo guardar.");
+        notifyError(error, "No se pudo guardar.");
       } finally {
         saving = false;
         saveButton.disabled = false;

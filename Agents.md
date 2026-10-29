@@ -1,6 +1,6 @@
 # Agents.md — Goyma Conexiones
 
-Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en este repositorio. Este documento complementa a `Constitution.md`: la constitución define los **principios**, este archivo define **cómo ejecutarlos en la práctica**. Ante cualquier conflicto, `Constitution.md` tiene prioridad. *(Alineado con `Constitution.md` v1.2.0.)*
+Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en este repositorio. Este documento complementa a `Constitution.md`: la constitución define los **principios**, este archivo define **cómo ejecutarlos en la práctica**. Ante cualquier conflicto, `Constitution.md` tiene prioridad. *(Alineado con `Constitution.md` v1.3.0.)*
 
 ---
 
@@ -36,6 +36,7 @@ Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en 
 | Identificadores (variables, funciones, tipos, columnas de BD, comandos Tauri) | Inglés |
 | Convención de nombres | `camelCase` en JS y en columnas/tablas de SQLite; `snake_case` idiomático en Rust (funciones, variables, campos, comandos Tauri). Tauri convierte los argumentos de `invoke()` a `snake_case` automáticamente; los structs devueltos a JS llevan `#[serde(rename_all = "camelCase")]`; el nombre `snake_case` del comando solo aparece dentro de `services/*.js`. Nunca `#[allow(non_snake_case)]` |
 | Reglas de esquema | Lo que el esquema puede garantizar (`UNIQUE`, `CHECK`, `COLLATE NOCASE` en `username`, FK) se declara en el esquema, no solo en código Rust. `COLLATE NOCASE` solo pliega ASCII: para texto con acentos se usa una columna normalizada con `UNIQUE` (o índice parcial) |
+| Cambios de esquema | Desde `spec-04`, cada cambio es una migración numerada en `src-tauri/src/db/migrations.rs` (con su test), nunca una edición de `create_schema` (`Constitution.md` §4 v1.3.0) |
 | Comentarios en el código | Español |
 | Textos de interfaz (UI) | Español |
 | Contraseñas | Nunca en texto plano; hash con `bcrypt` antes de guardar |

@@ -2,6 +2,7 @@ import {
   recoverPassword,
   verifyRecoveryIdentity,
 } from "../services/authService.js";
+import { notifyError, notifySuccess } from "../utils/feedback.js";
 import { installFormValidation } from "../utils/formValidation.js";
 
 const RECOVERY_ERROR_MESSAGE = "Ocurrió un error inesperado";
@@ -40,17 +41,14 @@ async function handleVerifyIdentity(event) {
   const username = document.getElementById("username").value.trim();
   const phone = document.getElementById("phone").value.trim();
   const nationalId = document.getElementById("nationalId").value.trim();
-  const feedback = document.getElementById("recoveryFeedback");
   const submitButton = document.getElementById("verifyRecoveryButton");
 
-  if (feedback) feedback.textContent = "";
   if (submitButton) submitButton.disabled = true;
 
   try {
     const result = await verifyRecoveryIdentity(username, phone, nationalId);
     if (result?.code) {
-      if (feedback)
-        feedback.textContent = result.message || RECOVERY_ERROR_MESSAGE;
+      notifyError(result, RECOVERY_ERROR_MESSAGE);
       return;
     }
 
@@ -59,12 +57,10 @@ async function handleVerifyIdentity(event) {
       .getElementById("changePasswordForm")
       .classList.remove("step-hidden");
   } catch (error) {
-    if (feedback) {
-      feedback.textContent =
-        typeof error?.message === "string"
-          ? error.message
-          : RECOVERY_ERROR_MESSAGE;
-    }
+    notifyError(
+      typeof error?.message === "string" ? error : null,
+      RECOVERY_ERROR_MESSAGE,
+    );
   } finally {
     if (submitButton) submitButton.disabled = false;
   }
@@ -84,7 +80,6 @@ async function handleChangePassword(event) {
   const nationalId = document.getElementById("nationalId").value.trim();
   const newPassword = document.getElementById("newPassword").value;
   const confirmPassword = document.getElementById("confirmPassword");
-  const feedback = document.getElementById("changePasswordFeedback");
   const submitButton = document.getElementById("changePasswordButton");
 
   confirmPassword.setCustomValidity(
@@ -96,7 +91,6 @@ async function handleChangePassword(event) {
     return;
   }
 
-  if (feedback) feedback.textContent = "";
   if (submitButton) submitButton.disabled = true;
 
   try {
@@ -107,27 +101,22 @@ async function handleChangePassword(event) {
       newPassword,
     );
     if (result?.code) {
-      if (feedback)
-        feedback.textContent = result.message || RECOVERY_ERROR_MESSAGE;
+      notifyError(result, RECOVERY_ERROR_MESSAGE);
       return;
     }
 
-    if (feedback) {
-      feedback.textContent =
-        "Contraseña restablecida correctamente. Redirigiendo al login...";
-      feedback.classList.add("is-success");
-    }
+    notifySuccess(
+      "Contraseña restablecida correctamente. Redirigiendo al login...",
+    );
 
     setTimeout(() => {
       window.location.replace("./index.html");
     }, 2000);
   } catch (error) {
-    if (feedback) {
-      feedback.textContent =
-        typeof error?.message === "string"
-          ? error.message
-          : RECOVERY_ERROR_MESSAGE;
-    }
+    notifyError(
+      typeof error?.message === "string" ? error : null,
+      RECOVERY_ERROR_MESSAGE,
+    );
   } finally {
     if (submitButton) submitButton.disabled = false;
   }

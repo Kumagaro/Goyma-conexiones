@@ -63,3 +63,18 @@ export function lineInputs(linesBodyId, field) {
     ),
   ];
 }
+
+// Toasts visibles de un tipo (spec-04 TO-01).
+export function toastsOfType(type) {
+  return [...document.querySelectorAll(`#toast-region .toast-${type}`)].filter(
+    (toast) => !toast.classList.contains("is-leaving"),
+  );
+}
+
+// Texto de los toasts visibles (título y mensaje), para las aserciones.
+export function toastText() {
+  return [...document.querySelectorAll("#toast-region .toast")]
+    .filter((toast) => !toast.classList.contains("is-leaving"))
+    .map((toast) => toast.textContent)
+    .join(" ");
+}

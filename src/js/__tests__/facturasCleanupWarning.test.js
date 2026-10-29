@@ -1,7 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { chooseFromCombobox } from "./helpers/invoiceUi.js";
+import {
+  chooseFromCombobox,
+  toastText,
+  toastsOfType,
+} from "./helpers/invoiceUi.js";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -111,7 +115,6 @@ const SUBMODULES = [
     name: "entry",
     type: "E",
     bodyId: "facturas-entrada-body",
-    warningId: "facturas-entrada-cleanup-warning",
     create: "createEntryInvoice",
     prepare: async () => {
       await fillLines(
@@ -128,7 +131,6 @@ const SUBMODULES = [
     name: "sale",
     type: "V",
     bodyId: "facturas-venta-body",
-    warningId: "facturas-venta-cleanup-warning",
     create: "createSaleInvoice",
     prepare: async () => {
       await fillLines(
@@ -144,7 +146,6 @@ const SUBMODULES = [
     name: "service",
     type: "S",
     bodyId: "facturas-servicios-body",
-    warningId: "facturas-servicios-cleanup-warning",
     create: "createServiceInvoice",
     prepare: async () => {
       await fillLines(
@@ -160,7 +161,6 @@ const SUBMODULES = [
     name: "guarantee",
     type: "GG",
     bodyId: "facturas-garantia-body",
-    warningId: "facturas-garantia-cleanup-warning",
     create: "createGuaranteeInvoice",
     prepare: async () => {
       await fillLines(
@@ -177,7 +177,6 @@ const SUBMODULES = [
     name: "installation",
     type: "GI",
     bodyId: "facturas-insumos-body",
-    warningId: "facturas-insumos-cleanup-warning",
     create: "createInstallationInvoice",
     prepare: async () => {
       await fillLines(
@@ -194,7 +193,6 @@ const SUBMODULES = [
     name: "loss",
     type: "P",
     bodyId: "facturas-perdidas-body",
-    warningId: "facturas-perdidas-cleanup-warning",
     create: "createLossInvoice",
     prepare: async () => {
       await chooseFromCombobox("factura-perdida-producto", "cab", "Cable");
@@ -238,7 +236,7 @@ describe("expiredCleanupWarning en las facturas (H-7)", () => {
   });
 
   it.each(SUBMODULES)(
-    "$name: el aviso se muestra tras crear y eliminar, y se limpia con null",
+    "$name: el aviso sale como toast de advertencia tras crear y eliminar; con null no sale",
     async (submodule) => {
       services.listInvoices.mockImplementation((filters) =>
         Promise.resolve(
@@ -248,7 +246,10 @@ describe("expiredCleanupWarning en las facturas (H-7)", () => {
         ),
       );
       await initFacturasView();
-      const status = () => document.getElementById(submodule.warningId);
+      const warnings = () =>
+        toastsOfType("warning").filter((toast) =>
+          toast.textContent.includes(WARNING),
+        ).length;
 
       // Crear con aviso.
       services[submodule.create].mockResolvedValue({
@@ -257,11 +258,9 @@ describe("expiredCleanupWarning en las facturas (H-7)", () => {
         expiredCleanupWarning: WARNING,
       });
       await submodule.prepare();
-      await vi.waitFor(() => expect(status()?.textContent).toBe(WARNING));
-      expect(status().getAttribute("role")).toBe("status");
-      expect(status().hidden).toBe(false);
+      await vi.waitFor(() => expect(warnings()).toBe(1));
 
-      // Eliminar con aviso y luego sin él: el null lo limpia.
+      // Eliminar con aviso y luego sin él: con null no sale otro toast.
       const deleteButton = () =>
         Array.from(
           document.getElementById(submodule.bodyId).querySelectorAll("button"),
@@ -272,9 +271,8 @@ describe("expiredCleanupWarning en las facturas (H-7)", () => {
         expiredCleanupWarning: WARNING,
       });
       await vi.waitFor(() => expect(deleteButton()).toBeTruthy());
-      status().textContent = "";
       deleteButton().click();
-      await vi.waitFor(() => expect(status().textContent).toBe(WARNING));
+      await vi.waitFor(() => expect(warnings()).toBe(2));
 
       services.deleteInvoice.mockResolvedValueOnce({
         invoiceId: 5,
@@ -283,8 +281,15 @@ describe("expiredCleanupWarning en las facturas (H-7)", () => {
       });
       await vi.waitFor(() => expect(deleteButton()).toBeTruthy());
       deleteButton().click();
-      await vi.waitFor(() => expect(status().textContent).toBe(""));
-      expect(status().hidden).toBe(true);
+      // El segundo borrado ya terminó cuando sale su toast de éxito.
+      await vi.waitFor(() =>
+        expect(
+          toastsOfType("success").filter((toast) =>
+            /eliminada/.test(toast.textContent),
+          ),
+        ).toHaveLength(2),
+      );
+      expect(warnings()).toBe(2);
     },
   );
 });

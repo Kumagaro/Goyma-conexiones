@@ -1,5 +1,12 @@
 import { confirmDialog } from "../components/confirmDialog.js";
 import {
+  clearFieldErrors,
+  notifyError,
+  notifySuccess,
+  reportError,
+  requireFields,
+} from "../utils/feedback.js";
+import {
   convertQuantity,
   createConversion,
   createUnit,
@@ -11,6 +18,7 @@ import {
   updateConversionFactor,
   updateUnit,
 } from "../services/unitsService.js";
+import { el, messageRow, setOptions } from "../utils/dom.js";
 
 let units = [];
 let conversions = [];
@@ -121,8 +129,7 @@ async function loadUnits(searchTerm = "") {
   const feedback = document.getElementById("unidad-feedback");
 
   if (body) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Cargando unidades…</td></tr>';
+    messageRow(body, "Cargando unidades…", 5);
   }
 
   try {
@@ -136,14 +143,9 @@ async function loadUnits(searchTerm = "") {
     }
   } catch (error) {
     if (body) {
-      body.innerHTML =
-        '<tr><td colspan="5" class="empty-row">No se pudieron cargar las unidades.</td></tr>';
+      messageRow(body, "No se pudieron cargar las unidades.", 5);
     }
-    if (feedback) {
-      feedback.textContent =
-        error?.message || "No se pudieron cargar las unidades.";
-      feedback.hidden = false;
-    }
+    notifyError(error, "No se pudieron cargar las unidades.");
   }
 }
 
@@ -231,8 +233,9 @@ async function handleUnitSubmit(event) {
   const name = nameInput?.value?.trim();
   const abbreviation = abbreviationInput?.value?.trim();
 
-  if (!name || !abbreviation) {
-    showUnitFeedback("El nombre y la abreviación son obligatorios.");
+  clearFieldErrors(form);
+  if (!requireFields([nameInput, abbreviationInput])) {
+    notifyError(null, "El nombre y la abreviación son obligatorios.");
     return;
   }
 
@@ -250,25 +253,17 @@ async function handleUnitSubmit(event) {
     closeUnitModal();
     await loadUnits();
     productCreation?.onCreated?.(createdUnit);
-    showUnitFeedback(
+    notifySuccess(
       wasEditing
         ? "Unidad actualizada correctamente."
         : "Unidad creada correctamente.",
     );
   } catch (error) {
-    showUnitFeedback(
-      normalizeUnitFeedbackMessage(
-        error?.message || "No se pudo guardar la unidad.",
-      ),
-    );
+    reportError(error, "No se pudo guardar la unidad.", [
+      [/abreviación/i, abbreviationInput],
+      [/nombre/i, nameInput],
+    ]);
   }
-}
-
-function showUnitFeedback(message) {
-  const feedback = document.getElementById("unidad-feedback");
-  if (!feedback) return;
-  feedback.textContent = normalizeUnitFeedbackMessage(message);
-  feedback.hidden = false;
 }
 
 function handleUnitTableAction(event) {
@@ -293,47 +288,56 @@ function renderUnitList(items) {
   if (!body) return;
 
   if (!items.length) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Aún no hay unidades.</td></tr>';
+    messageRow(body, "Aún no hay unidades.", 5);
     return;
   }
 
-  body.innerHTML = items
-    .map(
-      (unit) => `
-        <tr data-unit-id="${unit.id}">
-          <td>#${String(unit.id).padStart(4, "0")}</td>
-          <td>${escapeHtml(String(unit.name ?? ""))}</td>
-          <td>${escapeHtml(String(unit.abbreviation ?? ""))}</td>
-          <td style="text-align:center">
-            <span class="conteo-uso ${Number(unit.productCount ?? 0) > 0 ? "en-uso" : ""}">
-              ${Number(unit.productCount ?? 0)}
-            </span>
-          </td>
-          <td>
-            <div class="col-acciones">
-              <button type="button" class="action-link" data-unit-action="edit" data-unit-id="${unit.id}">
-                Editar
-              </button>
-              <button type="button" class="action-link danger" data-unit-action="delete" data-unit-id="${unit.id}">
-                Eliminar
-              </button>
-            </div>
-          </td>
-        </tr>
-      `,
-    )
-    .join("");
+  body.replaceChildren(
+    ...items.map((unit) => {
+      const count = Number(unit.productCount ?? 0);
+      return el(
+        "tr",
+        { dataset: { unitId: unit.id } },
+        el("td", {}, `#${String(unit.id).padStart(4, "0")}`),
+        el("td", {}, String(unit.name ?? "")),
+        el("td", {}, String(unit.abbreviation ?? "")),
+        el(
+          "td",
+          { style: "text-align:center" },
+          el(
+            "span",
+            { class: count > 0 ? "conteo-uso en-uso" : "conteo-uso" },
+            String(count),
+          ),
+        ),
+        el(
+          "td",
+          {},
+          el(
+            "div",
+            { class: "col-acciones" },
+            ROW_ACTIONS.map(([action, label, extra]) =>
+              el(
+                "button",
+                {
+                  type: "button",
+                  class: `action-link${extra}`,
+                  dataset: { unitAction: action, unitId: unit.id },
+                },
+                label,
+              ),
+            ),
+          ),
+        ),
+      );
+    }),
+  );
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+const ROW_ACTIONS = [
+  ["edit", "Editar", ""],
+  ["delete", "Eliminar", " danger"],
+];
 
 function openUnitModal(unitId = null, initialName = "", forProduct = false) {
   const modal = document.getElementById("modal-unidad");
@@ -405,11 +409,11 @@ async function handleDeleteUnit(unitId) {
     await loadUnits();
     await loadConversions();
     populateConversorSelectors();
-    showUnitFeedback(
+    notifySuccess(
       `Unidad eliminada. ${affectedProducts} producto(s) quedaron sin unidad y ${deletedConversions} conversión(es) se eliminó(n).`,
     );
   } catch (error) {
-    showUnitFeedback(error?.message || "No se pudo eliminar la unidad.");
+    notifyError(error, "No se pudo eliminar la unidad.");
   }
 }
 
@@ -417,11 +421,9 @@ async function handleDeleteUnit(unitId) {
 
 async function loadConversions(searchTerm = "") {
   const body = document.getElementById("conversiones-body");
-  const feedback = document.getElementById("conversion-feedback");
 
   if (body) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Cargando conversiones…</td></tr>';
+    messageRow(body, "Cargando conversiones…", 5);
   }
 
   try {
@@ -429,20 +431,11 @@ async function loadConversions(searchTerm = "") {
     const items = Array.isArray(response) ? response : [];
     conversions = items;
     renderConversionList(items);
-    if (feedback) {
-      feedback.textContent = "";
-      feedback.hidden = true;
-    }
   } catch (error) {
     if (body) {
-      body.innerHTML =
-        '<tr><td colspan="5" class="empty-row">No se pudieron cargar las conversiones.</td></tr>';
+      messageRow(body, "No se pudieron cargar las conversiones.", 5);
     }
-    if (feedback) {
-      feedback.textContent =
-        error?.message || "No se pudieron cargar las conversiones.";
-      feedback.hidden = false;
-    }
+    notifyError(error, "No se pudieron cargar las conversiones.");
   }
 }
 
@@ -451,33 +444,50 @@ function renderConversionList(items) {
   if (!body) return;
 
   if (!items.length) {
-    body.innerHTML =
-      '<tr><td colspan="5" class="empty-row">Aún no hay conversiones.</td></tr>';
+    messageRow(body, "Aún no hay conversiones.", 5);
     return;
   }
 
-  body.innerHTML = items
-    .map(
-      (conversion) => `
-        <tr data-conversion-id="${conversion.id}">
-          <td>#${String(conversion.id).padStart(4, "0")}</td>
-          <td>${escapeHtml(String(conversion.fromUnit.name ?? ""))} (${escapeHtml(String(conversion.fromUnit.abbreviation ?? ""))})</td>
-          <td>${escapeHtml(String(conversion.toUnit.name ?? ""))} (${escapeHtml(String(conversion.toUnit.abbreviation ?? ""))})</td>
-          <td style="text-align:center">${escapeHtml(String(conversion.factor ?? ""))}</td>
-          <td>
-            <div class="col-acciones">
-              <button type="button" class="action-link" data-conversion-action="edit" data-conversion-id="${conversion.id}">
-                Editar
-              </button>
-              <button type="button" class="action-link danger" data-conversion-action="delete" data-conversion-id="${conversion.id}">
-                Eliminar
-              </button>
-            </div>
-          </td>
-        </tr>
-      `,
-    )
-    .join("");
+  const unitLabel = (unit) =>
+    `${String(unit.name ?? "")} (${String(unit.abbreviation ?? "")})`;
+  body.replaceChildren(
+    ...items.map((conversion) =>
+      el(
+        "tr",
+        { dataset: { conversionId: conversion.id } },
+        el("td", {}, `#${String(conversion.id).padStart(4, "0")}`),
+        el("td", {}, unitLabel(conversion.fromUnit)),
+        el("td", {}, unitLabel(conversion.toUnit)),
+        el(
+          "td",
+          { style: "text-align:center" },
+          String(conversion.factor ?? ""),
+        ),
+        el(
+          "td",
+          {},
+          el(
+            "div",
+            { class: "col-acciones" },
+            ROW_ACTIONS.map(([action, label, extra]) =>
+              el(
+                "button",
+                {
+                  type: "button",
+                  class: `action-link${extra}`,
+                  dataset: {
+                    conversionAction: action,
+                    conversionId: conversion.id,
+                  },
+                },
+                label,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 function handleConversionTableAction(event) {
@@ -583,16 +593,12 @@ function closeConversionModal() {
 function populateConversionSelectors(origenSelect, destinoSelect) {
   if (!origenSelect || !destinoSelect) return;
 
-  const options = units
-    .map(
-      (unit) => `
-        <option value="${unit.id}">${escapeHtml(unit.name)} (${escapeHtml(unit.abbreviation)})</option>
-      `,
-    )
-    .join("");
-
-  origenSelect.innerHTML = options;
-  destinoSelect.innerHTML = options;
+  const options = units.map((unit) => [
+    unit.id,
+    `${unit.name} (${unit.abbreviation})`,
+  ]);
+  setOptions(origenSelect, options);
+  setOptions(destinoSelect, options);
 }
 
 async function handleConversionSubmit(event) {
@@ -608,12 +614,14 @@ async function handleConversionSubmit(event) {
   const factor = factorInput?.value?.trim();
 
   if (!Number.isFinite(fromUnitId) || !Number.isFinite(toUnitId) || !factor) {
-    showConversionFeedback("Selecciona ambas unidades y el factor.");
+    notifyError(null, "Selecciona ambas unidades y el factor.");
     return;
   }
 
+  // closeConversionModal limpia editingConversionId: se guarda antes.
+  const wasEditing = editingConversionId !== null;
   try {
-    if (editingConversionId !== null) {
+    if (wasEditing) {
       await updateConversionFactor(editingConversionId, factor);
     } else {
       await createConversion(fromUnitId, toUnitId, factor);
@@ -621,23 +629,16 @@ async function handleConversionSubmit(event) {
 
     closeConversionModal();
     await loadConversions();
-    showConversionFeedback(
-      editingConversionId === null
-        ? "Conversión creada correctamente."
-        : "Conversión actualizada correctamente.",
+    notifySuccess(
+      wasEditing
+        ? "Conversión actualizada correctamente."
+        : "Conversión creada correctamente.",
     );
   } catch (error) {
-    showConversionFeedback(
-      error?.message || "No se pudo guardar la conversión.",
-    );
+    reportError(error, "No se pudo guardar la conversión.", [
+      [/factor/i, factorInput],
+    ]);
   }
-}
-
-function showConversionFeedback(message) {
-  const feedback = document.getElementById("conversion-feedback");
-  if (!feedback) return;
-  feedback.textContent = message;
-  feedback.hidden = false;
 }
 
 async function handleDeleteConversion(conversionId) {
@@ -653,11 +654,9 @@ async function handleDeleteConversion(conversionId) {
   try {
     await deleteConversion(conversionId);
     await loadConversions();
-    showConversionFeedback("Conversión eliminada correctamente.");
+    notifySuccess("Conversión eliminada correctamente.");
   } catch (error) {
-    showConversionFeedback(
-      error?.message || "No se pudo eliminar la conversión.",
-    );
+    notifyError(error, "No se pudo eliminar la conversión.");
   }
 }
 
@@ -669,16 +668,12 @@ function populateConversorSelectors() {
 
   if (!origenSelect || !destinoSelect) return;
 
-  const options = units
-    .map(
-      (unit) => `
-        <option value="${unit.id}">${escapeHtml(unit.name)} (${escapeHtml(unit.abbreviation)})</option>
-      `,
-    )
-    .join("");
-
-  origenSelect.innerHTML = options;
-  destinoSelect.innerHTML = options;
+  const options = units.map((unit) => [
+    unit.id,
+    `${unit.name} (${unit.abbreviation})`,
+  ]);
+  setOptions(origenSelect, options);
+  setOptions(destinoSelect, options);
 
   if (units[0]) origenSelect.value = units[0].id;
   if (units[1]) destinoSelect.value = units[1].id;

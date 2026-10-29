@@ -9,7 +9,7 @@ import {
 } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { chooseFromCombobox } from "./helpers/invoiceUi.js";
+import { chooseFromCombobox, toastText } from "./helpers/invoiceUi.js";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -263,9 +263,7 @@ describe("facturasView submódulo installation (HTML de producción)", () => {
     submit();
     await Promise.resolve();
     expect(createInstallationInvoice).not.toHaveBeenCalled();
-    expect(
-      document.getElementById("factura-insumos-feedback").textContent,
-    ).toContain("factura de servicio");
+    expect(toastText()).toContain("factura de servicio");
 
     document.getElementById("factura-insumo-servicio").value = "4";
     document.getElementById("factura-insumo-estado").value = "completed";
