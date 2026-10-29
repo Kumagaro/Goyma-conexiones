@@ -1086,4 +1086,5 @@ La revisión contra `spec-03` (requisito por requisito, leyendo código) encontr
   - 2026-10-28: `cargo test` **371/371**; `npm test` **292/292** (35 archivos); clippy estricto, `cargo fmt --check` y `prettier --check` limpios.
 - [ ] Verificación manual de extremo a extremo de §6 (`tauri:dev` y `tauri:build`), como Administrador y como Contador.
   - **Pendiente:** el entorno no permite operar la ventana de Tauri.
-- [ ] Commit siguiendo Conventional Commits.
+- [x] Commit siguiendo Conventional Commits.
+  - `8991094` feat: completar la interfaz de facturas, contactos e historial (spec-03, task-03 §7).
