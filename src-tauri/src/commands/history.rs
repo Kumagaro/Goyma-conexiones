@@ -327,7 +327,7 @@ fn export_history_inner(
             "history export without destination",
         ));
     }
-    let list = get_product_history_inner(
+    let mut list = get_product_history_inner(
         connection,
         now,
         ProductHistoryFilters {
@@ -337,6 +337,10 @@ fn export_history_inner(
             types: input.types.clone(),
         },
     )?;
+    // get_product_history devuelve del más reciente al más antiguo.
+    if input.ascending {
+        list.items.reverse();
+    }
     if list.items.is_empty() {
         return Err(AppError::new(
             "invalidState",
@@ -492,6 +496,7 @@ mod tests {
             from_date: None,
             to_date: None,
             types: types.iter().map(|value| (*value).to_owned()).collect(),
+            ascending: false,
             destination_path: destination.to_string_lossy().into_owned(),
         }
     }
@@ -532,6 +537,34 @@ mod tests {
         // El movimiento Inicial no pasa el filtro de tipos.
         assert!(!sheet.contains(">Inicial<"));
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn export_history_follows_the_screen_order() {
+        use std::io::Read;
+        let (connection, product_id) = export_fixture("exportorder", "+5350000143", "12345678943");
+        let now = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        let sheet_for = |ascending: bool| {
+            let path = temp_export_path("historial.xlsx");
+            let mut input = export_input(product_id, &["entry", "saleOut"], &path);
+            input.ascending = ascending;
+            export_history_excel_inner(&connection, now, input).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+            let mut sheet = String::new();
+            archive
+                .by_name("xl/worksheets/sheet1.xml")
+                .unwrap()
+                .read_to_string(&mut sheet)
+                .unwrap();
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+            sheet
+        };
+        // Por defecto, el más reciente primero; con `ascending`, al revés (HP-03).
+        let newest_first = sheet_for(false);
+        assert!(newest_first.find("V-00001").unwrap() < newest_first.find("E-00001").unwrap());
+        let oldest_first = sheet_for(true);
+        assert!(oldest_first.find("E-00001").unwrap() < oldest_first.find("V-00001").unwrap());
     }
 
     #[test]
@@ -609,6 +642,7 @@ mod tests {
             from_date: None,
             to_date: None,
             types: vec![],
+            ascending: false,
             destination_path: "historial.xlsx".to_owned(),
         };
         assert_requires_session(|connection, now| {

@@ -32,6 +32,9 @@ pub struct ExportHistoryInput {
     pub to_date: Option<String>,
     #[serde(default)]
     pub types: Vec<String>,
+    /// Orden de la pantalla (HP-03): por defecto, el más reciente primero.
+    #[serde(default)]
+    pub ascending: bool,
     pub destination_path: String,
 }
 

@@ -418,13 +418,9 @@ pub fn list_invoices_inner(
             }
         }
 
-        let total_cents: i64 = connection
-            .query_row(
-                "SELECT COALESCE(SUM(subtotalCents), 0) FROM invoiceLines WHERE invoiceId = ?1",
-                [id],
-                |row| row.get(0),
-            )
-            .map_err(|error| map_db_error(error, "listInvoices", &[]))?;
+        let (total_cents, product_count, created_by_name) =
+            crate::search::invoice_list_stats(connection, id)
+                .map_err(|error| map_db_error(error, "listInvoices", &[]))?;
 
         items.push(InvoiceListItem {
             id,
@@ -442,6 +438,8 @@ pub fn list_invoices_inner(
             ),
             product_name,
             quantity: quantity_milli.map(format_quantity_milli),
+            product_count,
+            created_by_name,
         });
     }
 
@@ -12781,6 +12779,89 @@ mod tests {
         // Las salidas no tienen lote propio: no traen estos campos.
         assert_eq!(orphan.lines[0].remaining_quantity, None);
         assert_eq!(orphan.lines[0].consumed_quantity, None);
+    }
+
+    #[test]
+    fn invoice_lists_include_product_count_and_responsible() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "listcounter",
+            "12345678951",
+            "+5355550151",
+            "12345678952",
+            "+5355550152",
+            now,
+        );
+        let first = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Cable UTP",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let second = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Conector RJ45",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(
+                client_id,
+                vec![sale_line(first, "1"), sale_line(second, "2")],
+                None,
+            ),
+        )
+        .unwrap();
+
+        // FE-02 y FS-01: cada fila trae su número de productos y su responsable.
+        let sales = list_invoices_inner(
+            &mut connection,
+            now,
+            crate::models::invoice::InvoiceFilters {
+                invoice_type: Some("V".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(sales[0].product_count, 2);
+        assert_eq!(sales[0].created_by_name, "listcounter");
+        let found = list_invoices_inner(
+            &mut connection,
+            now,
+            crate::models::invoice::InvoiceFilters {
+                search: Some("V-00001".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(found[0].product_count, 2);
+
+        // PV-07: el historial del proveedor trae lo mismo por compra.
+        let supplier = crate::commands::suppliers::get_supplier_detail_inner(
+            &mut connection,
+            now,
+            supplier_id,
+        )
+        .unwrap();
+        assert_eq!(supplier.invoice_history.len(), 2);
+        assert!(supplier
+            .invoice_history
+            .iter()
+            .all(|item| item.product_count == 1 && item.created_by_name == "listcounter"));
+        let client =
+            crate::commands::clients::get_client_detail_inner(&mut connection, now, client_id)
+                .unwrap();
+        assert_eq!(client.invoice_history[0].product_count, 2);
     }
 
     #[test]

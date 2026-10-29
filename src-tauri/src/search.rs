@@ -317,12 +317,7 @@ pub fn search_invoices(
                 .min()
         };
         if let Some(rank) = rank {
-            let total_cents = connection
-                .query_row(
-                    "SELECT COALESCE(SUM(subtotalCents), 0) FROM invoiceLines WHERE invoiceId = ?1",
-                    [id],
-                    |row| row.get::<_, i64>(0),
-                )
+            let (total_cents, product_count, created_by_name) = invoice_list_stats(connection, id)
                 .map_err(|_| internal_error("failed to calculate invoice total for search"))?;
             matches.push((
                 rank,
@@ -344,6 +339,8 @@ pub fn search_invoices(
                     ),
                     product_name: None,
                     quantity: None,
+                    product_count,
+                    created_by_name,
                 },
             ));
         }
@@ -361,6 +358,20 @@ pub fn search_invoices(
             ))
     });
     Ok(matches.into_iter().take(limit).map(|item| item.3).collect())
+}
+
+/// Total, número de líneas y responsable de una factura, para los listados.
+pub fn invoice_list_stats(
+    connection: &Connection,
+    invoice_id: i64,
+) -> rusqlite::Result<(i64, i64, String)> {
+    connection.query_row(
+        "SELECT COALESCE(SUM(il.subtotalCents), 0), COUNT(il.id), i.createdByName
+         FROM invoices i LEFT JOIN invoiceLines il ON il.invoiceId = i.id
+         WHERE i.id = ?1 GROUP BY i.id",
+        [invoice_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )
 }
 
 fn internal_error(cause: &str) -> AppError {

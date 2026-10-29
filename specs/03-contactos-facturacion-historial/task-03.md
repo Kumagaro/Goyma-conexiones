@@ -910,8 +910,9 @@
   - **Decisión del dueño (2026-10-16):** un único commit para todo el módulo, en lugar de uno por fase (los cambios de varias fases estaban mezclados en el árbol de trabajo).
 ## 6. Cierre del módulo
 
-- [ ] **Revisión final contra `spec-03.md`:** recorrer CL-01 a CL-06, PV-01 a PV-07, LT-01 a LT-04, FE-01 a FE-08, FS-01 a FS-05, FP-01, FG-01, HP-01 a HP-04, SP-01 a SP-04 y confirmar que cada requisito tiene su comando implementado y su test pasando. Recorrer también la §14 de la spec.
-  - **No se puede cerrar todavía (2026-10-16).** El backend cubre todos los requisitos con tests, salvo PV-07. La interfaz tiene huecos que impiden usar el módulo; ver la nota de cierre al final de esta sección.
+- [x] **Revisión final contra `spec-03.md`:** recorrer CL-01 a CL-06, PV-01 a PV-07, LT-01 a LT-04, FE-01 a FE-08, FS-01 a FS-05, FP-01, FG-01, HP-01 a HP-04, SP-01 a SP-04 y confirmar que cada requisito tiene su comando implementado y su test pasando. Recorrer también la §14 de la spec.
+  - **Hecha (2026-10-28):** el backend cubre todos los requisitos; los huecos de interfaz se cerraron en §7 y §8. Solo falta la verificación manual en la app real.
+  - **No se podía cerrar (2026-10-16).** El backend cubre todos los requisitos con tests, salvo PV-07. La interfaz tiene huecos que impiden usar el módulo; ver la nota de cierre al final de esta sección.
 - [x] **Verificación de la matriz de autorización (`Agents.md` §3):** la tabla `(comando, sin sesión → rechazado, ambos roles → permitido)` tiene una fila por cada uno de los **35 comandos** nuevos y cada fila tiene su test pasando. Ningún comando de esta feature queda fuera. Ninguno actualiza `lastActivityAt`.
   - 35/35 comandos de `spec-03` con su fila (auditado sobre `generate_handler!`). Faltaban `getClientDetail` y `changeInvoiceStatus`, que §2.1.5 y §3.1.3 daban por hechos; se añadieron. Ningún comando de `spec-03` toca `lastActivityAt` (solo `auth.rs` y `dashboard.rs`, de specs anteriores).
 - [x] **Verificación de registros:** `validationFailed` e `invalidCredentials` no generan fila en `errorLogs`; `duplicateField`, `notFound`, `invalidState`, `stockInsuficiente`, `stockLimitExceeded`, `exportFailed` e `internal` sí (los que tienen throttle, bajo la política H-A2); ningún registro contiene valores ingresados por el usuario.
@@ -1088,3 +1089,21 @@ La revisión contra `spec-03` (requisito por requisito, leyendo código) encontr
   - **Pendiente:** el entorno no permite operar la ventana de Tauri.
 - [x] Commit siguiendo Conventional Commits.
   - `8991094` feat: completar la interfaz de facturas, contactos e historial (spec-03, task-03 §7).
+
+---
+
+## 8. Huecos de la revisión contra `spec-03` (anexo, 2026-10-28)
+
+*(Revisión requisito por requisito de §6 tras cerrar §7. El backend cubría todos los requisitos; estos huecos eran de interfaz o de datos que la interfaz necesitaba. Aprobados por el dueño para cerrarlos antes de la etapa final.)*
+
+- [x] **FE-07 — Adjunto PDF en Tauri.** La vista enviaba `file.path ?? file.name`, pero un `File` del webview de Tauri no trae ruta: el backend recibía solo el nombre. Ahora el PDF se elige con `dialog.open` (filtro PDF) o llega por el evento `tauri://drag-drop`, que entrega rutas; lo que no es PDF se rechaza con mensaje. Tests: diálogo nativo + `saveInvoiceAttachment(id, ruta)`; arrastre con PDF y con un PNG.
+- [x] **FE-01 — Producto nuevo desde la compra.** Sin coincidencias, el buscador de producto de la entrada ofrece "Producto no encontrado · Crear producto «…»" y abre `components/quickProductDialog.js` (nombre, descripción, categoría, unidad, % de ganancia). La línea viaja con `newProduct` y su `cost` es el costo unitario de la línea; el producto se crea al guardar. Al editar no se ofrece (el contrato de `updateEntryInvoice` no admite productos nuevos) y se explica. Tests: creación con los ids elegidos y el costo de la línea; edición sin diálogo.
+- [x] **Fecha por defecto = hoy** (FE-01, FS-01, FP-01) en los seis formularios, también al limpiar tras guardar. Test.
+- [x] **Columnas de los listados.** `InvoiceListItem` trae `productCount` y `createdByName` (`search::invoice_list_stats`). FE-02: columna "Productos" en las entradas. PV-07: vuelve a las columnas de la spec (fecha, estado, cantidad de productos, total, factura y responsable), que §7.5 había recortado por falta de datos. Tests Rust (`invoice_lists_include_product_count_and_responsible`) y Vitest.
+- [x] **Detalle: fecha de creación y responsable** (FE-03, FS-01, FP-01): "Registrada el … por …" en los seis detalles. Test.
+- [x] **HP-04 en el formulario de edición del producto:** la sección "Facturas Asociadas" se pinta al editar y sigue oculta al crear (aserción de `spec-02` intacta). Test.
+- [x] **Orden por fecha** (FE-02, FS-01, FP-01, FG-01, HP-02): el encabezado de fecha de los seis listados de facturas y del historial alterna el orden (`utils/dateSort.js`). La exportación del historial sigue el orden de la pantalla (HP-03) con `ExportHistoryInput.ascending`. Tests Rust (`export_history_follows_the_screen_order`) y Vitest.
+- [x] **CL-06/PV-06:** la opción de alta rápida dice "Cliente no encontrado · Crear nuevo cliente «…»" (ídem proveedor). Test.
+- [x] `components/formDialog.js`: carcasa común de los diálogos de alta rápida (contacto y producto).
+- [x] `cargo test` **373/373**, `npm test` **303/303** (35 archivos), clippy estricto, `cargo fmt --check` y `prettier --check` limpios (2026-10-28).
+- [ ] Verificación manual en `tauri:dev`/`tauri:build`: adjuntar un PDF con el diálogo y arrastrándolo; crear una compra con un producto nuevo. **Pendiente:** el entorno no permite operar la ventana de Tauri.

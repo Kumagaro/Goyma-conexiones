@@ -608,14 +608,25 @@ function renderProductDetail(detail) {
     if (button) button.hidden = hidden;
   }
   showStatus("producto-detalle-feedback", detail.expiredCleanupWarning ?? "");
-  void renderAssociatedInvoices(detail.id);
+  void renderAssociatedInvoices(
+    detail.id,
+    "producto-ver-facturas",
+    "producto-ver-facturas-lista",
+  );
 }
 
 // Facturas Asociadas (HP-04): número, tipo, fecha, estado y cantidad de cada
 // factura con el producto; "Ver" abre su detalle con facturasView.js.
-async function renderAssociatedInvoices(productId) {
-  const section = document.getElementById("producto-ver-facturas");
-  const list = document.getElementById("producto-ver-facturas-lista");
+function isCurrentProduct(productId) {
+  return (
+    currentProductDetail?.id === productId || editingProductId === productId
+  );
+}
+
+// Se pinta en el detalle y en el formulario de edición (HP-04).
+async function renderAssociatedInvoices(productId, sectionId, listId) {
+  const section = document.getElementById(sectionId);
+  const list = document.getElementById(listId);
   if (!section || !list) return;
   section.hidden = false;
   const message = (text) => {
@@ -629,13 +640,13 @@ async function renderAssociatedInvoices(productId) {
   try {
     items = await getProductAssociatedInvoices(productId);
   } catch {
-    if (currentProductDetail?.id === productId) {
+    if (isCurrentProduct(productId)) {
       message("No se pudieron cargar las facturas del producto.");
     }
     return;
   }
   // Si el usuario abrió otro producto mientras cargaba, se descarta.
-  if (currentProductDetail?.id !== productId) return;
+  if (!isCurrentProduct(productId)) return;
   const invoices = Array.isArray(items) ? items : [];
   if (!invoices.length) {
     message("Este producto aún no aparece en ninguna factura.");
@@ -878,6 +889,18 @@ export function openProductForm(product = null) {
   );
   setValue("producto-ganancia", product?.profitPercent ?? "");
   setValue("producto-stock", product?.quantity ?? "");
+  // HP-04: al editar, el formulario muestra también sus facturas asociadas.
+  const invoicesSection = document.getElementById(
+    "producto-facturas-asociadas",
+  );
+  if (invoicesSection) invoicesSection.hidden = !editing;
+  if (editing) {
+    void renderAssociatedInvoices(
+      editingProductId,
+      "producto-facturas-asociadas",
+      "producto-facturas-asociadas-lista",
+    );
+  }
 
   const costInput = document.getElementById("producto-precio-entrada");
   const quantityInput = document.getElementById("producto-stock");

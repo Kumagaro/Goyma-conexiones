@@ -21,6 +21,10 @@ pub struct InvoiceListItem {
     /// Solo en pérdidas: copia del producto y cantidad de su única línea.
     pub product_name: Option<String>,
     pub quantity: Option<String>,
+    /// Cantidad de productos (líneas) de la factura (FE-02, PV-07).
+    pub product_count: i64,
+    /// Usuario que registró la factura (responsable, PV-07).
+    pub created_by_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -336,6 +340,8 @@ mod tests {
             }),
             product_name: None,
             quantity: None,
+            product_count: 1,
+            created_by_name: "admin".to_owned(),
         };
         let value: Value = serde_json::to_value(item).unwrap();
         assert_eq!(value["invoiceType"], "V");

@@ -1995,26 +1995,7 @@
 
               <div id="producto-facturas-asociadas" hidden>
                 <h3 style="margin-bottom: 15px">Facturas Asociadas</h3>
-                <div class="form-grid">
-                  <div class="field">
-                    <label>Información de Factura de Compra</label>
-                    <input
-                      type="text"
-                      id="producto-factura-compra"
-                      placeholder="Sin facturas de entrada asociadas"
-                      readonly
-                    />
-                  </div>
-                  <div class="field">
-                    <label>Información de Factura de Venta</label>
-                    <input
-                      type="text"
-                      id="producto-factura-venta"
-                      placeholder="Sin facturas de venta asociadas"
-                      readonly
-                    />
-                  </div>
-                </div>
+                <div id="producto-facturas-asociadas-lista"></div>
               </div>
 
               <div id="producto-feedback" role="status" hidden></div>
@@ -3126,9 +3107,11 @@
                   <th id="th-fecha-historial-proveedor" class="th-sortable">
                     Fecha
                   </th>
-                  <th>No. Factura</th>
                   <th>Estado</th>
+                  <th style="text-align: center">Cantidad Productos</th>
                   <th style="text-align: right">Total</th>
+                  <th>Factura</th>
+                  <th>Responsable</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -3524,6 +3507,7 @@
                   </th>
                   <th style="text-align: right">Total</th>
                   <th>Estado</th>
+                  <th style="text-align: center">Productos</th>
                   <th>Acciones</th>
                 </tr>
               </thead>

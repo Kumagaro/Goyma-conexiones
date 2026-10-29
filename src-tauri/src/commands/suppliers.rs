@@ -525,7 +525,8 @@ fn supplier_invoice_history(
         .prepare(
             "SELECT i.id, i.number, i.type, i.contactFullName, i.invoiceDate,
                 COALESCE((SELECT SUM(il.subtotalCents) FROM invoiceLines il WHERE il.invoiceId = i.id), 0),
-                i.status, i.associatedNumber, i.associatedType
+                i.status, i.associatedNumber, i.associatedType,
+                (SELECT COUNT(*) FROM invoiceLines il WHERE il.invoiceId = i.id), i.createdByName
              FROM invoices i
              WHERE i.supplierId = ?1 AND i.type = 'E'
              ORDER BY i.invoiceDate DESC, i.id DESC",
@@ -543,6 +544,8 @@ fn supplier_invoice_history(
                 row.get::<_, Option<String>>(6)?,
                 row.get::<_, Option<String>>(7)?,
                 row.get::<_, Option<String>>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, String>(10)?,
             ))
         })
         .map_err(|error| map_db_error(error, "getSupplierDetail", &[]))?
@@ -563,6 +566,8 @@ fn supplier_invoice_history(
                 status,
                 associated_number,
                 associated_type,
+                product_count,
+                created_by_name,
             )| {
                 InvoiceListItem {
                     id,
@@ -580,6 +585,8 @@ fn supplier_invoice_history(
                     ),
                     product_name: None,
                     quantity: None,
+                    product_count,
+                    created_by_name,
                 }
             },
         )

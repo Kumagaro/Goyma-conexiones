@@ -351,7 +351,7 @@ function renderProveedorHistory() {
 function historyMessage(body, text) {
   const row = document.createElement("tr");
   const cell = document.createElement("td");
-  cell.colSpan = 5;
+  cell.colSpan = 7;
   cell.className = "empty-row";
   cell.textContent = text;
   row.append(cell);
@@ -413,16 +413,21 @@ function renderSupplierHistoryRows() {
   body.replaceChildren();
   for (const item of items) {
     const row = document.createElement("tr");
+    // Columnas de PV-07: fecha, estado, cantidad de productos, total,
+    // factura y responsable.
     const cells = [
       formatDate(item.date),
-      item.number ?? "—",
       ENTRY_STATUS_LABELS[item.status] ?? item.status ?? "—",
+      String(item.productCount ?? "—"),
       formatMoney(item.totalCents ?? 0),
+      item.number ?? "—",
+      item.createdByName ?? "—",
     ].map((text) => {
       const cell = document.createElement("td");
       cell.textContent = text;
       return cell;
     });
+    cells[2].style.textAlign = "center";
     cells[3].style.textAlign = "right";
     const actions = document.createElement("td");
     const view = document.createElement("button");

@@ -5,6 +5,7 @@ import {
   listHistoryProducts,
 } from "../services/historyService.js";
 import { showCleanupWarning } from "../utils/cleanupWarning.js";
+import { bindDateSort, isAscending, sortByDate } from "../utils/dateSort.js";
 import { formatId, formatMoney, formatTimestamp } from "../utils/formatters.js";
 
 // Etiquetas visibles de cada tipo de movimiento del historial.
@@ -19,6 +20,8 @@ const MOVEMENT_TYPE_LABELS = {
   adjustment: "Ajuste",
   reversal: "Reversión",
 };
+
+let historyItems = [];
 
 const TYPE_GROUPS = [
   { label: "Entradas", types: ["initial", "entry"] },
@@ -39,6 +42,17 @@ async function initializeHistorialView() {
   bindHistoryTab();
   bindHistoryFilters();
   bindExportButtons();
+  // HP-02: el encabezado de fecha alterna el orden.
+  bindDateSort(
+    "th-fecha-historial-producto",
+    "historialProducto",
+    () => renderHistoryList(historyItems),
+    (el) => {
+      if (!el || el.dataset.historialBound === "1") return false;
+      el.dataset.historialBound = "1";
+      return true;
+    },
+  );
   buildTypeFilter();
   await loadHistoryOptions();
   await loadProductHistory();
@@ -201,6 +215,7 @@ function setHistoryLoading(isLoading) {
 }
 
 function renderHistoryList(items) {
+  historyItems = items;
   const body = document.getElementById("historial-producto-body");
   if (!body) return;
   body.replaceChildren();
@@ -212,7 +227,11 @@ function renderHistoryList(items) {
     body.append(row);
     return;
   }
-  for (const item of items) {
+  for (const item of sortByDate(
+    items,
+    "th-fecha-historial-producto",
+    "createdAt",
+  )) {
     const row = document.createElement("tr");
     const dateCell = document.createElement("td");
     dateCell.textContent = item?.createdAt
@@ -351,6 +370,8 @@ async function handleExport(format) {
       ...(fromDate ? { fromDate } : {}),
       ...(toDate ? { toDate } : {}),
       types,
+      // El archivo sigue el orden de la pantalla (HP-03).
+      ascending: isAscending("th-fecha-historial-producto"),
       destinationPath,
     });
     const count = result?.exportedCount ?? 0;

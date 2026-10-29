@@ -44,6 +44,18 @@ vi.mock("../services/historyService.js", () => ({
   getProductAssociatedInvoices: vi.fn(),
 }));
 
+vi.mock("../services/categoriesService.js", () => ({
+  listCategories: vi.fn(() =>
+    Promise.resolve({ items: [{ id: 2, name: "Redes" }] }),
+  ),
+}));
+
+vi.mock("../services/unitsService.js", () => ({
+  listUnits: vi.fn(() =>
+    Promise.resolve({ items: [{ id: 3, name: "Unidad", abbreviation: "u" }] }),
+  ),
+}));
+
 vi.mock("../components/confirmDialog.js", () => ({
   confirmDialog: vi.fn(() => Promise.resolve(true)),
 }));
@@ -881,5 +893,211 @@ describe("avisos al eliminar una compra (§7.8, FE-05)", () => {
     );
     expect(message).not.toContain("Conector");
     expect(invoices.deleteInvoice).not.toHaveBeenCalled();
+  });
+});
+
+describe("huecos de la revisión contra spec-03", () => {
+  const dialog = () => document.querySelector('[role="dialog"]');
+
+  it("FE-07: el PDF se elige con el diálogo nativo y se adjunta con su ruta", async () => {
+    const path = "C:\\Compras\\factura-12.pdf";
+    const open = vi.fn(() => Promise.resolve(path));
+    window.__TAURI__ = { dialog: { open } };
+    invoices.createEntryInvoice.mockResolvedValue({ invoiceId: 31 });
+    try {
+      document.getElementById("factura-dropzone").click();
+      await vi.waitFor(() =>
+        expect(
+          document.getElementById("factura-archivo-nombre").textContent,
+        ).toBe("factura-12.pdf"),
+      );
+      expect(open).toHaveBeenCalledWith(
+        expect.objectContaining({
+          filters: [{ name: "Documento PDF", extensions: ["pdf"] }],
+        }),
+      );
+      await chooseFromCombobox("factura-proveedor", "ana", "Ana Pérez");
+      await chooseFromCombobox("factura-buscar-producto", "cable", "Cable UTP");
+      const cost = lineInputs("factura-lineas-body", "unitPrice")[0];
+      cost.value = "1";
+      cost.dispatchEvent(new Event("input", { bubbles: true }));
+      submitForm("factura-entrada-form");
+      await vi.waitFor(() =>
+        expect(invoices.saveInvoiceAttachment).toHaveBeenCalledWith(31, path),
+      );
+    } finally {
+      delete window.__TAURI__;
+    }
+  });
+
+  it("FE-07: el arrastre de Tauri entrega la ruta y rechaza lo que no es PDF", async () => {
+    let onDrop = null;
+    window.__TAURI__ = {
+      event: {
+        listen: vi.fn((name, handler) => {
+          if (name === "tauri://drag-drop") onDrop = handler;
+          return Promise.resolve(() => {});
+        }),
+      },
+    };
+    delete window.__facturasDropBound;
+    try {
+      await view.initEntryInvoicesView();
+      document.getElementById("tab-factura-entrada-create").click();
+      onDrop({ payload: { paths: ["C:\\Fotos\\recibo.png"] } });
+      expect(feedback(TYPES[0])).toBe("Solo se puede adjuntar un archivo PDF.");
+      onDrop({ payload: { paths: ["C:\\Compras\\recibo.pdf"] } });
+      expect(
+        document.getElementById("factura-archivo-nombre").textContent,
+      ).toBe("recibo.pdf");
+    } finally {
+      delete window.__TAURI__;
+      delete window.__facturasDropBound;
+    }
+  });
+
+  it("FE-01: un producto que no existe se crea al guardar la compra, con el costo de su línea", async () => {
+    history.searchProductsForInvoice.mockResolvedValue([]);
+    invoices.createEntryInvoice.mockResolvedValue({ invoiceId: 32 });
+    await chooseFromCombobox("factura-proveedor", "ana", "Ana Pérez");
+    await chooseFromCombobox(
+      "factura-buscar-producto",
+      "Router",
+      "Producto no encontrado · Crear producto «Router»",
+    );
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    expect(dialog().querySelector('[name="name"]').value).toBe("Router");
+    dialog().querySelector('[name="unitId"]').value = "3";
+    dialog().querySelector('[name="categoryId"]').value = "2";
+    dialog().querySelector('[name="profitPercent"]').value = "20";
+    dialog().querySelector('button[type="submit"]').click();
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+
+    const row = document.querySelector("#factura-lineas-body .li-row");
+    expect(row.textContent).toContain("Router (nuevo)");
+    const [quantity] = lineInputs("factura-lineas-body", "quantity");
+    const [cost] = lineInputs("factura-lineas-body", "unitPrice");
+    quantity.value = "2";
+    quantity.dispatchEvent(new Event("input", { bubbles: true }));
+    cost.value = "5,00";
+    cost.dispatchEvent(new Event("input", { bubbles: true }));
+    submitForm("factura-entrada-form");
+    await vi.waitFor(() =>
+      expect(invoices.createEntryInvoice).toHaveBeenCalledTimes(1),
+    );
+    expect(invoices.createEntryInvoice.mock.calls[0][0].lines).toEqual([
+      {
+        newProduct: {
+          name: "Router",
+          categoryId: 2,
+          unitId: 3,
+          profitPercent: "20",
+          cost: "5,00",
+        },
+        quantity: "2",
+        unitPrice: "5,00",
+      },
+    ]);
+  });
+
+  it("FE-01: al editar una compra no se ofrece crear productos", async () => {
+    invoices.getInvoice.mockResolvedValue({
+      ...PENDING_SALE,
+      invoiceType: "E",
+      lines: [PENDING_SALE.lines[0]],
+    });
+    history.searchProductsForInvoice.mockResolvedValue([]);
+    await view.__testHooks.openEntryDetail(1);
+    document.getElementById("factura-entrada-editar").click();
+    await chooseFromCombobox(
+      "factura-buscar-producto",
+      "Router",
+      "Crear producto",
+    );
+    await vi.waitFor(() =>
+      expect(feedback(TYPES[0])).toContain("solo se usan productos existentes"),
+    );
+    expect(dialog()).toBeNull();
+  });
+
+  it("FE-01, FS-01, FP-01: la fecha de emisión es hoy por defecto", () => {
+    const today = view.todayLocal();
+    expect(today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    for (const t of TYPES) {
+      expect(document.getElementById(`${t.field}-fecha-emision`).value).toBe(
+        today,
+      );
+    }
+    expect(document.getElementById("factura-perdida-fecha").value).toBe(today);
+  });
+
+  it("FE-03, FS-01, FP-01: el detalle muestra la fecha de creación y el responsable", async () => {
+    invoices.getInvoice.mockResolvedValue({
+      ...PENDING_SALE,
+      createdAt: "2026-02-10T15:30:00Z",
+      createdByName: "contadora",
+    });
+    await view.__testHooks.openSaleDetail(1);
+    expect(
+      document.getElementById("factura-venta-ver-registro").textContent,
+    ).toMatch(/^Registrada el \d{2}\/\d{2}\/2026 \d{2}:\d{2} por contadora$/);
+    await view.__testHooks.openLossDetail(1);
+    expect(
+      document.getElementById("factura-perdidas-ver-registro").textContent,
+    ).toContain("por contadora");
+  });
+
+  it("FE-02: el listado de entradas muestra la cantidad de productos", async () => {
+    invoices.listInvoices.mockResolvedValue([
+      {
+        id: 4,
+        number: "E-00004",
+        invoiceType: "E",
+        contactName: "Ana",
+        date: "2026-02-10",
+        totalCents: 100,
+        status: "pending",
+        productCount: 3,
+      },
+    ]);
+    await view.initEntryInvoicesView();
+    const headers = [
+      ...document.querySelectorAll("#factura-entrada-list thead th"),
+    ].map((th) => th.textContent.trim());
+    const cells = [
+      ...document.querySelectorAll("#facturas-entrada-body tr td"),
+    ].map((td) => td.textContent);
+    expect(headers).toContain("Productos");
+    expect(cells[headers.indexOf("Productos")]).toBe("3");
+  });
+
+  it("el encabezado de fecha alterna el orden de los listados", async () => {
+    invoices.listInvoices.mockResolvedValue([
+      { id: 2, number: "V-00002", invoiceType: "V", date: "2026-02-10" },
+      { id: 1, number: "V-00001", invoiceType: "V", date: "2026-01-05" },
+    ]);
+    await view.initGeneralInvoicesView();
+    const numbers = () =>
+      [...document.querySelectorAll("#facturas-general-body tr")].map(
+        (row) => row.cells[0].textContent,
+      );
+    expect(numbers()).toEqual(["V-00002", "V-00001"]);
+    document.getElementById("th-fecha-facturas-general").click();
+    expect(numbers()).toEqual(["V-00001", "V-00002"]);
+    document.getElementById("th-fecha-facturas-general").click();
+    expect(numbers()).toEqual(["V-00002", "V-00001"]);
+  });
+
+  it("CL-06 y PV-06: sin coincidencias dice que el contacto no se encontró", async () => {
+    clients.searchClients.mockResolvedValue([]);
+    suppliers.searchSuppliers.mockResolvedValue([]);
+    const [clientOption] = await typeInCombobox("factura-venta-cliente", "Zoe");
+    expect(clientOption.textContent).toBe(
+      "Cliente no encontrado · Crear nuevo cliente «Zoe»",
+    );
+    const [supplierOption] = await typeInCombobox("factura-proveedor", "Luis");
+    expect(supplierOption.textContent).toBe(
+      "Proveedor no encontrado · Crear nuevo proveedor «Luis»",
+    );
   });
 });

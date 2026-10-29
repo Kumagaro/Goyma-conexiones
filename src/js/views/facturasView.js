@@ -1,6 +1,7 @@
 import { createCombobox } from "../components/combobox.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import { openQuickContactDialog } from "../components/quickContactDialog.js";
+import { openQuickProductDialog } from "../components/quickProductDialog.js";
 import {
   changeInvoiceStatus,
   createEntryInvoice,
@@ -23,7 +24,11 @@ import {
 import { getClientDetail, searchClients } from "../services/clientsService.js";
 import { searchSuppliers } from "../services/suppliersService.js";
 import { searchProductsForInvoice } from "../services/historyService.js";
-import { formatDate, formatMoney } from "../utils/formatters.js";
+import {
+  formatDate,
+  formatMoney,
+  formatTimestamp,
+} from "../utils/formatters.js";
 import {
   ASSOCIATED_STATUS_LABELS,
   ENTRY_STATUS_LABELS,
@@ -32,6 +37,7 @@ import {
   invoiceStatusLabel,
 } from "../utils/invoiceLabels.js";
 import { showCleanupWarning } from "../utils/cleanupWarning.js";
+import { bindDateSort, sortByDate } from "../utils/dateSort.js";
 import { debounce } from "../utils/requestGuard.js";
 
 const PAYMENT_LABELS = {
@@ -198,6 +204,31 @@ function parseDecimal(text, decimals) {
   return Math.round(Number(normalized) * 10 ** decimals);
 }
 
+// Fecha de hoy en hora local (aaaa-mm-dd): valor por defecto de las facturas.
+export function todayLocal() {
+  const now = new Date();
+  const two = (value) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+}
+
+// Fecha de creación y responsable del detalle (FE-03, FS-01, FP-01).
+function renderRegistration(viewId, detail) {
+  const view = document.getElementById(viewId);
+  const anchor = view?.querySelector(".pv-header > div") ?? view;
+  if (!anchor) return;
+  const id = `${viewId}-registro`;
+  let line = document.getElementById(id);
+  if (!line) {
+    line = document.createElement("p");
+    line.id = id;
+    line.className = "pv-desc-text";
+    anchor.append(line);
+  }
+  line.textContent = detail?.createdAt
+    ? `Registrada el ${formatTimestamp(detail.createdAt)} por ${detail.createdByName ?? "—"}`
+    : "";
+}
+
 function centsToText(cents) {
   if (!Number.isSafeInteger(cents)) return "";
   return (cents / 100).toFixed(2).replace(".", ",");
@@ -270,6 +301,7 @@ function createInvoiceSubmodule(cfg) {
   let createTitle = null;
   let pendingAttachmentPath = null;
   let removeAttachment = false;
+  let lastItems = [];
 
   const field = (suffix) => document.getElementById(`${cfg.field}-${suffix}`);
   const button = (suffix) =>
@@ -310,7 +342,15 @@ function createInvoiceSubmodule(cfg) {
       }
       updatePaymentVisibility();
     }
+    bindDateSort(
+      `th-fecha-${cfg.pageKey}`,
+      cfg.sortKey,
+      () => renderList(lastItems),
+      claim,
+    );
     createTitle ??= field("form-title")?.textContent.trim() ?? "";
+    const date = field("fecha-emision");
+    if (date && !date.value) date.value = todayLocal();
     renderLines();
     return loadInvoices();
   }
@@ -378,7 +418,8 @@ function createInvoiceSubmodule(cfg) {
       search: (query) => (query ? search(query) : Promise.resolve([])),
       formatOption: formatContactOption,
       addOnlyWhenEmpty: true,
-      addOptionLabel: (query) => `Crear nuevo ${contactNoun} «${query}»`,
+      addOptionLabel: (query) =>
+        `${cfg.contact === "client" ? "Cliente" : "Proveedor"} no encontrado · Crear nuevo ${contactNoun} «${query}»`,
       onAddNew: (query) =>
         openQuickContactDialog({
           kind: cfg.contact,
@@ -410,6 +451,15 @@ function createInvoiceSubmodule(cfg) {
       formatOption: formatProductOption,
       // Una salida no puede llevar un producto agotado (FS-01); una compra sí.
       isOptionDisabled: (item) => !isEntry && item?.isOutOfStock === true,
+      // Solo una compra puede traer un producto que aún no existe (FE-01).
+      ...(isEntry
+        ? {
+            addOnlyWhenEmpty: true,
+            addOptionLabel: (query) =>
+              `Producto no encontrado · Crear producto «${query}»`,
+            onAddNew: (query) => startNewProduct(query),
+          }
+        : {}),
       onSelect: (item) => {
         if (!item) return;
         addProductLine(item);
@@ -503,6 +553,50 @@ function createInvoiceSubmodule(cfg) {
       ?.focus();
   }
 
+  // El producto se crea al guardar la factura, con la cantidad y el costo de
+  // su línea; si la factura falla, no se crea (FE-01).
+  async function startNewProduct(query) {
+    if (editing) {
+      // updateEntryInvoice no admite productos nuevos.
+      showFeedback(
+        "Al editar solo se usan productos existentes. Registra el producto nuevo en una compra nueva.",
+      );
+      return null;
+    }
+    const product = await openQuickProductDialog({ initialName: query });
+    if (!product) return null;
+    const key = product.name.trim().toLowerCase();
+    if (lines.some((line) => line.productName.trim().toLowerCase() === key)) {
+      showFeedback(`«${product.name}» ya está en la factura.`);
+      return null;
+    }
+    lines.push({
+      productId: null,
+      productIdOriginal: null,
+      newProduct: {
+        name: product.name,
+        description: product.description,
+        categoryId: product.categoryId,
+        unitId: product.unitId,
+        profitPercent: product.profitPercent,
+      },
+      productName: product.name,
+      unitAbbreviation: product.unitAbbreviation,
+      quantity: "1",
+      originalQuantity: null,
+      unitPrice: "",
+      priceCents: null,
+      productStatus: "active",
+    });
+    showFeedback("");
+    productCombobox?.setSelected(null);
+    renderLines();
+    field("lineas-body")
+      ?.querySelector(`[data-line-index="${lines.length - 1}"] input`)
+      ?.focus();
+    return null;
+  }
+
   // Línea existente cuyo producto se eliminó: solo se puede quitar.
   const isDeletedLine = (line) =>
     line.productIdOriginal != null && line.productStatus == null;
@@ -566,7 +660,9 @@ function createInvoiceSubmodule(cfg) {
         ? `${line.productName} (eliminado)`
         : discontinued
           ? `${line.productName} (descontinuado)`
-          : line.productName;
+          : line.newProduct
+            ? `${line.productName} (nuevo)`
+            : line.productName;
       const quantity = document.createElement("div");
       quantity.append(lineInput(line, index, "quantity", "Cantidad", deleted));
       const unit = document.createElement("div");
@@ -638,12 +734,55 @@ function createInvoiceSubmodule(cfg) {
       ?.classList.toggle("has-file", Boolean(name));
   }
 
+  // El backend copia el PDF desde una ruta del disco (FE-07). En Tauri la
+  // ruta la dan el diálogo nativo o el evento de arrastre: un File del
+  // webview no la trae.
+  function setAttachmentPath(path) {
+    if (!path) return;
+    if (!/\.pdf$/i.test(path)) {
+      showFeedback("Solo se puede adjuntar un archivo PDF.");
+      return;
+    }
+    pendingAttachmentPath = path;
+    removeAttachment = false;
+    setAttachmentLabel(path.split(/[\\/]/).pop());
+    showFeedback("");
+  }
+
+  async function pickAttachment() {
+    const open = window.__TAURI__?.dialog?.open;
+    if (typeof open !== "function") {
+      // Fuera de Tauri queda el selector del navegador.
+      document.getElementById("factura-archivo-input")?.click();
+      return;
+    }
+    try {
+      const path = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Documento PDF", extensions: ["pdf"] }],
+      });
+      if (typeof path === "string") setAttachmentPath(path);
+    } catch {
+      showFeedback("No se pudo abrir el selector de archivos.");
+    }
+  }
+
   function chooseAttachment(file) {
     if (!file) return;
-    // En Tauri el backend recibe la ruta; en el navegador se guarda el nombre.
-    pendingAttachmentPath = file.path ?? file.name ?? null;
-    removeAttachment = false;
-    setAttachmentLabel(file.name ?? "");
+    setAttachmentPath(file.path ?? file.name ?? null);
+  }
+
+  // Tauri intercepta el arrastre de archivos y entrega sus rutas en un evento.
+  function listenTauriDrop() {
+    const listen = window.__TAURI__?.event?.listen;
+    if (typeof listen !== "function" || window.__facturasDropBound) return;
+    window.__facturasDropBound = true;
+    void listen("tauri://drag-drop", (event) => {
+      const formView = document.getElementById(`${cfg.view}-create`);
+      if (!formView?.classList.contains("active")) return;
+      setAttachmentPath(event?.payload?.paths?.[0] ?? null);
+    });
   }
 
   function bindAttachment() {
@@ -655,9 +794,7 @@ function createInvoiceSubmodule(cfg) {
     }
     const dropzone = document.getElementById("factura-dropzone");
     if (claim(dropzone)) {
-      dropzone.addEventListener("click", () => {
-        document.getElementById("factura-archivo-input")?.click();
-      });
+      dropzone.addEventListener("click", () => void pickAttachment());
       dropzone.addEventListener("dragover", (event) => {
         event.preventDefault();
         dropzone.classList.add("dragover");
@@ -671,6 +808,7 @@ function createInvoiceSubmodule(cfg) {
         chooseAttachment(event.dataTransfer?.files?.[0]);
       });
     }
+    listenTauriDrop();
     const removeButton = document.getElementById("factura-archivo-quitar");
     if (claim(removeButton)) {
       removeButton.addEventListener("click", (event) => {
@@ -742,6 +880,8 @@ function createInvoiceSubmodule(cfg) {
     pendingAttachmentPath = null;
     removeAttachment = false;
     form()?.reset();
+    const date = field("fecha-emision");
+    if (date) date.value = todayLocal();
     contactCombobox?.setSelected(null);
     productCombobox?.setSelected(null);
     selectedContact = null;
@@ -838,6 +978,13 @@ function createInvoiceSubmodule(cfg) {
       }
       // Un producto eliminado no tiene id vigente: nunca se envía NaN.
       if (line.productId != null) item.productId = line.productId;
+      // El costo inicial del producto nuevo es el de su línea (FE-01).
+      if (line.newProduct) {
+        item.newProduct = {
+          ...line.newProduct,
+          cost: String(line.unitPrice).trim(),
+        };
+      }
       item.quantity = String(line.quantity).trim();
       if (isEntry) item.unitPrice = String(line.unitPrice).trim();
       return item;
@@ -937,6 +1084,7 @@ function createInvoiceSubmodule(cfg) {
   }
 
   function renderList(items) {
+    lastItems = items;
     const body = document.getElementById(cfg.bodyId);
     if (!body) return;
     if (!items.length) {
@@ -944,7 +1092,7 @@ function createInvoiceSubmodule(cfg) {
       return;
     }
     body.replaceChildren();
-    for (const item of items) {
+    for (const item of sortByDate(items, `th-fecha-${cfg.pageKey}`)) {
       const row = document.createElement("tr");
       const texts = [
         item?.number ?? "—",
@@ -962,6 +1110,7 @@ function createInvoiceSubmodule(cfg) {
         formatMoney(item?.totalCents ?? 0),
         cfg.statusLabels[item?.status] ?? item?.status ?? "—",
       );
+      if (cfg.showsProductCount) texts.push(String(item?.productCount ?? "—"));
       const cells = texts.map((text) => {
         const cell = document.createElement("td");
         cell.textContent = text;
@@ -1091,6 +1240,7 @@ function createInvoiceSubmodule(cfg) {
     const editButton = button("editar");
     if (editButton) editButton.hidden = detail?.status !== "pending";
     renderStatusActions(detail);
+    renderRegistration(`${cfg.view}-ver`, detail);
   }
 
   function renderStatusActions(detail) {
@@ -1255,6 +1405,8 @@ const entrySubmodule = createInvoiceSubmodule({
   invoiceType: "E",
   pageId: "page-facturas-entrada",
   pageKey: "facturas-entrada",
+  sortKey: "facturasEntrada",
+  showsProductCount: true,
   view: "factura-entrada",
   field: "factura",
   buttons: "factura-entrada",
@@ -1280,6 +1432,7 @@ const saleSubmodule = createInvoiceSubmodule({
   invoiceType: "V",
   pageId: "page-facturas-venta",
   pageKey: "facturas-venta",
+  sortKey: "facturasVenta",
   view: "factura-venta",
   field: "factura-venta",
   buttons: "factura-venta",
@@ -1304,6 +1457,7 @@ const serviceSubmodule = createInvoiceSubmodule({
   invoiceType: "S",
   pageId: "page-facturas-servicios",
   pageKey: "facturas-servicios",
+  sortKey: "facturasServicios",
   view: "factura-servicios",
   field: "factura-servicio",
   buttons: "factura-servicio",
@@ -1330,6 +1484,7 @@ const guaranteeSubmodule = createInvoiceSubmodule({
   invoiceType: "GG",
   pageId: "page-facturas-garantia",
   pageKey: "facturas-garantia",
+  sortKey: "facturasGarantia",
   view: "factura-garantia",
   field: "factura-garantia",
   buttons: "factura-garantia",
@@ -1362,6 +1517,7 @@ const installationSubmodule = createInvoiceSubmodule({
   invoiceType: "GI",
   pageId: "page-facturas-insumos",
   pageKey: "facturas-insumos",
+  sortKey: "facturasInsumos",
   view: "factura-insumos",
   field: "factura-insumo",
   buttons: "factura-insumo",
@@ -1414,6 +1570,8 @@ let lossProductCombobox = null;
 let currentLossId = null;
 let currentLossDetail = null;
 let savingLoss = false;
+let lossItems = [];
+let generalItems = [];
 
 export function initLossInvoicesView() {
   const root = document.getElementById("page-facturas-perdidas");
@@ -1432,6 +1590,14 @@ export function initLossInvoicesView() {
   bindLossForm();
   bindLossTableActions();
   bindLossDetailActions();
+  bindDateSort(
+    "th-fecha-facturas-perdidas",
+    "facturasPerdidas",
+    () => renderLossList(lossItems),
+    claimLoss,
+  );
+  const date = document.getElementById("factura-perdida-fecha");
+  if (date && !date.value) date.value = todayLocal();
   return loadLossInvoices();
 }
 
@@ -1568,6 +1734,7 @@ async function loadLossInvoices() {
 }
 
 function renderLossList(items) {
+  lossItems = items;
   const body = document.getElementById("facturas-perdidas-body");
   if (!body) return;
   if (!items.length) {
@@ -1575,7 +1742,7 @@ function renderLossList(items) {
     return;
   }
   body.replaceChildren();
-  for (const item of items) {
+  for (const item of sortByDate(items, "th-fecha-facturas-perdidas")) {
     const row = document.createElement("tr");
     const cells = [
       item?.number ?? "—",
@@ -1699,6 +1866,7 @@ function renderLossDetail(detail) {
     detail?.date ? formatDate(detail.date) : "—",
   );
   setText("factura-perdida-ver-descripcion", detail?.notes ?? "—");
+  renderRegistration("factura-perdidas-ver", detail);
 }
 
 async function handleDeleteLoss(invoiceId) {
@@ -1782,6 +1950,12 @@ export function initGeneralInvoicesView() {
       );
     });
   }
+  bindDateSort(
+    "th-fecha-facturas-general",
+    "facturasGeneral",
+    () => renderFacturasGeneral(generalItems),
+    claimGeneral,
+  );
   if (!window.__facturasGeneralPageChangeBound) {
     window.addEventListener("page:change", (event) => {
       if (event.detail?.pageId !== "facturas-general") return;
@@ -1816,6 +1990,7 @@ async function loadGeneralInvoices() {
 }
 
 export function renderFacturasGeneral(items) {
+  generalItems = items;
   const body = document.getElementById("facturas-general-body");
   if (!body) return;
   if (!items.length) {
@@ -1831,7 +2006,7 @@ export function renderFacturasGeneral(items) {
     return;
   }
   body.replaceChildren();
-  for (const item of items) {
+  for (const item of sortByDate(items, "th-fecha-facturas-general")) {
     const type = item?.invoiceType ?? "";
     const row = document.createElement("tr");
     const cells = [

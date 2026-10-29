@@ -107,6 +107,7 @@ function seedProductsPage() {
           <input id="producto-stock" type="text" />
           <select id="producto-caducidad-tipo"><option value="no-aplica">No aplica</option><option value="fecha">Fecha</option></select>
           <div id="producto-caducidad-fecha-wrap"><input id="producto-caducidad-fecha" type="date" /></div>
+          <div id="producto-facturas-asociadas" hidden><div id="producto-facturas-asociadas-lista"></div></div>
           <div id="producto-feedback" role="status" hidden></div>
           <button id="producto-cancelar" type="button">Cancelar</button>
           <button type="submit">Guardar</button>
@@ -303,6 +304,48 @@ describe("valores de Fase 2 en productos y categorías", () => {
     list().querySelector("button").click();
     expect(window.irAFacturaDesdeGeneral).toHaveBeenCalledWith("V", 31);
     delete window.irAFacturaDesdeGeneral;
+  });
+
+  it("al editar el producto el formulario también muestra sus Facturas Asociadas (HP-04)", async () => {
+    seedProductsPage();
+    listProducts.mockResolvedValue([
+      { id: 5, name: "Switch", quantity: "1", isOutOfStock: false },
+    ]);
+    getProduct.mockResolvedValue({
+      id: 5,
+      name: "Switch",
+      quantity: "1",
+      isDiscontinued: false,
+      expiredCleanupWarning: null,
+    });
+    getProductAssociatedInvoices.mockResolvedValueOnce([
+      {
+        invoiceId: 8,
+        invoiceNumber: "E-00008",
+        invoiceType: "E",
+        invoiceDate: "2026-02-10",
+        status: "completed",
+        quantity: "4",
+      },
+    ]);
+    const view = await import("../views/productosView.js");
+    await view.initProductosView();
+    await view.showProductoTab("list");
+    // Al crear, la sección no aparece.
+    expect(document.getElementById("producto-facturas-asociadas").hidden).toBe(
+      true,
+    );
+    document
+      .querySelector('#productos-body [data-product-action="edit"]')
+      .click();
+    const list = () =>
+      document.getElementById("producto-facturas-asociadas-lista");
+    await vi.waitFor(() => expect(list().textContent).toContain("E-00008"));
+    expect(getProductAssociatedInvoices).toHaveBeenCalledWith(5);
+    expect(document.getElementById("producto-facturas-asociadas").hidden).toBe(
+      false,
+    );
+    expect(list().textContent).toContain("Pagada");
   });
 
   it("sin facturas asociadas muestra un estado vacío claro", async () => {

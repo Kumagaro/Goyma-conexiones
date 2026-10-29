@@ -127,6 +127,8 @@ describe("proveedoresView", () => {
                   date: "2026-01-05",
                   totalCents: 1500,
                   status: "completed",
+                  productCount: 2,
+                  createdByName: "contadora",
                 },
                 {
                   id: 12,
@@ -148,7 +150,7 @@ describe("proveedoresView", () => {
     document.getElementById("tab-proveedor-historial").click();
     const body = document.getElementById("historial-proveedor-body");
     const numbers = () =>
-      [...body.querySelectorAll("tr")].map((row) => row.cells[1]?.textContent);
+      [...body.querySelectorAll("tr")].map((row) => row.cells[4]?.textContent);
     await vi.waitFor(() => expect(body.querySelectorAll("tr")).toHaveLength(2));
     expect(getSupplierDetail).toHaveBeenCalledWith(1);
     // Más reciente primero; texto seguro.
@@ -158,6 +160,18 @@ describe("proveedoresView", () => {
     expect(body.textContent).toContain(formatMoney(1500));
     expect(body.textContent).toContain("Pagada");
     expect(body.textContent).toContain("Por Pagar");
+    // Columnas de PV-07: fecha, estado, cantidad de productos, total, factura y responsable.
+    expect(
+      [...body.querySelectorAll("tr")[1].cells].map((cell) => cell.textContent),
+    ).toEqual([
+      formatDate("2026-01-05"),
+      "Pagada",
+      "2",
+      formatMoney(1500),
+      "E-00001",
+      "contadora",
+      "Ver",
+    ]);
 
     document.getElementById("th-fecha-historial-proveedor").click();
     expect(numbers()).toEqual(["E-00001", evil]);

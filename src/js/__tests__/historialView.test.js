@@ -41,7 +41,10 @@ function seedHistoryPage() {
             <input type="date" id="historial-producto-hasta" />
             <select id="historial-producto-tipo"></select>
           </div>
-          <table><tbody id="historial-producto-body"></tbody></table>
+          <table>
+            <thead><tr><th id="th-fecha-historial-producto">Fecha</th></tr></thead>
+            <tbody id="historial-producto-body"></tbody>
+          </table>
         </div>
         <div id="producto-ver" class="config-subview">
           <button id="producto-ver-historial" type="button" hidden>Ver Historial</button>
@@ -187,14 +190,14 @@ describe("historialView", () => {
       items: [
         {
           ...movement,
-          id: 1,
+          id: 2,
           invoiceNumber: "V-00004",
           invoiceType: "V",
           invoiceId: 44,
         },
         {
           ...movement,
-          id: 2,
+          id: 1,
           invoiceNumber: "V-00003",
           invoiceType: "V",
           invoiceId: null,
@@ -217,6 +220,45 @@ describe("historialView", () => {
     expect(deleted.querySelector("button")).toBeNull();
     expect(deleted.textContent).toContain("V-00003");
     delete window.irAFacturaDesdeGeneral;
+  });
+
+  it("HP-02: el encabezado de fecha alterna el orden de los movimientos", async () => {
+    const movement = {
+      type: "entry",
+      quantity: "1",
+      stockAfter: "1",
+      unitPriceCents: 100,
+      totalPriceCents: 100,
+      userName: "Ana",
+      productIdOriginal: 2,
+    };
+    listHistoryProducts.mockResolvedValue([...ACTIVE_PRODUCTS]);
+    getProductHistory.mockResolvedValue({
+      items: [
+        {
+          ...movement,
+          id: 2,
+          createdAt: "2026-02-10T15:30:00Z",
+          invoiceNumber: "E-00002",
+        },
+        {
+          ...movement,
+          id: 1,
+          createdAt: "2026-01-05T10:00:00Z",
+          invoiceNumber: "E-00001",
+        },
+      ],
+    });
+    await initHistorialView();
+    const select = document.getElementById("historial-producto-select");
+    select.value = "2";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    const body = document.getElementById("historial-producto-body");
+    const invoices = () =>
+      [...body.querySelectorAll("tr")].map((row) => row.cells[6].textContent);
+    await vi.waitFor(() => expect(invoices()).toEqual(["E-00002", "E-00001"]));
+    document.getElementById("th-fecha-historial-producto").click();
+    expect(invoices()).toEqual(["E-00001", "E-00002"]);
   });
 
   it("escucha product:viewHistory y abre la pestaña con el producto preseleccionado", async () => {
@@ -419,8 +461,17 @@ describe("historialView exportación (HTML de producción)", () => {
           productId: 2,
           fromDate: "2026-02-01",
           types: [],
+          ascending: false,
           destinationPath: `C:\\salida\\h.${extension}`,
         }),
+      );
+      // Con el encabezado en ascendente, el archivo sigue ese orden (HP-03).
+      document.getElementById("th-fecha-historial-producto").click();
+      button.click();
+      await vi.waitFor(() =>
+        expect(exporterRef()).toHaveBeenLastCalledWith(
+          expect.objectContaining({ ascending: true }),
+        ),
       );
       expect(save).toHaveBeenCalledWith(
         expect.objectContaining({
