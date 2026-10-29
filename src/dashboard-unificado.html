@@ -1043,7 +1043,7 @@
             <span class="text">Proveedores</span>
           </a>
         </li>
-        <li id="sidebar-facturas" hidden>
+        <li id="sidebar-facturas">
           <button onclick="toggleSubMenu(this)" class="dropsown-button">
             <svg class="icon"><use href="#icon-receipt"></use></svg>
             <span class="text">Facturas</span>
@@ -1096,7 +1096,7 @@
                       'Facturas de Servicios',
                     );
                   "
-                  >Servicos</a
+                  >Servicios</a
                 >
               </li>
               <li>
@@ -2312,43 +2312,17 @@
             </details>
 
             <!-- Facturas asociadas: colapsable -->
-            <details class="pv-section" id="producto-ver-facturas" hidden>
+            <details class="pv-section" id="producto-ver-facturas">
               <summary>
                 <h3 class="cat-view-section-title">Facturas Asociadas</h3>
                 <svg class="icon pv-chevron">
                   <use href="#icon-chevron-down"></use>
                 </svg>
               </summary>
-              <div class="pv-section-body">
-                <div class="pv-invoice-grid">
-                  <div class="pv-invoice-card">
-                    <div class="kpi-icon">
-                      <svg class="icon"><use href="#icon-receipt"></use></svg>
-                    </div>
-                    <div>
-                      <span class="pv-invoice-label">Factura de Compra</span>
-                      <div
-                        class="pv-invoice-value"
-                        id="producto-ver-factura-compra"
-                      ></div>
-                    </div>
-                  </div>
-                  <div class="pv-invoice-card">
-                    <div class="kpi-icon">
-                      <svg class="icon">
-                        <use href="#icon-receipt-edit"></use>
-                      </svg>
-                    </div>
-                    <div>
-                      <span class="pv-invoice-label">Factura de Venta</span>
-                      <div
-                        class="pv-invoice-value"
-                        id="producto-ver-factura-venta"
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <div
+                class="pv-section-body"
+                id="producto-ver-facturas-lista"
+              ></div>
             </details>
 
             <div class="form-actions">
@@ -2611,7 +2585,7 @@
 
           <!-- Vista: crear / editar cliente -->
           <div id="cliente-create" class="config-subview">
-            <form class="form-card">
+            <form class="form-card" id="cliente-form">
               <div>
                 <h3 id="cliente-form-title">Datos de Cliente</h3>
               </div>
@@ -2725,7 +2699,13 @@
               </div>
 
               <div class="form-actions">
-                <button type="button" class="btn-secondary">Cancelar</button>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  id="cliente-cancelar"
+                >
+                  Cancelar
+                </button>
                 <button type="submit" class="btn-primary">
                   Guardar Cambios
                 </button>
@@ -2994,7 +2974,7 @@
 
           <!-- Vista: crear / editar proveedor -->
           <div id="proveedor-create" class="config-subview">
-            <form class="form-card">
+            <form class="form-card" id="proveedor-form">
               <div>
                 <h3 id="proveedor-form-title">Datos de Proveedor</h3>
               </div>
@@ -3090,7 +3070,13 @@
               </div>
 
               <div class="form-actions">
-                <button type="button" class="btn-secondary">Cancelar</button>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  id="proveedor-cancelar"
+                >
+                  Cancelar
+                </button>
                 <button type="submit" class="btn-primary">
                   Guardar Cambios
                 </button>
@@ -3106,11 +3092,11 @@
             </p>
             <div class="historial-toolbar">
               <div class="field field-select-item">
-                <label>Proveedor</label>
+                <label for="historial-proveedor-select">Proveedor</label>
                 <select id="historial-proveedor-select"></select>
               </div>
               <div class="field">
-                <label
+                <label for="historial-proveedor-desde"
                   ><svg
                     class="icon"
                     style="width: 16px; height: 16px; vertical-align: -3px"
@@ -3122,7 +3108,7 @@
                 <input type="date" id="historial-proveedor-desde" />
               </div>
               <div class="field">
-                <label
+                <label for="historial-proveedor-hasta"
                   ><svg
                     class="icon"
                     style="width: 16px; height: 16px; vertical-align: -3px"
@@ -3140,12 +3126,10 @@
                   <th id="th-fecha-historial-proveedor" class="th-sortable">
                     Fecha
                   </th>
+                  <th>No. Factura</th>
                   <th>Estado</th>
-                  <th style="text-align: center">Cantidad Productos</th>
-                  <th style="text-align: right">Precio Unitario</th>
-                  <th style="text-align: right">Precio Total</th>
-                  <th>Factura</th>
-                  <th>Responsable</th>
+                  <th style="text-align: right">Total</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="historial-proveedor-body"></tbody>
@@ -3485,7 +3469,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE ENTRADA ===================== -->
-        <div id="page-facturas-entrada" class="page" hidden>
+        <div id="page-facturas-entrada" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-entrada-list">
@@ -3511,6 +3495,25 @@
 
           <!-- Vista: listado -->
           <div id="factura-entrada-list" class="config-subview active">
+            <div class="historial-toolbar">
+              <div class="field field-select-item">
+                <label for="factura-entrada-filtro-estado">Estado</label>
+                <select id="factura-entrada-filtro-estado">
+                  <option value="">Todos</option>
+                  <option value="pending">Por Pagar</option>
+                  <option value="completed">Pagada</option>
+                  <option value="cancelled">Cancelada</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="factura-entrada-desde">Fecha inicial</label>
+                <input type="date" id="factura-entrada-desde" />
+              </div>
+              <div class="field">
+                <label for="factura-entrada-hasta">Fecha final</label>
+                <input type="date" id="factura-entrada-hasta" />
+              </div>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -3629,16 +3632,6 @@
                       autocomplete="off"
                       placeholder="Buscar producto para agregar a la factura..."
                     />
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      id="factura-producto-add"
-                      title="Agregar producto encontrado"
-                    >
-                      <svg class="icon" style="width: 20px; height: 20px">
-                        <use href="#icon-plus"></use>
-                      </svg>
-                    </button>
                   </div>
                 </div>
 
@@ -3654,18 +3647,6 @@
                   </div>
                   <div id="factura-lineas-body"></div>
                 </div>
-
-                <button
-                  type="button"
-                  class="add-product-row"
-                  id="factura-agregar-fila"
-                  style="margin-top: 15px"
-                >
-                  <svg class="icon" style="width: 16px; height: 16px">
-                    <use href="#icon-plus"></use>
-                  </svg>
-                  Agregar Fila
-                </button>
               </div>
 
               <div class="factura-form-row" style="align-items: flex-start">
@@ -3964,7 +3945,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE VENTA ===================== -->
-        <div id="page-facturas-venta" class="page" hidden>
+        <div id="page-facturas-venta" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-venta-list">
@@ -3990,6 +3971,25 @@
 
           <!-- Vista: listado -->
           <div id="factura-venta-list" class="config-subview active">
+            <div class="historial-toolbar">
+              <div class="field field-select-item">
+                <label for="factura-venta-filtro-estado">Estado</label>
+                <select id="factura-venta-filtro-estado">
+                  <option value="">Todos</option>
+                  <option value="pending">Por Cobrar</option>
+                  <option value="completed">Cobrada</option>
+                  <option value="cancelled">Cancelada</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="factura-venta-desde">Fecha inicial</label>
+                <input type="date" id="factura-venta-desde" />
+              </div>
+              <div class="field">
+                <label for="factura-venta-hasta">Fecha final</label>
+                <input type="date" id="factura-venta-hasta" />
+              </div>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -4101,16 +4101,6 @@
                       autocomplete="off"
                       placeholder="Buscar producto para agregar a la venta..."
                     />
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      id="factura-venta-producto-add"
-                      title="Agregar producto encontrado"
-                    >
-                      <svg class="icon" style="width: 20px; height: 20px">
-                        <use href="#icon-plus"></use>
-                      </svg>
-                    </button>
                   </div>
                 </div>
 
@@ -4126,18 +4116,6 @@
                   </div>
                   <div id="factura-venta-lineas-body"></div>
                 </div>
-
-                <button
-                  type="button"
-                  class="add-product-row"
-                  id="factura-venta-agregar-fila"
-                  style="margin-top: 15px"
-                >
-                  <svg class="icon" style="width: 16px; height: 16px">
-                    <use href="#icon-plus"></use>
-                  </svg>
-                  Agregar Fila
-                </button>
               </div>
 
               <div class="factura-form-row" style="align-items: flex-start">
@@ -4383,7 +4361,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE SERVICIOS ===================== -->
-        <div id="page-facturas-servicios" class="page" hidden>
+        <div id="page-facturas-servicios" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-servicios-list">
@@ -4409,6 +4387,25 @@
 
           <!-- Vista: listado -->
           <div id="factura-servicios-list" class="config-subview active">
+            <div class="historial-toolbar">
+              <div class="field field-select-item">
+                <label for="factura-servicios-filtro-estado">Estado</label>
+                <select id="factura-servicios-filtro-estado">
+                  <option value="">Todos</option>
+                  <option value="pending">Por Cobrar</option>
+                  <option value="completed">Cobrada</option>
+                  <option value="cancelled">Cancelada</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="factura-servicios-desde">Fecha inicial</label>
+                <input type="date" id="factura-servicios-desde" />
+              </div>
+              <div class="field">
+                <label for="factura-servicios-hasta">Fecha final</label>
+                <input type="date" id="factura-servicios-hasta" />
+              </div>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -4522,16 +4519,6 @@
                       autocomplete="off"
                       placeholder="Buscar insumo para agregar a la factura..."
                     />
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      id="factura-servicio-producto-add"
-                      title="Agregar insumo encontrado"
-                    >
-                      <svg class="icon" style="width: 20px; height: 20px">
-                        <use href="#icon-plus"></use>
-                      </svg>
-                    </button>
                   </div>
                 </div>
 
@@ -4547,18 +4534,6 @@
                   </div>
                   <div id="factura-servicio-lineas-body"></div>
                 </div>
-
-                <button
-                  type="button"
-                  class="add-product-row"
-                  id="factura-servicio-agregar-fila"
-                  style="margin-top: 15px"
-                >
-                  <svg class="icon" style="width: 16px; height: 16px">
-                    <use href="#icon-plus"></use>
-                  </svg>
-                  Agregar Fila
-                </button>
               </div>
 
               <div class="factura-form-row" style="align-items: flex-start">
@@ -4813,7 +4788,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE INSUMOS ===================== -->
-        <div id="page-facturas-insumos" class="page" hidden>
+        <div id="page-facturas-insumos" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-insumos-list">
@@ -4839,6 +4814,25 @@
 
           <!-- Vista: listado -->
           <div id="factura-insumos-list" class="config-subview active">
+            <div class="historial-toolbar">
+              <div class="field field-select-item">
+                <label for="factura-insumos-filtro-estado">Estado</label>
+                <select id="factura-insumos-filtro-estado">
+                  <option value="">Todos</option>
+                  <option value="pending">Pendiente</option>
+                  <option value="completed">Completada</option>
+                  <option value="cancelled">Cancelada</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="factura-insumos-desde">Fecha inicial</label>
+                <input type="date" id="factura-insumos-desde" />
+              </div>
+              <div class="field">
+                <label for="factura-insumos-hasta">Fecha final</label>
+                <input type="date" id="factura-insumos-hasta" />
+              </div>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -4953,16 +4947,6 @@
                       autocomplete="off"
                       placeholder="Buscar insumo para agregar a la factura..."
                     />
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      id="factura-insumo-producto-add"
-                      title="Agregar insumo encontrado"
-                    >
-                      <svg class="icon" style="width: 20px; height: 20px">
-                        <use href="#icon-plus"></use>
-                      </svg>
-                    </button>
                   </div>
                 </div>
 
@@ -4978,18 +4962,6 @@
                   </div>
                   <div id="factura-insumo-lineas-body"></div>
                 </div>
-
-                <button
-                  type="button"
-                  class="add-product-row"
-                  id="factura-insumo-agregar-fila"
-                  style="margin-top: 15px"
-                >
-                  <svg class="icon" style="width: 16px; height: 16px">
-                    <use href="#icon-plus"></use>
-                  </svg>
-                  Agregar Fila
-                </button>
               </div>
 
               <div class="factura-form-row" style="align-items: flex-start">
@@ -5233,7 +5205,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE GARANTÍA ===================== -->
-        <div id="page-facturas-garantia" class="page" hidden>
+        <div id="page-facturas-garantia" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-garantia-list">
@@ -5259,6 +5231,25 @@
 
           <!-- Vista: listado -->
           <div id="factura-garantia-list" class="config-subview active">
+            <div class="historial-toolbar">
+              <div class="field field-select-item">
+                <label for="factura-garantia-filtro-estado">Estado</label>
+                <select id="factura-garantia-filtro-estado">
+                  <option value="">Todos</option>
+                  <option value="pending">Pendiente</option>
+                  <option value="completed">Completada</option>
+                  <option value="cancelled">Cancelada</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="factura-garantia-desde">Fecha inicial</label>
+                <input type="date" id="factura-garantia-desde" />
+              </div>
+              <div class="field">
+                <label for="factura-garantia-hasta">Fecha final</label>
+                <input type="date" id="factura-garantia-hasta" />
+              </div>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -5373,16 +5364,6 @@
                       autocomplete="off"
                       placeholder="Buscar producto en garantía para agregar..."
                     />
-                    <button
-                      type="button"
-                      class="icon-btn"
-                      id="factura-garantia-producto-add"
-                      title="Agregar producto encontrado"
-                    >
-                      <svg class="icon" style="width: 20px; height: 20px">
-                        <use href="#icon-plus"></use>
-                      </svg>
-                    </button>
                   </div>
                 </div>
 
@@ -5398,18 +5379,6 @@
                   </div>
                   <div id="factura-garantia-lineas-body"></div>
                 </div>
-
-                <button
-                  type="button"
-                  class="add-product-row"
-                  id="factura-garantia-agregar-fila"
-                  style="margin-top: 15px"
-                >
-                  <svg class="icon" style="width: 16px; height: 16px">
-                    <use href="#icon-plus"></use>
-                  </svg>
-                  Agregar Fila
-                </button>
               </div>
 
               <div class="factura-form-row" style="align-items: flex-start">
@@ -5662,7 +5631,7 @@
         </div>
 
         <!-- ===================== FACTURAS DE PÉRDIDAS ===================== -->
-        <div id="page-facturas-perdidas" class="page" hidden>
+        <div id="page-facturas-perdidas" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-perdidas-list">
@@ -5688,6 +5657,16 @@
 
           <!-- Vista: listado -->
           <div id="factura-perdidas-list" class="config-subview active">
+            <div class="historial-toolbar">
+              <div class="field">
+                <label for="factura-perdidas-desde">Fecha inicial</label>
+                <input type="date" id="factura-perdidas-desde" />
+              </div>
+              <div class="field">
+                <label for="factura-perdidas-hasta">Fecha final</label>
+                <input type="date" id="factura-perdidas-hasta" />
+              </div>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -5928,7 +5907,7 @@
         </div>
 
         <!-- ===================== FACTURAS - VISTA GENERAL ===================== -->
-        <div id="page-facturas-general" class="page" hidden>
+        <div id="page-facturas-general" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active">Todas las Facturas</button>
@@ -5984,6 +5963,14 @@
                 <option value="completadas">Completadas</option>
                 <option value="canceladas">Canceladas</option>
               </select>
+            </div>
+            <div class="field">
+              <label for="factura-general-desde">Fecha inicial</label>
+              <input type="date" id="factura-general-desde" />
+            </div>
+            <div class="field">
+              <label for="factura-general-hasta">Fecha final</label>
+              <input type="date" id="factura-general-hasta" />
             </div>
           </div>
 

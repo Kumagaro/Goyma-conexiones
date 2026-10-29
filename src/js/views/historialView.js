@@ -229,7 +229,23 @@ function renderHistoryList(items) {
     const totalCell = document.createElement("td");
     totalCell.textContent = formatMoney(item?.totalPriceCents);
     const invoiceCell = document.createElement("td");
-    invoiceCell.textContent = item?.invoiceNumber ?? "—";
+    if (item?.invoiceNumber && item?.invoiceId != null && item?.invoiceType) {
+      // HP-02: el número abre la factura mientras siga existiendo.
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "action-link";
+      link.textContent = item.invoiceNumber;
+      link.setAttribute("aria-label", `Ver factura ${item.invoiceNumber}`);
+      link.addEventListener("click", () => {
+        window.irAFacturaDesdeGeneral?.(
+          item.invoiceType,
+          Number(item.invoiceId),
+        );
+      });
+      invoiceCell.append(link);
+    } else {
+      invoiceCell.textContent = item?.invoiceNumber ?? "—";
+    }
     const userCell = document.createElement("td");
     userCell.textContent = item?.userName ?? "—";
     row.append(

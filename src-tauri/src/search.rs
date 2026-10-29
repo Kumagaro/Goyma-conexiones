@@ -4,6 +4,7 @@ use crate::errors::AppError;
 use crate::models::client::ContactMatch;
 use crate::models::invoice::{AssociatedInvoice, InvoiceListItem};
 use crate::models::product::{format_quantity_milli, ProductMatch};
+use crate::pricing::selling_price_cents;
 use crate::text::{clean_name, normalize_text, spanish_sort_key};
 
 pub fn normalize_query(raw: &str) -> String {
@@ -114,20 +115,57 @@ pub fn search_contacts(
     Ok(matches.into_iter().take(limit).map(|item| item.3).collect())
 }
 
+/// Formulario desde el que se busca un producto: decide qué productos se
+/// ofrecen (FE-01, FS-01, FP-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductSearchPurpose {
+    /// Compra: activos, incluidos los agotados (se pueden reponer).
+    Entry,
+    /// Salidas: activos; los agotados se marcan para que no se elijan.
+    Outgoing,
+    /// Pérdida: activos y, además, descontinuados que aún tienen stock (S-22).
+    Loss,
+}
+
+impl ProductSearchPurpose {
+    pub fn parse(value: Option<&str>) -> Result<Self, AppError> {
+        match value {
+            None | Some("outgoing") => Ok(Self::Outgoing),
+            Some("entry") => Ok(Self::Entry),
+            Some("loss") => Ok(Self::Loss),
+            Some(_) => Err(AppError::new(
+                "validationFailed",
+                "La búsqueda no es válida",
+                "unsupported product search purpose",
+            )),
+        }
+    }
+}
+
 pub fn search_products_for_invoice(
     connection: &Connection,
     raw_query: &str,
+    purpose: ProductSearchPurpose,
     limit: usize,
 ) -> Result<Vec<ProductMatch>, AppError> {
     if limit == 0 {
         return Ok(Vec::new());
     }
     let query = normalize_query(raw_query);
+    let include_discontinued_with_stock = purpose == ProductSearchPurpose::Loss;
     let mut statement = connection
-        .prepare("SELECT p.id, p.name, p.description, c.name, u.abbreviation, p.quantityMilli FROM products p LEFT JOIN categories c ON c.id = p.categoryId LEFT JOIN units u ON u.id = p.unitId WHERE p.status = 'active' AND p.quantityMilli > 0")
+        .prepare(
+            "SELECT p.id, p.name, p.description, c.name, u.abbreviation, p.quantityMilli,
+                    p.status, p.costCents, p.profitPercentHundredths
+             FROM products p
+             LEFT JOIN categories c ON c.id = p.categoryId
+             LEFT JOIN units u ON u.id = p.unitId
+             WHERE p.status = 'active'
+                OR (?1 AND p.status = 'discontinued' AND p.quantityMilli > 0)",
+        )
         .map_err(|_| internal_error("failed to prepare product search"))?;
     let rows = statement
-        .query_map([], |row| {
+        .query_map([include_discontinued_with_stock], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
@@ -135,13 +173,27 @@ pub fn search_products_for_invoice(
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
             ))
         })
         .map_err(|_| internal_error("failed to query invoice products"))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|_| internal_error("failed to collect invoice products"))?;
     let mut matches = Vec::new();
-    for (id, name, description, category_name, unit_abbreviation, stock_milli) in rows {
+    for (
+        id,
+        name,
+        description,
+        category_name,
+        unit_abbreviation,
+        stock_milli,
+        status,
+        cost_cents,
+        profit_hundredths,
+    ) in rows
+    {
         let fields = [
             normalize_query(&name),
             category_name
@@ -172,8 +224,9 @@ pub fn search_products_for_invoice(
                     category_name,
                     unit_abbreviation,
                     stock: format_quantity_milli(stock_milli),
-                    is_out_of_stock: false,
-                    is_discontinued: false,
+                    selling_price_cents: selling_price_cents(cost_cents, profit_hundredths),
+                    is_out_of_stock: stock_milli == 0,
+                    is_discontinued: status == "discontinued",
                 },
             ));
         }
@@ -322,7 +375,7 @@ mod tests {
 
     use super::{
         normalize_query, relevance_rank, search_contacts, search_invoices,
-        search_products_for_invoice,
+        search_products_for_invoice, ProductSearchPurpose,
     };
 
     const TS: &str = "2026-10-03T00:00:00Z";
@@ -382,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn invoice_product_search_excludes_inactive_and_out_of_stock_and_caps_results() {
+    fn invoice_product_search_marks_out_of_stock_and_offers_discontinued_only_for_loss() {
         let connection = setup_test_db();
         let category_id = insert_category_fixture(&connection, "Cables", None);
         let available_id = insert_product_fixture(
@@ -428,17 +481,68 @@ mod tests {
             )
             .unwrap();
 
-        let results = search_products_for_invoice(&connection, "cable", 20).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].id, available_id);
-        assert!(!results[0].is_out_of_stock);
-        assert!(!results[0].is_discontinued);
-        assert!(search_products_for_invoice(&connection, "red", 1).unwrap()[0].id == available_id);
-        assert!(search_products_for_invoice(&connection, "", 0)
-            .unwrap()
-            .is_empty());
-        assert_ne!(available_id, out_id);
-        assert_ne!(available_id, discontinued_id);
+        let ids = |purpose| {
+            search_products_for_invoice(&connection, "cable", purpose, 20)
+                .unwrap()
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>()
+        };
+        // Entrada y salidas: activos, también el agotado; nunca el descontinuado (S-22).
+        assert_eq!(ids(ProductSearchPurpose::Entry), vec![out_id, available_id]);
+        assert_eq!(
+            ids(ProductSearchPurpose::Outgoing),
+            vec![out_id, available_id]
+        );
+        // Pérdida: además, el descontinuado que aún tiene stock (FP-01).
+        assert_eq!(
+            ids(ProductSearchPurpose::Loss),
+            vec![out_id, available_id, discontinued_id]
+        );
+
+        let results =
+            search_products_for_invoice(&connection, "cable", ProductSearchPurpose::Loss, 20)
+                .unwrap();
+        let by_id = |id| results.iter().find(|item| item.id == id).unwrap();
+        assert!(by_id(out_id).is_out_of_stock);
+        assert!(!by_id(out_id).is_discontinued);
+        assert!(!by_id(available_id).is_out_of_stock);
+        assert!(!by_id(available_id).is_discontinued);
+        assert!(by_id(discontinued_id).is_discontinued);
+        // Precio vigente para el total preliminar: costo 100 sin ganancia.
+        assert_eq!(by_id(available_id).selling_price_cents, 100);
+
+        assert!(
+            search_products_for_invoice(&connection, "red", ProductSearchPurpose::Outgoing, 1)
+                .unwrap()[0]
+                .id
+                == available_id
+        );
+        assert!(
+            search_products_for_invoice(&connection, "", ProductSearchPurpose::Outgoing, 0)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn product_search_purpose_defaults_to_outgoing_and_rejects_unknown_values() {
+        assert_eq!(
+            ProductSearchPurpose::parse(None).unwrap(),
+            ProductSearchPurpose::Outgoing
+        );
+        assert_eq!(
+            ProductSearchPurpose::parse(Some("entry")).unwrap(),
+            ProductSearchPurpose::Entry
+        );
+        assert_eq!(
+            ProductSearchPurpose::parse(Some("loss")).unwrap(),
+            ProductSearchPurpose::Loss
+        );
+        assert_eq!(
+            ProductSearchPurpose::parse(Some("otro")).unwrap_err().code,
+            "validationFailed"
+        );
     }
 
     #[test]

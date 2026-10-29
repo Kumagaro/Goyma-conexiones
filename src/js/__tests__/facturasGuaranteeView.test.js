@@ -9,6 +9,7 @@ import {
 } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { chooseFromCombobox } from "./helpers/invoiceUi.js";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -28,6 +29,12 @@ vi.mock("../services/clientsService.js", () => ({
   getClientDetail: vi.fn(),
 }));
 
+vi.mock("../services/historyService.js", () => ({
+  searchProductsForInvoice: vi.fn(() =>
+    Promise.resolve([{ id: 11, name: "Cable", stock: "5" }]),
+  ),
+}));
+
 vi.mock("../components/confirmDialog.js", () => ({
   confirmDialog: vi.fn(() => Promise.resolve(true)),
 }));
@@ -38,6 +45,7 @@ let createGuaranteeInvoice,
   getInvoice,
   listInvoices,
   getClientDetail,
+  searchClients,
   __testHooks,
   initFacturasView;
 
@@ -45,7 +53,8 @@ beforeAll(async () => {
   vi.resetModules();
   ({ createGuaranteeInvoice, getInvoice, listInvoices } =
     await import("../services/invoicesService.js"));
-  ({ getClientDetail } = await import("../services/clientsService.js"));
+  ({ getClientDetail, searchClients } =
+    await import("../services/clientsService.js"));
   ({ __testHooks, initFacturasView } =
     await import("../views/facturasView.js"));
 });
@@ -70,6 +79,13 @@ const CLIENT_HISTORY = [
   { id: 5, number: "GI-00001", invoiceType: "GI", status: "pending" },
 ];
 
+// Elige el cliente en el buscador como el usuario (task-03 §7).
+async function selectClient(id, fullName = "Cliente Siete") {
+  // Persistente: una búsqueda con debounce pendiente no consume la respuesta.
+  searchClients.mockResolvedValue([{ id, fullName }]);
+  await chooseFromCombobox("factura-garantia-cliente", "cli", fullName);
+}
+
 function optionTexts(select) {
   return Array.from(select.options).map((o) => [o.value, o.textContent]);
 }
@@ -78,6 +94,8 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
   beforeEach(() => {
     document.body.innerHTML = `<main>${pageHtml}</main>`;
     vi.clearAllMocks();
+    // Descarta respuestas "Once" que un test anterior no llegó a consumir.
+    getClientDetail.mockReset();
     listInvoices.mockResolvedValue([]);
   });
 
@@ -138,9 +156,10 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
     expect(select.tagName).toBe("SELECT");
     expect(select.required).toBe(true);
 
-    await __testHooks.selectGuaranteeClient({ id: 7, fullName: "Cliente" });
+    await selectClient(7);
     expect(getClientDetail).toHaveBeenCalledWith(7);
     // Solo ventas y servicios no cancelados; ni garantías ni insumos.
+    await vi.waitFor(() => expect(select.options).toHaveLength(3));
     expect(optionTexts(select)).toEqual([
       ["", "Selecciona la factura original"],
       ["1", "V-00001 · Venta"],
@@ -151,8 +170,9 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
   it("al cambiar de cliente el select se limpia", async () => {
     getClientDetail.mockResolvedValue({ invoiceHistory: CLIENT_HISTORY });
     await initFacturasView();
-    await __testHooks.selectGuaranteeClient({ id: 7 });
+    await selectClient(7);
     const select = document.getElementById("factura-garantia-original");
+    await vi.waitFor(() => expect(select.options).toHaveLength(3));
     select.value = "1";
 
     const cliente = document.getElementById("factura-garantia-cliente");
@@ -168,10 +188,14 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
       () => new Promise((resolve) => (resolveFirst = resolve)),
     );
     await initFacturasView();
-    const pending = __testHooks.selectGuaranteeClient({ id: 7 });
-    await __testHooks.selectGuaranteeClient(null);
+    await selectClient(7);
+    await vi.waitFor(() => expect(resolveFirst).toBeTypeOf("function"));
+    // Volver a escribir deselecciona al cliente antes de que llegue la respuesta.
+    const cliente = document.getElementById("factura-garantia-cliente");
+    cliente.value = "Otro";
+    cliente.dispatchEvent(new Event("input", { bubbles: true }));
     resolveFirst({ invoiceHistory: CLIENT_HISTORY });
-    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(
       document.getElementById("factura-garantia-original").options,
     ).toHaveLength(1);
@@ -240,10 +264,20 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
       );
 
     // Sin factura original no se envía.
-    await __testHooks.selectGuaranteeClient({ id: 7 });
+    await selectClient(7);
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("factura-garantia-original").options,
+      ).toHaveLength(3),
+    );
     document.getElementById("factura-garantia-fecha-emision").value =
       "2026-02-10";
-    __testHooks.setGuaranteeLines([{ productId: 11, quantity: "1.5" }]);
+    await chooseFromCombobox("factura-garantia-buscar", "cab", "Cable");
+    const quantity = document.querySelector(
+      '#factura-garantia-lineas-body [data-line-field="quantity"]',
+    );
+    quantity.value = "1.5";
+    quantity.dispatchEvent(new Event("input", { bubbles: true }));
     submit();
     await Promise.resolve();
     expect(createGuaranteeInvoice).not.toHaveBeenCalled();
@@ -317,7 +351,12 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
       lines: [{ productName: evil, quantity: "1" }],
     });
     await initFacturasView();
-    await __testHooks.selectGuaranteeClient({ id: 1 });
+    await selectClient(1, "Cliente Uno");
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("factura-garantia-original").options,
+      ).toHaveLength(2),
+    );
     await __testHooks.openGuaranteeDetail(1);
     const page = document.getElementById("page-facturas-garantia");
     expect(page.textContent).toContain("Cliente");

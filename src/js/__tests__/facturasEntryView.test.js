@@ -1,3 +1,4 @@
+import { chooseFromCombobox } from "./helpers/invoiceUi.js";
 import {
   afterEach,
   beforeAll,
@@ -29,8 +30,16 @@ vi.mock("../services/clientsService.js", () => ({
 }));
 
 vi.mock("../services/suppliersService.js", () => ({
-  searchSuppliers: vi.fn(() => Promise.resolve([])),
+  searchSuppliers: vi.fn(() =>
+    Promise.resolve([{ id: 3, fullName: "Proveedor Tres" }]),
+  ),
   listSuppliers: vi.fn(() => Promise.resolve([])),
+}));
+
+vi.mock("../services/historyService.js", () => ({
+  searchProductsForInvoice: vi.fn(() =>
+    Promise.resolve([{ id: 7, name: "Cable", stock: "0", isOutOfStock: true }]),
+  ),
 }));
 
 vi.mock("../components/confirmDialog.js", () => ({
@@ -227,7 +236,7 @@ describe("facturasView submódulo entry", () => {
     expect(metodo.style.display).not.toBe("none");
   });
 
-  it("#factura-proveedor es combobox y el botón + abre el formulario de proveedor", async () => {
+  it("#factura-proveedor es combobox y el botón + abre el alta rápida de proveedor", async () => {
     listInvoices.mockResolvedValue([]);
     await initFacturasView();
 
@@ -235,25 +244,20 @@ describe("facturasView submódulo entry", () => {
     expect(proveedorInput.getAttribute("role")).toBe("combobox");
     expect(proveedorInput.getAttribute("aria-autocomplete")).toBe("list");
 
-    const addButton = document.getElementById("factura-proveedor-add");
-    expect(addButton).not.toBeNull();
-    const dispatched = [];
-    document.addEventListener(
-      "entry:openSupplierForm",
-      (event) => dispatched.push(event),
-      { once: true },
-    );
-    addButton.click();
-    expect(dispatched).toHaveLength(1);
+    document.getElementById("factura-proveedor-add").click();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.textContent).toContain("Nuevo proveedor");
+    [...dialog.querySelectorAll("button")]
+      .find((button) => button.textContent === "Cancelar")
+      .click();
   });
 
-  it("#factura-buscar-producto es combobox con botón +", async () => {
+  it("#factura-buscar-producto es combobox", async () => {
     listInvoices.mockResolvedValue([]);
     await initFacturasView();
 
     const productoInput = document.getElementById("factura-buscar-producto");
     expect(productoInput.getAttribute("role")).toBe("combobox");
-    expect(document.getElementById("factura-producto-add")).not.toBeNull();
   });
 
   it("#factura-descuento y #factura-impuesto no existen", async () => {
@@ -280,17 +284,31 @@ describe("facturasView submódulo entry", () => {
     __testHooks.setPendingAttachment("/tmp/factura.pdf");
 
     document.getElementById("factura-fecha-emision").value = "2026-02-10";
-    __testHooks.setSelectedSupplier({ id: 3, fullName: "Proveedor Tres" });
-    __testHooks.setEntryLines([
-      { productId: 7, quantity: "2", unitPrice: "10,00" },
-    ]);
+    await chooseFromCombobox("factura-proveedor", "pro", "Proveedor Tres");
+    // Una compra puede reponer un producto agotado (FE-01).
+    await chooseFromCombobox("factura-buscar-producto", "cab", "Cable");
+    for (const [field, value] of [
+      ["quantity", "2"],
+      ["unitPrice", "10,00"],
+    ]) {
+      const input = document.querySelector(
+        `#factura-lineas-body [data-line-field="${field}"]`,
+      );
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
 
     const form = document.getElementById("factura-entrada-form");
     form.dispatchEvent(
       new Event("submit", { bubbles: true, cancelable: true }),
     );
     await vi.waitFor(() => {
-      expect(createEntryInvoice).toHaveBeenCalled();
+      expect(createEntryInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          supplierId: 3,
+          lines: [{ productId: 7, quantity: "2", unitPrice: "10,00" }],
+        }),
+      );
     });
     await vi.waitFor(() => {
       expect(saveInvoiceAttachment).toHaveBeenCalledWith(5, "/tmp/factura.pdf");

@@ -171,6 +171,54 @@ describe("historialView", () => {
     expect(body.textContent).toContain("Ana");
   });
 
+  it("HP-02: el número abre la factura si aún existe; si se eliminó queda como texto", async () => {
+    const movement = {
+      createdAt: "2026-02-10T15:30:00Z",
+      type: "saleOut",
+      quantity: "-1",
+      stockAfter: "9",
+      unitPriceCents: 100,
+      totalPriceCents: 100,
+      userName: "Ana",
+      productIdOriginal: 2,
+    };
+    listHistoryProducts.mockResolvedValue([...ACTIVE_PRODUCTS]);
+    getProductHistory.mockResolvedValue({
+      items: [
+        {
+          ...movement,
+          id: 1,
+          invoiceNumber: "V-00004",
+          invoiceType: "V",
+          invoiceId: 44,
+        },
+        {
+          ...movement,
+          id: 2,
+          invoiceNumber: "V-00003",
+          invoiceType: "V",
+          invoiceId: null,
+        },
+      ],
+    });
+    window.irAFacturaDesdeGeneral = vi.fn();
+    await initHistorialView();
+    const select = document.getElementById("historial-producto-select");
+    select.value = "2";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const body = document.getElementById("historial-producto-body");
+    await vi.waitFor(() => expect(body.querySelectorAll("tr")).toHaveLength(2));
+    const [existing, deleted] = body.querySelectorAll("tr");
+    const link = existing.querySelector("button");
+    expect(link.textContent).toBe("V-00004");
+    link.click();
+    expect(window.irAFacturaDesdeGeneral).toHaveBeenCalledWith("V", 44);
+    expect(deleted.querySelector("button")).toBeNull();
+    expect(deleted.textContent).toContain("V-00003");
+    delete window.irAFacturaDesdeGeneral;
+  });
+
   it("escucha product:viewHistory y abre la pestaña con el producto preseleccionado", async () => {
     listHistoryProducts.mockResolvedValue([...ACTIVE_PRODUCTS]);
     getProductHistory.mockResolvedValue({ items: [] });

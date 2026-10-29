@@ -125,7 +125,6 @@ function showPage(pageId, el, label) {
       document.getElementById("tab-producto-list"),
     );
   }
-  // Las páginas de facturas permanecen ocultas hasta implementar su spec.
   if (targetId === "notificaciones") renderNotificaciones();
   // bubbles: las vistas escuchan en window, que solo lo recibe si sube.
   document.dispatchEvent(

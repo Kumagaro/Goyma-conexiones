@@ -22,6 +22,7 @@ import {
   updateClient,
 } from "../services/clientsService.js";
 import { initClientesView } from "../views/clientesView.js";
+import { confirmDialog } from "../components/confirmDialog.js";
 import { formatDate, formatMoney } from "../utils/formatters.js";
 
 function seedClientPage() {
@@ -119,6 +120,42 @@ describe("clientesView", () => {
     );
     await Promise.resolve();
     expect(listClients).toHaveBeenCalledTimes(2);
+  });
+
+  it("CL-05: al eliminar avisa cuántas facturas se conservan", async () => {
+    listClients.mockResolvedValue([{ id: 3, fullName: "Ana Pérez" }]);
+    getClientDetail.mockResolvedValue({
+      invoiceHistory: [{ id: 1 }, { id: 2 }, { id: 3, status: "cancelled" }],
+    });
+    confirmDialog.mockResolvedValueOnce(false);
+    await initClientesView();
+    document.querySelector('[data-client-action="delete"]').click();
+    await vi.waitFor(() => expect(confirmDialog).toHaveBeenCalled());
+    expect(getClientDetail).toHaveBeenCalledWith(3);
+    expect(confirmDialog.mock.calls[0][0].message).toContain(
+      "Ana Pérez tiene 3 facturas; se conservarán con la copia de sus datos.",
+    );
+    expect(deleteClient).not.toHaveBeenCalled();
+  });
+
+  it("volver a inicializar la vista no enlaza dos veces el envío del formulario", async () => {
+    listClients.mockResolvedValue([]);
+    createClient.mockResolvedValue({ id: 12 });
+    await initClientesView();
+    await initClientesView();
+    for (const [id, value] of [
+      ["cliente-nombres", "Luis"],
+      ["cliente-apellidos", "García"],
+      ["cliente-ci", "90010112345"],
+      ["cliente-telefono", "+5355512345"],
+    ]) {
+      document.getElementById(id).value = value;
+    }
+    document
+      .getElementById("cliente-form")
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(createClient).toHaveBeenCalled());
+    expect(createClient).toHaveBeenCalledTimes(1);
   });
 
   it("crea, edita y elimina un cliente con mensajes seguros", async () => {

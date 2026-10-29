@@ -444,6 +444,7 @@ mod tests {
             total_price_cents: cents * 2,
             invoice_number: invoice.map(str::to_owned),
             invoice_type: invoice.map(|_| "V".to_owned()),
+            invoice_id: None,
             user_name: "María Ñúñez".to_owned(),
             product_id_original: 7,
         }

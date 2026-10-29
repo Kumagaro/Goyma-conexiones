@@ -9,6 +9,7 @@ import {
 } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { chooseFromCombobox } from "./helpers/invoiceUi.js";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -29,6 +30,12 @@ vi.mock("../services/clientsService.js", () => ({
   getClientDetail: vi.fn(),
 }));
 
+vi.mock("../services/historyService.js", () => ({
+  searchProductsForInvoice: vi.fn(() =>
+    Promise.resolve([{ id: 11, name: "Cable", stock: "5" }]),
+  ),
+}));
+
 vi.mock("../components/confirmDialog.js", () => ({
   confirmDialog: vi.fn(() => Promise.resolve(true)),
 }));
@@ -39,6 +46,7 @@ let createInstallationInvoice,
   getInvoice,
   listInvoices,
   getClientDetail,
+  searchClients,
   __testHooks,
   initFacturasView;
 
@@ -46,7 +54,8 @@ beforeAll(async () => {
   vi.resetModules();
   ({ createInstallationInvoice, getInvoice, listInvoices } =
     await import("../services/invoicesService.js"));
-  ({ getClientDetail } = await import("../services/clientsService.js"));
+  ({ getClientDetail, searchClients } =
+    await import("../services/clientsService.js"));
   ({ __testHooks, initFacturasView } =
     await import("../views/facturasView.js"));
 });
@@ -70,6 +79,18 @@ const CLIENT_HISTORY = [
   { id: 4, number: "S-00003", invoiceType: "S", status: "pending" },
   { id: 5, number: "GG-00001", invoiceType: "GG", status: "pending" },
 ];
+
+// Elige el cliente en el buscador como el usuario (task-03 §7).
+async function selectClient(id, fullName = "Cliente Siete") {
+  // Persistente: una búsqueda con debounce pendiente no consume la respuesta.
+  searchClients.mockResolvedValue([{ id, fullName }]);
+  await chooseFromCombobox("factura-insumo-cliente", "cli", fullName);
+  await vi.waitFor(() =>
+    expect(
+      document.getElementById("factura-insumo-servicio").options.length,
+    ).toBeGreaterThan(1),
+  );
+}
 
 function optionTexts(select) {
   return Array.from(select.options).map((o) => [o.value, o.textContent]);
@@ -140,7 +161,7 @@ describe("facturasView submódulo installation (HTML de producción)", () => {
     expect(select.tagName).toBe("SELECT");
     expect(select.required).toBe(true);
 
-    await __testHooks.selectInstallationClient({ id: 7 });
+    await selectClient(7);
     expect(getClientDetail).toHaveBeenCalledWith(7);
     // Solo servicios no cancelados; ni ventas ni garantías.
     expect(optionTexts(select)).toEqual([
@@ -153,7 +174,7 @@ describe("facturasView submódulo installation (HTML de producción)", () => {
   it("al cambiar de cliente el select se limpia", async () => {
     getClientDetail.mockResolvedValue({ invoiceHistory: CLIENT_HISTORY });
     await initFacturasView();
-    await __testHooks.selectInstallationClient({ id: 7 });
+    await selectClient(7);
     const select = document.getElementById("factura-insumo-servicio");
     select.value = "2";
 
@@ -230,10 +251,15 @@ describe("facturasView submódulo installation (HTML de producción)", () => {
         new Event("submit", { bubbles: true, cancelable: true }),
       );
 
-    await __testHooks.selectInstallationClient({ id: 7 });
+    await selectClient(7);
     document.getElementById("factura-insumo-fecha-emision").value =
       "2026-02-10";
-    __testHooks.setInstallationLines([{ productId: 11, quantity: "2" }]);
+    await chooseFromCombobox("factura-insumo-buscar", "cab", "Cable");
+    const quantity = document.querySelector(
+      '#factura-insumo-lineas-body [data-line-field="quantity"]',
+    );
+    quantity.value = "2";
+    quantity.dispatchEvent(new Event("input", { bubbles: true }));
     submit();
     await Promise.resolve();
     expect(createInstallationInvoice).not.toHaveBeenCalled();

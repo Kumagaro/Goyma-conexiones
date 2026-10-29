@@ -245,9 +245,9 @@ describe("Vitest con jsdom", () => {
     // Wrappers adelantados cuyo backend aún no está registrado. Con las
     // Fases 3 y 4 terminadas no queda ninguno; si vuelve a haberlos, se listan.
     const pendingBackend = [];
-    // Comandos registrados sin wrapper dedicado todavía. Al añadir el
-    // wrapper, esta lista debe recortarse.
-    const pendingWrapper = ["get_product_associated_invoices"].sort();
+    // Comandos registrados sin wrapper dedicado todavía. Con §7.6
+    // (getProductAssociatedInvoices en historyService.js) no queda ninguno.
+    const pendingWrapper = [];
 
     expect(handler).not.toBeNull();
     expect(handlerCommands.length).toBeGreaterThan(0);

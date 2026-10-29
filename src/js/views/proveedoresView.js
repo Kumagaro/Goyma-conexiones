@@ -10,11 +10,14 @@ import {
   updateSupplier,
 } from "../services/suppliersService.js";
 import { formatDate, formatId, formatMoney } from "../utils/formatters.js";
+import { ENTRY_STATUS_LABELS } from "../utils/invoiceLabels.js";
 import { debounce } from "../utils/requestGuard.js";
 
 let suppliers = [];
 let editingSupplierId = null;
 let currentSupplierId = null;
+let historyItems = [];
+let historyRequest = 0;
 
 export function initProveedoresView() {
   return initializeProveedoresView();
@@ -23,12 +26,18 @@ export function initProveedoresView() {
 async function initializeProveedoresView() {
   removeLegacyInlineHandlers();
   bindPageChangeListener();
-  bindTabButtons();
-  bindSearch();
-  bindForm();
-  bindTableActions();
-  bindDetailActions();
-  bindHistoryControls();
+  // Cada page:change vuelve a inicializar la vista: los listeners se enlazan
+  // una sola vez para que un envío no cree el proveedor dos veces.
+  const page = document.getElementById("page-proveedores");
+  if (page?.dataset.proveedoresBound !== "1") {
+    if (page) page.dataset.proveedoresBound = "1";
+    bindTabButtons();
+    bindSearch();
+    bindForm();
+    bindTableActions();
+    bindDetailActions();
+    bindHistoryControls();
+  }
   await loadSuppliers();
   showProveedorTab("list", document.getElementById("tab-proveedor-list"));
 }
@@ -104,6 +113,12 @@ function bindForm() {
     event.preventDefault();
     void handleSupplierSubmit();
   });
+  document
+    .getElementById("proveedor-cancelar")
+    ?.addEventListener("click", () => {
+      resetSupplierForm();
+      showProveedorTab("list", document.getElementById("tab-proveedor-list"));
+    });
 }
 
 function bindTableActions() {
@@ -152,24 +167,45 @@ function bindDetailActions() {
 }
 
 function bindHistoryControls() {
-  const select = document.getElementById("historial-proveedor-select");
-  if (select) {
-    select.addEventListener("change", () => {
-      renderProveedorHistory();
+  for (const id of [
+    "historial-proveedor-select",
+    "historial-proveedor-desde",
+    "historial-proveedor-hasta",
+  ]) {
+    document.getElementById(id)?.addEventListener("change", () => {
+      if (id === "historial-proveedor-select") void loadSupplierHistory();
+      else renderSupplierHistoryRows();
     });
   }
-  // Sustituye al onclick inline del encabezado "Fecha" (orden de dashboard.js).
+  // Sustituye al onclick inline del encabezado "Fecha"; el orden es local y
+  // toggleOrdenFecha (dashboard.js) solo actualiza el icono.
   const dateHeader = document.getElementById("th-fecha-historial-proveedor");
   if (dateHeader && dateHeader.dataset.sortBound !== "1") {
     dateHeader.dataset.sortBound = "1";
     dateHeader.addEventListener("click", () => {
+      // El orden vive en el encabezado: por defecto, más reciente primero.
+      dateHeader.dataset.sortOrder =
+        dateHeader.dataset.sortOrder === "asc" ? "desc" : "asc";
       if (typeof window.toggleOrdenFecha === "function") {
-        window.toggleOrdenFecha("historialProveedor", renderProveedorHistory);
+        window.toggleOrdenFecha(
+          "historialProveedor",
+          renderSupplierHistoryRows,
+        );
       } else {
-        renderProveedorHistory();
+        renderSupplierHistoryRows();
       }
     });
   }
+  document
+    .getElementById("historial-proveedor-body")
+    ?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-history-invoice]");
+      if (!button) return;
+      window.irAFacturaDesdeGeneral?.(
+        "E",
+        Number(button.dataset.historyInvoice),
+      );
+    });
 }
 
 function showProveedorTab(tab, button = null) {
@@ -269,6 +305,8 @@ function renderSupplierList(items) {
     .join("");
 }
 
+// Historial de compras (PV-07): las facturas de entrada del proveedor salen
+// de getSupplierDetail; el rango de fechas y el orden se aplican aquí.
 function renderProveedorHistory() {
   const select = document.getElementById("historial-proveedor-select");
   const body = document.getElementById("historial-proveedor-body");
@@ -277,8 +315,8 @@ function renderProveedorHistory() {
 
   if (!suppliers.length) {
     select.innerHTML = '<option value="">No hay proveedores</option>';
-    body.innerHTML =
-      '<tr><td colspan="7" class="empty-row">No hay proveedores para consultar.</td></tr>';
+    historyItems = [];
+    historyMessage(body, "No hay proveedores para consultar.");
     return;
   }
 
@@ -302,19 +340,101 @@ function renderProveedorHistory() {
     select.selectedIndex = 0;
   }
 
-  const selectedId = Number(select.value);
-  const selectedSupplier = suppliers.find(
-    (supplier) => Number(supplier.id) === selectedId,
-  );
+  // Solo se consulta el backend con la pestaña de historial abierta.
+  if (
+    document.getElementById("proveedor-historial")?.classList.contains("active")
+  ) {
+    void loadSupplierHistory();
+  }
+}
 
-  if (!selectedSupplier) {
-    body.innerHTML =
-      '<tr><td colspan="7" class="empty-row">No hay proveedores para consultar.</td></tr>';
+function historyMessage(body, text) {
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = 5;
+  cell.className = "empty-row";
+  cell.textContent = text;
+  row.append(cell);
+  body.replaceChildren(row);
+}
+
+async function loadSupplierHistory() {
+  const body = document.getElementById("historial-proveedor-body");
+  const supplierId = Number(
+    document.getElementById("historial-proveedor-select")?.value,
+  );
+  if (!body || !Number.isSafeInteger(supplierId) || supplierId <= 0) return;
+  const request = ++historyRequest;
+  historyMessage(body, "Cargando compras…");
+  try {
+    const detail = await getSupplierDetail(supplierId);
+    // Si el usuario eligió otro proveedor mientras cargaba, se descarta.
+    if (request !== historyRequest) return;
+    historyItems = (detail?.invoiceHistory ?? []).filter(
+      (item) => (item?.invoiceType ?? "E") === "E",
+    );
+    renderSupplierHistoryRows();
+  } catch {
+    if (request !== historyRequest) return;
+    historyItems = [];
+    historyMessage(body, "No se pudo cargar el historial de compras.");
+  }
+}
+
+function renderSupplierHistoryRows() {
+  const body = document.getElementById("historial-proveedor-body");
+  if (!body) return;
+  const from = document.getElementById("historial-proveedor-desde")?.value;
+  const to = document.getElementById("historial-proveedor-hasta")?.value;
+  if (from && to && from > to) {
+    historyMessage(body, "La fecha inicial no puede ser posterior a la final.");
     return;
   }
-
-  body.innerHTML =
-    '<tr><td colspan="7" class="empty-row">Este proveedor aún no tiene compras registradas.</td></tr>';
+  const ascending =
+    document.getElementById("th-fecha-historial-proveedor")?.dataset
+      .sortOrder === "asc";
+  const items = historyItems
+    .filter((item) => (!from || item.date >= from) && (!to || item.date <= to))
+    .sort((left, right) => {
+      const order =
+        String(left.date).localeCompare(String(right.date)) ||
+        Number(left.id) - Number(right.id);
+      return ascending ? order : -order;
+    });
+  if (!items.length) {
+    historyMessage(
+      body,
+      historyItems.length
+        ? "No hay compras en el período seleccionado."
+        : "Este proveedor aún no tiene compras registradas.",
+    );
+    return;
+  }
+  body.replaceChildren();
+  for (const item of items) {
+    const row = document.createElement("tr");
+    const cells = [
+      formatDate(item.date),
+      item.number ?? "—",
+      ENTRY_STATUS_LABELS[item.status] ?? item.status ?? "—",
+      formatMoney(item.totalCents ?? 0),
+    ].map((text) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      return cell;
+    });
+    cells[3].style.textAlign = "right";
+    const actions = document.createElement("td");
+    const view = document.createElement("button");
+    view.type = "button";
+    view.className = "action-link";
+    view.textContent = "Ver";
+    view.dataset.historyInvoice = String(item.id);
+    view.setAttribute("aria-label", `Ver factura ${item.number ?? ""}`);
+    actions.append(view);
+    row.append(...cells, actions);
+    body.append(row);
+  }
 }
 
 async function handleSupplierSubmit() {
@@ -475,9 +595,23 @@ async function handleDeleteSupplier(supplierId) {
   );
   if (!supplier) return;
 
+  // El listado no trae el recuento: se pide el detalle antes de confirmar (PV-05).
+  let invoiceCount = 0;
+  try {
+    const detail = await getSupplierDetail(supplierId);
+    // Se cuentan todas, también las canceladas: todas conservan la copia.
+    invoiceCount = detail?.invoiceHistory?.length ?? 0;
+  } catch {
+    // Sin el detalle se confirma igual, sin el recuento.
+  }
+  const name = supplier.fullName ?? "este proveedor";
   const confirmed = await confirmDialog({
     title: "Eliminar proveedor",
-    message: `¿Deseas eliminar a ${supplier.fullName ?? "este proveedor"}?`,
+    message:
+      invoiceCount > 0
+        ? `${name} tiene ${invoiceCount} ${invoiceCount === 1 ? "factura" : "facturas"}; se conservarán con la copia de sus datos.
+¿Deseas eliminarlo?`
+        : `¿Deseas eliminar a ${name}?`,
     confirmText: "Eliminar",
   });
 

@@ -45,6 +45,10 @@ pub struct InvoiceDetail {
     pub notes: Option<String>,
     pub payment_method: Option<String>,
     pub paid_at: Option<String>,
+    /// Cliente o proveedor vigente (para editar); `None` si se eliminó.
+    pub contact_id: Option<i64>,
+    /// Factura asociada vigente (garantía e insumos); `None` si se eliminó.
+    pub associated_invoice_id: Option<i64>,
     pub contact_full_name: Option<String>,
     pub contact_company: Option<String>,
     pub contact_national_id: Option<String>,

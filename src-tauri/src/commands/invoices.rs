@@ -569,12 +569,33 @@ pub fn get_invoice_inner(
         )
         .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
 
+    // Ids vigentes para editar la factura: `None` si el contacto o la factura
+    // asociada se eliminaron (la copia de texto se conserva igual).
+    let (contact_id, associated_invoice_id): (Option<i64>, Option<i64>) = connection
+        .query_row(
+            "SELECT COALESCE(clientId, supplierId), associatedInvoiceId FROM invoices WHERE id = ?1",
+            [invoice_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
+
     let lines = {
         let mut statement = connection
             .prepare(
-                "SELECT position, productIdOriginal, productName, unitName, unitAbbreviation,
-                        quantityMilli, unitPriceCents, subtotalCents, categoryName, costAtSaleCents
-                 FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
+                "SELECT il.position, il.productIdOriginal, il.productName, il.unitName, il.unitAbbreviation,
+                        il.quantityMilli, il.unitPriceCents, il.subtotalCents, il.categoryName,
+                        il.costAtSaleCents, p.status, l.remainingMilli,
+                        CASE WHEN l.id IS NULL THEN NULL ELSE (
+                            SELECT COALESCE(SUM(c.quantityMilli), 0)
+                            FROM consumptions c
+                            JOIN invoiceLines cl ON cl.id = c.invoiceLineId
+                            JOIN invoices ci ON ci.id = cl.invoiceId
+                            WHERE c.lotId = l.id AND (ci.status IS NULL OR ci.status <> 'cancelled')
+                        ) END
+                 FROM invoiceLines il
+                 LEFT JOIN products p ON p.id = il.productId
+                 LEFT JOIN lots l ON l.invoiceLineId = il.id
+                 WHERE il.invoiceId = ?1 ORDER BY il.position",
             )
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
         let rows = statement
@@ -590,6 +611,9 @@ pub fn get_invoice_inner(
                     subtotal_cents: row.get(7)?,
                     category_name: row.get(8)?,
                     cost_at_sale_cents: row.get(9)?,
+                    product_status: row.get(10)?,
+                    remaining_quantity: row.get::<_, Option<i64>>(11)?.map(format_quantity_milli),
+                    consumed_quantity: row.get::<_, Option<i64>>(12)?.map(format_quantity_milli),
                 })
             })
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
@@ -614,6 +638,8 @@ pub fn get_invoice_inner(
         notes,
         payment_method,
         paid_at,
+        contact_id,
+        associated_invoice_id,
         contact_full_name,
         contact_company,
         contact_national_id,
@@ -11815,6 +11841,136 @@ mod tests {
     }
 
     #[test]
+    fn change_invoice_status_restores_lots_records_reversals_and_clears_payment() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "statusflow",
+            "12345678931",
+            "+5355550131",
+            "12345678932",
+            "+5355550132",
+            now,
+        );
+        let first = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Cable UTP",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let second = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Conector RJ45",
+            100,
+            0,
+            "5",
+            "1,00",
+        );
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(
+                client_id,
+                vec![sale_line(first, "4"), sale_line(second, "2")],
+                None,
+            ),
+        )
+        .unwrap();
+        let stock = |connection: &rusqlite::Connection, product_id: i64| -> (i64, i64) {
+            connection
+                .query_row(
+                    "SELECT (SELECT quantityMilli FROM products WHERE id = ?1),
+                            (SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1)",
+                    [product_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        };
+        assert_eq!(stock(&connection, first), (6_000, 6_000));
+        assert_eq!(stock(&connection, second), (3_000, 3_000));
+        let payment = |connection: &rusqlite::Connection| -> (Option<String>, Option<String>) {
+            connection
+                .query_row(
+                    "SELECT paymentMethod, paidAt FROM invoices WHERE id = ?1",
+                    [sale.invoice_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+        };
+
+        // Por Cobrar → Cobrada → Por Cobrar: se borran la fecha y el método de pago.
+        change_invoice_status_inner(
+            &mut connection,
+            now,
+            sale.invoice_id,
+            "completed",
+            Some("transfer"),
+        )
+        .unwrap();
+        let paid = payment(&connection);
+        assert_eq!(paid.0.as_deref(), Some("transfer"));
+        assert!(paid.1.is_some());
+        change_invoice_status_inner(&mut connection, now, sale.invoice_id, "pending", None)
+            .unwrap();
+        assert_eq!(payment(&connection), (None, None));
+
+        // Cancelar devuelve cada consumo a su lote y registra una Reversión por línea.
+        change_invoice_status_inner(&mut connection, now, sale.invoice_id, "cancelled", None)
+            .unwrap();
+        assert_eq!(stock(&connection, first), (10_000, 10_000));
+        assert_eq!(stock(&connection, second), (5_000, 5_000));
+        let reversals: Vec<(i64, i64)> = connection
+            .prepare(
+                "SELECT productIdOriginal, quantityMilli FROM productMovements
+                 WHERE type = 'reversal' AND invoiceNumber = ?1 ORDER BY productIdOriginal",
+            )
+            .unwrap()
+            .query_map([&sale.number], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(reversals, vec![(first, 4_000), (second, 2_000)]);
+        assert_cache_invariant(&connection, "tras cancelar la venta");
+
+        // Cancelar una compra deja sus lotes a 0 sin borrarlos.
+        let entry_id: i64 = connection
+            .query_row(
+                "SELECT invoiceId FROM invoiceLines WHERE productIdOriginal = ?1",
+                [first],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let lots_before: i64 = connection
+            .query_row("SELECT COUNT(*) FROM lots", [], |row| row.get(0))
+            .unwrap();
+        change_invoice_status_inner(&mut connection, now, entry_id, "cancelled", None).unwrap();
+        let entry_lots: Vec<i64> = connection
+            .prepare(
+                "SELECT l.remainingMilli FROM lots l
+                 JOIN invoiceLines il ON il.id = l.invoiceLineId
+                 WHERE il.invoiceId = ?1",
+            )
+            .unwrap()
+            .query_map([entry_id], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(entry_lots, vec![0]);
+        let lots_after: i64 = connection
+            .query_row("SELECT COUNT(*) FROM lots", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(lots_after, lots_before);
+        assert_eq!(stock(&connection, first), (0, 0));
+        assert_eq!(stock(&connection, second), (5_000, 5_000));
+        assert_cache_invariant(&connection, "tras cancelar la compra");
+    }
+
+    #[test]
     fn list_invoices_inner_filters_by_type_status_search_and_date_range() {
         let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
         let mut connection = setup_test_db();
@@ -12488,6 +12644,143 @@ mod tests {
         let missing = get_invoice_inner(&mut connection, now, 9999).unwrap_err();
         assert_eq!(missing.code, "notFound");
         assert_eq!(missing.message, "La factura ya no existe");
+    }
+
+    #[test]
+    fn get_invoice_inner_exposes_current_ids_and_product_status_for_editing() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "editdetail",
+            "12345678941",
+            "+5355550141",
+            "12345678942",
+            "+5355550142",
+            now,
+        );
+        let active = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Cable UTP",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let discontinued = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Conector RJ45",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let deleted = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Canaleta",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(
+                client_id,
+                vec![
+                    sale_line(active, "1"),
+                    sale_line(discontinued, "1"),
+                    sale_line(deleted, "1"),
+                ],
+                None,
+            ),
+        )
+        .unwrap();
+        let guarantee = super::create_guarantee_invoice_inner(
+            &mut connection,
+            now,
+            guarantee_input(
+                client_id,
+                sale.invoice_id,
+                vec![guarantee_line(active, "1")],
+                None,
+            ),
+        )
+        .unwrap();
+        connection
+            .execute(
+                "UPDATE products SET status = 'discontinued', discontinuedAt = ?2 WHERE id = ?1",
+                (discontinued, format_utc_timestamp(now)),
+            )
+            .unwrap();
+        connection
+            .execute("DELETE FROM products WHERE id = ?1", [deleted])
+            .unwrap();
+
+        let detail = get_invoice_inner(&mut connection, now, sale.invoice_id).unwrap();
+        assert_eq!(detail.contact_id, Some(client_id));
+        assert_eq!(detail.associated_invoice_id, None);
+        let statuses = detail
+            .lines
+            .iter()
+            .map(|line| (line.product_id_original, line.product_status.as_deref()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            statuses,
+            vec![
+                (active, Some("active")),
+                (discontinued, Some("discontinued")),
+                (deleted, None),
+            ]
+        );
+
+        let guarantee_detail =
+            get_invoice_inner(&mut connection, now, guarantee.invoice_id).unwrap();
+        assert_eq!(
+            guarantee_detail.associated_invoice_id,
+            Some(sale.invoice_id)
+        );
+
+        // Sin el cliente, el id desaparece y la copia de texto se conserva.
+        connection
+            .execute("DELETE FROM clients WHERE id = ?1", [client_id])
+            .unwrap();
+        let orphan = get_invoice_inner(&mut connection, now, sale.invoice_id).unwrap();
+        assert_eq!(orphan.contact_id, None);
+        assert!(orphan.contact_full_name.is_some());
+
+        let entry_id: i64 = connection
+            .query_row(
+                "SELECT invoiceId FROM invoiceLines WHERE productIdOriginal = ?1 ORDER BY id LIMIT 1",
+                [active],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let entry = get_invoice_inner(&mut connection, now, entry_id).unwrap();
+        assert_eq!(entry.contact_id, Some(supplier_id));
+        // FE-05: del lote de 10 quedan 8; la venta y la garantía consumieron 2.
+        assert_eq!(entry.lines[0].remaining_quantity.as_deref(), Some("8"));
+        assert_eq!(entry.lines[0].consumed_quantity.as_deref(), Some("2"));
+        // Una venta cancelada devuelve su consumo: ya no cuenta como consumido.
+        change_invoice_status_inner(
+            &mut connection,
+            now,
+            guarantee.invoice_id,
+            "cancelled",
+            None,
+        )
+        .unwrap();
+        let entry = get_invoice_inner(&mut connection, now, entry_id).unwrap();
+        assert_eq!(entry.lines[0].remaining_quantity.as_deref(), Some("9"));
+        assert_eq!(entry.lines[0].consumed_quantity.as_deref(), Some("1"));
+        // Las salidas no tienen lote propio: no traen estos campos.
+        assert_eq!(orphan.lines[0].remaining_quantity, None);
+        assert_eq!(orphan.lines[0].consumed_quantity, None);
     }
 
     #[test]

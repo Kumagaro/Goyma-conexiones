@@ -1024,10 +1024,14 @@ describe("listados y detalle de productos", () => {
     // Nota: esta aserción es válida solo dentro de spec-02. spec-03 §3.7.2
     // (HP-02) deja visibles la pestaña y la vista de Historial.
     expect(parsed.getElementById("tab-producto-historial").hidden).toBe(false);
-    expect(parsed.getElementById("sidebar-facturas").hidden).toBe(true);
+    // spec-03 §7.9: la sección de facturas y sus 7 páginas quedan visibles.
+    expect(parsed.getElementById("sidebar-facturas").hidden).toBe(false);
     expect(
-      parsed.querySelectorAll("[id^='page-facturas-']:not([hidden])"),
+      parsed.querySelectorAll("[id^='page-facturas-'][hidden]"),
     ).toHaveLength(0);
+    expect(parsed.querySelectorAll("[id^='page-facturas-']")).toHaveLength(7);
+    expect(parsed.getElementById("producto-ver-historial").hidden).toBe(false);
+    expect(parsed.getElementById("producto-ver-facturas").hidden).toBe(false);
     expect(
       productPage.querySelector("[onclick], [oninput], [onchange], [onsubmit]"),
     ).toBeNull();

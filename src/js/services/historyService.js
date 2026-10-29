@@ -15,3 +15,12 @@ export function exportHistoryExcel(input) {
 export function exportHistoryPdf(input) {
   return invoke("export_history_pdf", { input });
 }
+
+// `purpose`: "entry", "outgoing" o "loss"; decide qué productos se ofrecen.
+export function searchProductsForInvoice(query, purpose) {
+  return invoke("search_products_for_invoice", { query, purpose });
+}
+
+export function getProductAssociatedInvoices(productId) {
+  return invoke("get_product_associated_invoices", { productId });
+}

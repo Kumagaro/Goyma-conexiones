@@ -443,16 +443,18 @@ pub fn search_products_for_invoice_inner(
     connection: &mut Connection,
     now: DateTime<Utc>,
     query: String,
+    purpose: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<ProductMatch>, AppError> {
     crate::commands::auth::require_session(connection, now)?;
+    let purpose = crate::search::ProductSearchPurpose::parse(purpose.as_deref())?;
 
     let transaction = connection
         .transaction()
         .map_err(|error| map_db_error(error, "searchProductsForInvoice", &[]))?;
     let _expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let limit = limit.unwrap_or(20).min(20);
-    let results = crate::search::search_products_for_invoice(&transaction, &query, limit)?;
+    let results = crate::search::search_products_for_invoice(&transaction, &query, purpose, limit)?;
 
     transaction
         .commit()
@@ -464,11 +466,12 @@ pub fn search_products_for_invoice_inner(
 pub fn search_products_for_invoice(
     state: tauri::State<'_, std::sync::Mutex<Connection>>,
     query: String,
+    purpose: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<ProductMatch>, AppError> {
     let mut connection = lock_conn(&state);
     let now = Utc::now();
-    let result = search_products_for_invoice_inner(&mut connection, now, query, limit);
+    let result = search_products_for_invoice_inner(&mut connection, now, query, purpose, limit);
     log_product_command_error(&connection, "searchProductsForInvoice", &result, now);
     result
 }
@@ -3446,20 +3449,49 @@ mod tests {
             .unwrap();
 
         assert_requires_session(|connection, now| {
-            search_products_for_invoice_inner(connection, now, "cable".to_owned(), Some(20))
+            search_products_for_invoice_inner(
+                connection,
+                now,
+                "cable".to_owned(),
+                Some("loss".to_owned()),
+                Some(20),
+            )
         });
         assert_allows_both_roles(|connection, now| {
-            search_products_for_invoice_inner(connection, now, "cable".to_owned(), Some(20))
+            search_products_for_invoice_inner(
+                connection,
+                now,
+                "cable".to_owned(),
+                Some("loss".to_owned()),
+                Some(20),
+            )
         });
 
         authorize_test_user(&connection, now);
-        let results =
-            search_products_for_invoice_inner(&mut connection, now, "cable".to_owned(), Some(20))
-                .unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].id, active_id);
+        let results = search_products_for_invoice_inner(
+            &mut connection,
+            now,
+            "cable".to_owned(),
+            None,
+            Some(20),
+        )
+        .unwrap();
+        // Por defecto (salidas) el agotado se devuelve marcado; el vencido se purgó.
+        let ids = results.iter().map(|item| item.id).collect::<Vec<_>>();
+        assert_eq!(ids, vec![out_of_stock_id, active_id]);
+        assert!(results[0].is_out_of_stock);
         assert!(!product_exists(&connection, expired_id));
         assert!(product_exists(&connection, out_of_stock_id));
+
+        let invalid = search_products_for_invoice_inner(
+            &mut connection,
+            now,
+            "cable".to_owned(),
+            Some("otro".to_owned()),
+            Some(20),
+        )
+        .unwrap_err();
+        assert_eq!(invalid.code, "validationFailed");
     }
 
     #[test]

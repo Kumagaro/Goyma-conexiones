@@ -7,6 +7,10 @@ export function createCombobox({
   addOptionLabel,
   onAddNew,
   onSelect,
+  // Opciones visibles pero no elegibles (p. ej. un producto agotado).
+  isOptionDisabled = () => false,
+  // true: "Agregar nuevo" solo cuando la búsqueda no devuelve nada.
+  addOnlyWhenEmpty = false,
   clearLabel = "",
   debounceMs = 300,
 }) {
@@ -89,6 +93,7 @@ export function createCombobox({
   }
 
   function chooseOption(option) {
+    if (option.disabled) return;
     if (option.kind === "add") {
       if (typeof onAddNew !== "function") return;
       const query = input.value.trim();
@@ -111,12 +116,19 @@ export function createCombobox({
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", "false");
     if (kind === "add") option.dataset.comboboxAdd = "";
+    const disabled = kind !== "add" && Boolean(isOptionDisabled(item));
+    if (disabled) {
+      option.disabled = true;
+      option.setAttribute("aria-disabled", "true");
+    }
     option.textContent =
       kind === "add" ? addOptionLabel(input.value.trim()) : formatOption(item);
     option.addEventListener("mousedown", (event) => event.preventDefault());
-    option.addEventListener("click", () => chooseOption({ kind, item }));
+    option.addEventListener("click", () =>
+      chooseOption({ kind, item, disabled }),
+    );
     listbox.append(option);
-    return { element: option, item, kind };
+    return { element: option, item, kind, disabled };
   }
 
   async function searchAndRender(query, currentRequestId) {
@@ -130,7 +142,8 @@ export function createCombobox({
       options = items.map((item, index) => addOption(item, index));
 
       const exactMatch = items.some((item) => item?.isExactMatch === true);
-      if (query && !exactMatch && typeof onAddNew === "function") {
+      const offerAdd = addOnlyWhenEmpty ? items.length === 0 : !exactMatch;
+      if (query && offerAdd && typeof onAddNew === "function") {
         options.push(addOption(null, options.length, "add"));
       }
 

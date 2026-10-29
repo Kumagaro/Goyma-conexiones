@@ -16,6 +16,7 @@ import {
   previewSellingPrice,
   updateProduct,
 } from "../services/productsService.js";
+import { getProductAssociatedInvoices } from "../services/historyService.js";
 import { searchUnits } from "../services/unitsService.js";
 import {
   formatCalendarDate,
@@ -24,6 +25,10 @@ import {
   formatMoney,
   formatRemainingDays,
 } from "../utils/formatters.js";
+import {
+  INVOICE_TYPE_LABELS,
+  invoiceStatusLabel,
+} from "../utils/invoiceLabels.js";
 import { openUnitModalForProduct } from "./unidadesView.js";
 
 let initPromise = null;
@@ -141,11 +146,6 @@ async function initializeProductosView() {
   document
     .getElementById("producto-condiciones-filter")
     ?.addEventListener("change", () => void loadConditionProducts());
-
-  document.getElementById("tab-producto-historial")?.setAttribute("hidden", "");
-  document.getElementById("producto-historial")?.setAttribute("hidden", "");
-  document.getElementById("producto-ver-historial")?.setAttribute("hidden", "");
-  document.getElementById("producto-ver-facturas")?.setAttribute("hidden", "");
 
   window.showProductoTab = showProductoTab;
   window.productosView = {
@@ -607,8 +607,90 @@ function renderProductDetail(detail) {
     );
     if (button) button.hidden = hidden;
   }
-  document.getElementById("producto-ver-facturas")?.setAttribute("hidden", "");
   showStatus("producto-detalle-feedback", detail.expiredCleanupWarning ?? "");
+  void renderAssociatedInvoices(detail.id);
+}
+
+// Facturas Asociadas (HP-04): número, tipo, fecha, estado y cantidad de cada
+// factura con el producto; "Ver" abre su detalle con facturasView.js.
+async function renderAssociatedInvoices(productId) {
+  const section = document.getElementById("producto-ver-facturas");
+  const list = document.getElementById("producto-ver-facturas-lista");
+  if (!section || !list) return;
+  section.hidden = false;
+  const message = (text) => {
+    const paragraph = document.createElement("p");
+    paragraph.className = "pv-desc-text";
+    paragraph.textContent = text;
+    list.replaceChildren(paragraph);
+  };
+  message("Cargando facturas…");
+  let items;
+  try {
+    items = await getProductAssociatedInvoices(productId);
+  } catch {
+    if (currentProductDetail?.id === productId) {
+      message("No se pudieron cargar las facturas del producto.");
+    }
+    return;
+  }
+  // Si el usuario abrió otro producto mientras cargaba, se descarta.
+  if (currentProductDetail?.id !== productId) return;
+  const invoices = Array.isArray(items) ? items : [];
+  if (!invoices.length) {
+    message("Este producto aún no aparece en ninguna factura.");
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "list-table";
+  const headRow = document.createElement("tr");
+  for (const label of [
+    "No. Factura",
+    "Tipo",
+    "Fecha",
+    "Estado",
+    "Cantidad",
+    "Acciones",
+  ]) {
+    const th = document.createElement("th");
+    th.textContent = label;
+    headRow.append(th);
+  }
+  const thead = document.createElement("thead");
+  thead.append(headRow);
+  const tbody = document.createElement("tbody");
+  for (const invoice of invoices) {
+    const type = invoice?.invoiceType ?? "";
+    const row = document.createElement("tr");
+    for (const text of [
+      invoice?.invoiceNumber ?? "—",
+      INVOICE_TYPE_LABELS[type] ?? type,
+      formatCalendarDate(invoice?.invoiceDate),
+      invoiceStatusLabel(type, invoice?.status),
+      invoice?.quantity ?? "—",
+    ]) {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      row.append(cell);
+    }
+    const actions = document.createElement("td");
+    const view = document.createElement("button");
+    view.type = "button";
+    view.className = "action-link";
+    view.textContent = "Ver";
+    view.setAttribute(
+      "aria-label",
+      `Ver factura ${invoice?.invoiceNumber ?? ""}`,
+    );
+    view.addEventListener("click", () => {
+      window.irAFacturaDesdeGeneral?.(type, Number(invoice?.invoiceId));
+    });
+    actions.append(view);
+    row.append(actions);
+    tbody.append(row);
+  }
+  table.append(thead, tbody);
+  list.replaceChildren(table);
 }
 
 async function handleProductAction(action, productId) {

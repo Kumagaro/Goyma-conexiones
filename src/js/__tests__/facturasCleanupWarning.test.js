@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { chooseFromCombobox } from "./helpers/invoiceUi.js";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -11,6 +12,11 @@ vi.mock("../services/invoicesService.js", () => ({
   createGuaranteeInvoice: vi.fn(),
   createInstallationInvoice: vi.fn(),
   createLossInvoice: vi.fn(),
+  updateEntryInvoice: vi.fn(),
+  updateSaleInvoice: vi.fn(),
+  updateServiceInvoice: vi.fn(),
+  updateGuaranteeInvoice: vi.fn(),
+  updateInstallationInvoice: vi.fn(),
   saveInvoiceAttachment: vi.fn(),
   downloadInvoiceAttachment: vi.fn(),
   deleteInvoice: vi.fn(),
@@ -18,12 +24,18 @@ vi.mock("../services/invoicesService.js", () => ({
 }));
 
 vi.mock("../services/clientsService.js", () => ({
-  searchClients: vi.fn(() => Promise.resolve([])),
+  searchClients: vi.fn(() => Promise.resolve([{ id: 4, fullName: "Ana" }])),
   getClientDetail: vi.fn(),
 }));
 
 vi.mock("../services/suppliersService.js", () => ({
-  searchSuppliers: vi.fn(() => Promise.resolve([])),
+  searchSuppliers: vi.fn(() => Promise.resolve([{ id: 1, fullName: "Ana" }])),
+}));
+
+vi.mock("../services/historyService.js", () => ({
+  searchProductsForInvoice: vi.fn(() =>
+    Promise.resolve([{ id: 1, name: "Cable", stock: "5" }]),
+  ),
 }));
 
 vi.mock("../components/confirmDialog.js", () => ({
@@ -67,6 +79,33 @@ const submit = (formId) =>
 
 // Por submódulo: tipo, cuerpo del listado, id del aviso, comando de alta y
 // cómo dejar el formulario listo para guardar.
+// Elige contacto y producto con los buscadores y teclea la cantidad.
+async function fillLines(contactInput, productInput, linesBody, isEntry) {
+  await chooseFromCombobox(contactInput, "ana", "Ana");
+  await chooseFromCombobox(productInput, "cab", "Cable");
+  for (const [field, value] of [
+    ["quantity", "1"],
+    ...(isEntry ? [["unitPrice", "1"]] : []),
+  ]) {
+    const input = document.querySelector(
+      `#${linesBody} [data-line-field="${field}"]`,
+    );
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
+async function chooseAssociated(selectId, value) {
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector(`#${selectId} option[value="${value}"]`),
+    ).not.toBeNull(),
+  );
+  setValue(selectId, value);
+}
+
+// Por submódulo: tipo, cuerpo del listado, id del aviso, comando de alta y
+// cómo dejar el formulario listo para guardar.
 const SUBMODULES = [
   {
     name: "entry",
@@ -74,11 +113,13 @@ const SUBMODULES = [
     bodyId: "facturas-entrada-body",
     warningId: "facturas-entrada-cleanup-warning",
     create: "createEntryInvoice",
-    prepare: () => {
-      __testHooks.setSelectedSupplier({ id: 1 });
-      __testHooks.setEntryLines([
-        { productId: 1, quantity: "1", unitPrice: "1" },
-      ]);
+    prepare: async () => {
+      await fillLines(
+        "factura-proveedor",
+        "factura-buscar-producto",
+        "factura-lineas-body",
+        true,
+      );
       setValue("factura-fecha-emision", "2026-02-10");
       submit("factura-entrada-form");
     },
@@ -89,9 +130,12 @@ const SUBMODULES = [
     bodyId: "facturas-venta-body",
     warningId: "facturas-venta-cleanup-warning",
     create: "createSaleInvoice",
-    prepare: () => {
-      __testHooks.setSelectedClient({ id: 4 });
-      __testHooks.setSaleLines([{ productId: 1, quantity: "1" }]);
+    prepare: async () => {
+      await fillLines(
+        "factura-venta-cliente",
+        "factura-venta-buscar-producto",
+        "factura-venta-lineas-body",
+      );
       setValue("factura-venta-fecha-emision", "2026-02-10");
       submit("factura-venta-form");
     },
@@ -102,9 +146,12 @@ const SUBMODULES = [
     bodyId: "facturas-servicios-body",
     warningId: "facturas-servicios-cleanup-warning",
     create: "createServiceInvoice",
-    prepare: () => {
-      __testHooks.setSelectedServiceClient({ id: 4 });
-      __testHooks.setServiceLines([{ productId: 1, quantity: "1" }]);
+    prepare: async () => {
+      await fillLines(
+        "factura-servicio-cliente",
+        "factura-servicio-buscar",
+        "factura-servicio-lineas-body",
+      );
       setValue("factura-servicio-fecha-emision", "2026-02-10");
       submit("factura-servicios-form");
     },
@@ -116,9 +163,12 @@ const SUBMODULES = [
     warningId: "facturas-garantia-cleanup-warning",
     create: "createGuaranteeInvoice",
     prepare: async () => {
-      await __testHooks.selectGuaranteeClient({ id: 4 });
-      setValue("factura-garantia-original", "9");
-      __testHooks.setGuaranteeLines([{ productId: 1, quantity: "1" }]);
+      await fillLines(
+        "factura-garantia-cliente",
+        "factura-garantia-buscar",
+        "factura-garantia-lineas-body",
+      );
+      await chooseAssociated("factura-garantia-original", "9");
       setValue("factura-garantia-fecha-emision", "2026-02-10");
       submit("factura-garantia-form");
     },
@@ -130,9 +180,12 @@ const SUBMODULES = [
     warningId: "facturas-insumos-cleanup-warning",
     create: "createInstallationInvoice",
     prepare: async () => {
-      await __testHooks.selectInstallationClient({ id: 4 });
-      setValue("factura-insumo-servicio", "8");
-      __testHooks.setInstallationLines([{ productId: 1, quantity: "1" }]);
+      await fillLines(
+        "factura-insumo-cliente",
+        "factura-insumo-buscar",
+        "factura-insumo-lineas-body",
+      );
+      await chooseAssociated("factura-insumo-servicio", "8");
       setValue("factura-insumo-fecha-emision", "2026-02-10");
       submit("factura-insumos-form");
     },
@@ -143,8 +196,8 @@ const SUBMODULES = [
     bodyId: "facturas-perdidas-body",
     warningId: "facturas-perdidas-cleanup-warning",
     create: "createLossInvoice",
-    prepare: () => {
-      __testHooks.getLossCombobox().setSelected({ id: 3, name: "Cable" });
+    prepare: async () => {
+      await chooseFromCombobox("factura-perdida-producto", "cab", "Cable");
       setValue("factura-perdida-cantidad", "1");
       setValue("factura-perdida-fecha", "2026-02-10");
       submit("factura-perdidas-form");

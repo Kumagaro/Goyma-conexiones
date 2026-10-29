@@ -15,6 +15,15 @@ pub struct InvoiceLineDetail {
     pub category_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_at_sale_cents: Option<i64>,
+    /// Estado actual del producto (`active`/`discontinued`); `None` si se
+    /// eliminó. La edición lo usa para bloquear cambios (FE-04, FS-01).
+    pub product_status: Option<String>,
+    /// Solo en compras: unidades de su lote que siguen en inventario y las ya
+    /// consumidas por salidas no canceladas (aviso al eliminar, FE-05).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_quantity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consumed_quantity: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

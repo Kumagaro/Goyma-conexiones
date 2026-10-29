@@ -233,7 +233,10 @@ pub fn get_product_history_inner(
 
     let mut statement = connection
         .prepare(
-            "SELECT id, createdAt, type, quantityMilli, stockAfterMilli, unitPriceCents, totalPriceCents, invoiceNumber, invoiceType, userName, productIdOriginal FROM productMovements WHERE productIdOriginal = ?1 ORDER BY createdAt DESC, id DESC",
+            "SELECT m.id, m.createdAt, m.type, m.quantityMilli, m.stockAfterMilli, m.unitPriceCents, m.totalPriceCents, m.invoiceNumber, m.invoiceType, m.userName, m.productIdOriginal, i.id
+             FROM productMovements m
+             LEFT JOIN invoices i ON i.number = m.invoiceNumber AND i.type = m.invoiceType
+             WHERE m.productIdOriginal = ?1 ORDER BY m.createdAt DESC, m.id DESC",
         )
         .map_err(|error| map_db_error(error, "getProductHistory", &[]))?;
 
@@ -249,6 +252,7 @@ pub fn get_product_history_inner(
                 total_price_cents: row.get(6)?,
                 invoice_number: row.get(7)?,
                 invoice_type: row.get(8)?,
+                invoice_id: row.get(11)?,
                 user_name: row.get(9)?,
                 product_id_original: row.get(10)?,
             })
@@ -668,6 +672,25 @@ mod tests {
                 ),
             )
             .unwrap();
+        // Una pérdida que sigue existiendo: su movimiento la enlaza (HP-02).
+        connection
+            .execute(
+                "INSERT INTO invoices (type, number, invoiceDate, status, createdByUserId, createdByName, createdAt, updatedAt)
+                 VALUES ('P', 'P-00001', '2026-10-07', NULL, ?1, 'historyuser', ?2, ?2)",
+                (user_id, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+            )
+            .unwrap();
+        let loss_id = connection.last_insert_rowid();
+        connection
+            .execute(
+                "INSERT INTO productMovements (createdAt, productId, productIdOriginal, productName, type, quantityMilli, stockAfterMilli, unitPriceCents, totalPriceCents, invoiceId, invoiceNumber, invoiceType, userId, userName) VALUES (?1, ?2, ?2, 'Cable UTP', 'loss', -1000, 1000, 2000, 2000, NULL, 'P-00001', 'P', ?3, 'historyuser')",
+                (
+                    now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    product_id,
+                    user_id,
+                ),
+            )
+            .unwrap();
         connection
             .execute("DELETE FROM products WHERE id = ?1", [product_id])
             .unwrap();
@@ -684,9 +707,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.items.len(), 2);
-        assert_eq!(result.items[0].movement_type, "entry");
-        assert_eq!(result.items[1].movement_type, "initial");
+        assert_eq!(result.items.len(), 3);
+        assert_eq!(result.items[0].movement_type, "loss");
+        assert_eq!(result.items[0].invoice_id, Some(loss_id));
+        assert_eq!(result.items[1].movement_type, "entry");
+        // E-00001 ya no existe: no se ofrece abrirla.
+        assert_eq!(result.items[1].invoice_id, None);
+        assert_eq!(result.items[2].movement_type, "initial");
+        assert_eq!(result.items[2].invoice_id, None);
     }
 
     #[test]

@@ -33,12 +33,17 @@ vi.mock("../views/unidadesView.js", () => ({
   openUnitModalForProduct: vi.fn(),
 }));
 
+vi.mock("../services/historyService.js", () => ({
+  getProductAssociatedInvoices: vi.fn(() => Promise.resolve([])),
+}));
+
 vi.mock("../components/confirmDialog.js", () => ({
   confirmDialog: vi.fn(() => Promise.resolve(true)),
 }));
 
 import { getProduct, listProducts } from "../services/productsService.js";
 import { getCategory, listCategories } from "../services/categoriesService.js";
+import { getProductAssociatedInvoices } from "../services/historyService.js";
 
 function seedProductsPage() {
   document.body.innerHTML = `
@@ -117,7 +122,7 @@ function seedProductsPage() {
         <p id="producto-ver-descripcion"></p><details id="producto-ver-desc-section"></details>
         <div id="producto-ver-estado"></div><div id="producto-ver-fecha-descontinuacion"></div>
         <div id="producto-ver-dias-restantes"></div><div id="producto-detalle-feedback" role="status" hidden></div>
-        <details id="producto-ver-facturas" hidden></details>
+        <details id="producto-ver-facturas" hidden><div id="producto-ver-facturas-lista"></div></details>
         <button id="producto-ver-historial" hidden>Ver Historial</button>
         <button data-product-detail-action="edit">Editar</button>
         <button data-product-detail-action="discontinue">Descontinuar</button>
@@ -245,6 +250,85 @@ describe("valores de Fase 2 en productos y categorías", () => {
     expect(
       document.getElementById("producto-ver-valor-total").textContent,
     ).toBe("99,98 USD");
+  });
+
+  it("el detalle del producto muestra sus Facturas Asociadas con Ver (HP-04)", async () => {
+    seedProductsPage();
+    const evil = '<img src=x onerror="alert(1)">V-00001';
+    listProducts.mockResolvedValue([
+      { id: 2, name: "Cable", quantity: "1", isOutOfStock: false },
+    ]);
+    getProduct.mockResolvedValue({
+      id: 2,
+      name: "Cable",
+      quantity: "1",
+      isDiscontinued: false,
+      expiredCleanupWarning: null,
+    });
+    getProductAssociatedInvoices.mockResolvedValueOnce([
+      {
+        invoiceId: 31,
+        invoiceNumber: evil,
+        invoiceType: "V",
+        invoiceDate: "2026-02-10",
+        status: "pending",
+        quantity: "2,5",
+      },
+    ]);
+    window.irAFacturaDesdeGeneral = vi.fn();
+
+    const view = await import("../views/productosView.js");
+    await view.initProductosView();
+    await view.showProductoTab("list");
+    document
+      .querySelector('#productos-body [data-product-action="view"]')
+      .click();
+    const list = () => document.getElementById("producto-ver-facturas-lista");
+    await vi.waitFor(() =>
+      expect(list().querySelector("table")).not.toBeNull(),
+    );
+    expect(getProductAssociatedInvoices).toHaveBeenCalledWith(2);
+    expect(document.getElementById("producto-ver-facturas").hidden).toBe(false);
+    const cells = [...list().querySelectorAll("tbody td")].map(
+      (cell) => cell.textContent,
+    );
+    expect(cells.slice(0, 5)).toEqual([
+      evil,
+      "Venta",
+      "10/02/2026",
+      "Por Cobrar",
+      "2,5",
+    ]);
+    expect(list().querySelector("img")).toBeNull();
+    list().querySelector("button").click();
+    expect(window.irAFacturaDesdeGeneral).toHaveBeenCalledWith("V", 31);
+    delete window.irAFacturaDesdeGeneral;
+  });
+
+  it("sin facturas asociadas muestra un estado vacío claro", async () => {
+    seedProductsPage();
+    listProducts.mockResolvedValue([
+      { id: 3, name: "Router", quantity: "1", isOutOfStock: false },
+    ]);
+    getProduct.mockResolvedValue({
+      id: 3,
+      name: "Router",
+      quantity: "1",
+      isDiscontinued: false,
+      expiredCleanupWarning: null,
+    });
+    getProductAssociatedInvoices.mockResolvedValueOnce([]);
+    const view = await import("../views/productosView.js");
+    await view.initProductosView();
+    await view.showProductoTab("list");
+    document
+      .querySelector('#productos-body [data-product-action="view"]')
+      .click();
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("producto-ver-facturas-lista").textContent,
+      ).toBe("Este producto aún no aparece en ninguna factura."),
+    );
   });
 
   it("categoriasView muestra ingresosCents en la columna y en el detalle (0 sin ventas)", async () => {

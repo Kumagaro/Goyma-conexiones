@@ -22,6 +22,7 @@ import {
   updateSupplier,
 } from "../services/suppliersService.js";
 import { initProveedoresView } from "../views/proveedoresView.js";
+import { confirmDialog } from "../components/confirmDialog.js";
 import { formatDate, formatMoney } from "../utils/formatters.js";
 
 function seedSupplierPage() {
@@ -54,8 +55,12 @@ function seedSupplierPage() {
         </div>
         <div id="proveedor-historial" class="config-subview">
           <select id="historial-proveedor-select"></select>
-          <table><thead><tr><th id="th-fecha-historial-proveedor">Fecha</th></tr></thead></table>
-          <tbody id="historial-proveedor-body"></tbody>
+          <input type="date" id="historial-proveedor-desde" />
+          <input type="date" id="historial-proveedor-hasta" />
+          <table>
+            <thead><tr><th id="th-fecha-historial-proveedor">Fecha</th></tr></thead>
+            <tbody id="historial-proveedor-body"></tbody>
+          </table>
         </div>
         <div id="proveedor-ver" class="config-subview">
           <span id="proveedor-ver-id"></span>
@@ -102,6 +107,111 @@ describe("proveedoresView", () => {
       expect.any(Function),
     );
     delete window.toggleOrdenFecha;
+  });
+
+  it("PV-07: el historial pinta las compras del proveedor elegido, filtra, ordena y abre la factura", async () => {
+    listSuppliers.mockResolvedValue([
+      { id: 1, fullName: "Ana Pérez" },
+      { id: 2, fullName: "Luis Gómez" },
+    ]);
+    const evil = '<img src=x onerror="alert(1)">E-00009';
+    getSupplierDetail.mockImplementation((id) =>
+      Promise.resolve({
+        invoiceHistory:
+          id === 1
+            ? [
+                {
+                  id: 11,
+                  number: "E-00001",
+                  invoiceType: "E",
+                  date: "2026-01-05",
+                  totalCents: 1500,
+                  status: "completed",
+                },
+                {
+                  id: 12,
+                  number: evil,
+                  invoiceType: "E",
+                  date: "2026-02-10",
+                  totalCents: 2500,
+                  status: "pending",
+                },
+              ]
+            : [],
+      }),
+    );
+    window.irAFacturaDesdeGeneral = vi.fn();
+    await initProveedoresView();
+    // Sin abrir la pestaña no se consulta el historial.
+    expect(getSupplierDetail).not.toHaveBeenCalled();
+
+    document.getElementById("tab-proveedor-historial").click();
+    const body = document.getElementById("historial-proveedor-body");
+    const numbers = () =>
+      [...body.querySelectorAll("tr")].map((row) => row.cells[1]?.textContent);
+    await vi.waitFor(() => expect(body.querySelectorAll("tr")).toHaveLength(2));
+    expect(getSupplierDetail).toHaveBeenCalledWith(1);
+    // Más reciente primero; texto seguro.
+    expect(numbers()).toEqual([evil, "E-00001"]);
+    expect(body.querySelector("img")).toBeNull();
+    expect(body.textContent).toContain(formatDate("2026-01-05"));
+    expect(body.textContent).toContain(formatMoney(1500));
+    expect(body.textContent).toContain("Pagada");
+    expect(body.textContent).toContain("Por Pagar");
+
+    document.getElementById("th-fecha-historial-proveedor").click();
+    expect(numbers()).toEqual(["E-00001", evil]);
+
+    const desde = document.getElementById("historial-proveedor-desde");
+    desde.value = "2026-02-01";
+    desde.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(numbers()).toEqual([evil]);
+
+    body.querySelector("button").click();
+    expect(window.irAFacturaDesdeGeneral).toHaveBeenCalledWith("E", 12);
+
+    const hasta = document.getElementById("historial-proveedor-hasta");
+    hasta.value = "2026-01-01";
+    hasta.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(body.textContent).toContain(
+      "La fecha inicial no puede ser posterior a la final",
+    );
+
+    desde.value = "";
+    hasta.value = "";
+    const select = document.getElementById("historial-proveedor-select");
+    select.value = "2";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() =>
+      expect(body.textContent).toContain(
+        "Este proveedor aún no tiene compras registradas.",
+      ),
+    );
+
+    getSupplierDetail.mockRejectedValueOnce(new Error("falla"));
+    select.value = "1";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() =>
+      expect(body.textContent).toContain(
+        "No se pudo cargar el historial de compras.",
+      ),
+    );
+    delete window.irAFacturaDesdeGeneral;
+  });
+
+  it("PV-05: al eliminar avisa cuántas facturas se conservan", async () => {
+    listSuppliers.mockResolvedValue([{ id: 1, fullName: "Ana Pérez" }]);
+    getSupplierDetail.mockResolvedValue({
+      invoiceHistory: [{ id: 1 }, { id: 2, status: "cancelled" }],
+    });
+    confirmDialog.mockResolvedValueOnce(false);
+    await initProveedoresView();
+    document.querySelector('[data-supplier-action="delete"]').click();
+    await vi.waitFor(() => expect(confirmDialog).toHaveBeenCalled());
+    expect(confirmDialog.mock.calls[0][0].message).toContain(
+      "Ana Pérez tiene 2 facturas; se conservarán con la copia de sus datos.",
+    );
+    expect(deleteSupplier).not.toHaveBeenCalled();
   });
 
   it("carga proveedores y muestra el estado vacío si no llega nada", async () => {

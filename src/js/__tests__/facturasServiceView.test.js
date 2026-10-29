@@ -9,6 +9,7 @@ import {
 } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { chooseFromCombobox } from "./helpers/invoiceUi.js";
 
 vi.mock("../services/invoicesService.js", () => ({
   listInvoices: vi.fn(),
@@ -26,8 +27,18 @@ vi.mock("../services/invoicesService.js", () => ({
 }));
 
 vi.mock("../services/clientsService.js", () => ({
-  searchClients: vi.fn(() => Promise.resolve([])),
+  searchClients: vi.fn(() =>
+    Promise.resolve([{ id: 4, fullName: "Cliente Cuatro" }]),
+  ),
   listClients: vi.fn(() => Promise.resolve([])),
+}));
+
+vi.mock("../services/historyService.js", () => ({
+  searchProductsForInvoice: vi.fn(() =>
+    Promise.resolve([
+      { id: 7, name: "Cable", stock: "5", sellingPriceCents: 100 },
+    ]),
+  ),
 }));
 
 vi.mock("../components/confirmDialog.js", () => ({
@@ -225,8 +236,6 @@ describe("facturasView submódulo service", () => {
     for (const id of [
       "factura-servicios-form",
       "factura-servicio-cliente-add",
-      "factura-servicio-producto-add",
-      "factura-servicio-agregar-fila",
       "factura-servicio-cancelar",
       "factura-servicio-volver",
       "factura-servicio-editar",
@@ -238,6 +247,9 @@ describe("facturasView submódulo service", () => {
     for (const id of [
       "factura-servicio-descuento",
       "factura-servicio-impuesto",
+      // §7.1: el buscador de producto basta; sin "+" ni "Agregar Fila".
+      "factura-servicio-producto-add",
+      "factura-servicio-agregar-fila",
       "factura-servicio-ver-descuento",
       "factura-servicio-ver-impuestos",
     ]) {
@@ -284,36 +296,28 @@ describe("facturasView submódulo service", () => {
     );
   });
 
-  it("#factura-servicio-cliente es combobox y el botón + abre el formulario de cliente", async () => {
+  it("#factura-servicio-cliente es combobox y el botón + abre el alta rápida de cliente", async () => {
     listInvoices.mockResolvedValue([]);
     await initFacturasView();
 
     const clienteInput = document.getElementById("factura-servicio-cliente");
     expect(clienteInput.getAttribute("role")).toBe("combobox");
 
-    const dispatched = [];
-    document.addEventListener(
-      "service:openClientForm",
-      (event) => dispatched.push(event),
-      { once: true },
-    );
     document.getElementById("factura-servicio-cliente-add").click();
-    expect(dispatched).toHaveLength(1);
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.textContent).toContain("Nuevo cliente");
+    [...dialog.querySelectorAll("button")]
+      .find((button) => button.textContent === "Cancelar")
+      .click();
   });
 
-  it("#factura-servicio-buscar es combobox con botón + y hay botón Agregar Fila", async () => {
+  it("#factura-servicio-buscar es combobox", async () => {
     listInvoices.mockResolvedValue([]);
     await initFacturasView();
 
     expect(
       document.getElementById("factura-servicio-buscar").getAttribute("role"),
     ).toBe("combobox");
-    expect(
-      document.getElementById("factura-servicio-producto-add"),
-    ).not.toBeNull();
-    expect(
-      document.getElementById("factura-servicio-agregar-fila"),
-    ).not.toBeNull();
   });
 
   it("#factura-servicio-descuento y #factura-servicio-impuesto no existen", async () => {
@@ -332,11 +336,19 @@ describe("facturasView submódulo service", () => {
     });
     await initFacturasView();
 
-    const { __testHooks } = await import("../views/facturasView.js");
     document.getElementById("factura-servicio-fecha-emision").value =
       "2026-02-10";
-    __testHooks.setSelectedServiceClient({ id: 4, fullName: "Cliente Cuatro" });
-    __testHooks.setServiceLines([{ productId: 7, quantity: "2" }]);
+    await chooseFromCombobox(
+      "factura-servicio-cliente",
+      "cli",
+      "Cliente Cuatro",
+    );
+    await chooseFromCombobox("factura-servicio-buscar", "cab", "Cable");
+    const quantity = document.querySelector(
+      '#factura-servicio-lineas-body [data-line-field="quantity"]',
+    );
+    quantity.value = "2";
+    quantity.dispatchEvent(new Event("input", { bubbles: true }));
 
     document
       .getElementById("factura-servicios-form")

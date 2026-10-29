@@ -1,3 +1,4 @@
+import { chooseFromCombobox } from "./helpers/invoiceUi.js";
 import {
   afterEach,
   beforeAll,
@@ -22,8 +23,18 @@ vi.mock("../services/invoicesService.js", () => ({
 }));
 
 vi.mock("../services/clientsService.js", () => ({
-  searchClients: vi.fn(() => Promise.resolve([])),
+  searchClients: vi.fn(() =>
+    Promise.resolve([{ id: 4, fullName: "Cliente Cuatro" }]),
+  ),
   listClients: vi.fn(() => Promise.resolve([])),
+}));
+
+vi.mock("../services/historyService.js", () => ({
+  searchProductsForInvoice: vi.fn(() =>
+    Promise.resolve([
+      { id: 7, name: "Cable", stock: "5", sellingPriceCents: 100 },
+    ]),
+  ),
 }));
 
 vi.mock("../components/confirmDialog.js", () => ({
@@ -202,7 +213,7 @@ describe("facturasView submódulo sale", () => {
     expect(metodo.style.display).not.toBe("none");
   });
 
-  it("#factura-venta-cliente es combobox y el botón + abre el formulario de cliente", async () => {
+  it("#factura-venta-cliente es combobox y el botón + abre el alta rápida de cliente", async () => {
     listInvoices.mockResolvedValue([]);
     await initFacturasView();
 
@@ -210,19 +221,15 @@ describe("facturasView submódulo sale", () => {
     expect(clienteInput.getAttribute("role")).toBe("combobox");
     expect(clienteInput.getAttribute("aria-autocomplete")).toBe("list");
 
-    const addButton = document.getElementById("factura-venta-cliente-add");
-    expect(addButton).not.toBeNull();
-    const dispatched = [];
-    document.addEventListener(
-      "sale:openClientForm",
-      (event) => dispatched.push(event),
-      { once: true },
-    );
-    addButton.click();
-    expect(dispatched).toHaveLength(1);
+    document.getElementById("factura-venta-cliente-add").click();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.textContent).toContain("Nuevo cliente");
+    [...dialog.querySelectorAll("button")]
+      .find((button) => button.textContent === "Cancelar")
+      .click();
   });
 
-  it("#factura-venta-buscar-producto es combobox con botón + y hay botón Agregar Fila", async () => {
+  it("#factura-venta-buscar-producto es combobox", async () => {
     listInvoices.mockResolvedValue([]);
     await initFacturasView();
 
@@ -230,12 +237,6 @@ describe("facturasView submódulo sale", () => {
       "factura-venta-buscar-producto",
     );
     expect(productoInput.getAttribute("role")).toBe("combobox");
-    expect(
-      document.getElementById("factura-venta-producto-add"),
-    ).not.toBeNull();
-    expect(
-      document.getElementById("factura-venta-agregar-fila"),
-    ).not.toBeNull();
   });
 
   it("#factura-venta-descuento y #factura-venta-impuesto no existen", async () => {
@@ -254,10 +255,14 @@ describe("facturasView submódulo sale", () => {
     });
     await initFacturasView();
 
-    const { __testHooks } = await import("../views/facturasView.js");
     document.getElementById("factura-venta-fecha-emision").value = "2026-02-10";
-    __testHooks.setSelectedClient({ id: 4, fullName: "Cliente Cuatro" });
-    __testHooks.setSaleLines([{ productId: 7, quantity: "2" }]);
+    await chooseFromCombobox("factura-venta-cliente", "cli", "Cliente Cuatro");
+    await chooseFromCombobox("factura-venta-buscar-producto", "cab", "Cable");
+    const quantity = document.querySelector(
+      '#factura-venta-lineas-body [data-line-field="quantity"]',
+    );
+    quantity.value = "2";
+    quantity.dispatchEvent(new Event("input", { bubbles: true }));
 
     const form = document.getElementById("factura-venta-form");
     form.dispatchEvent(

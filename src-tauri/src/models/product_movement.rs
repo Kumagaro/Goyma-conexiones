@@ -67,6 +67,9 @@ pub struct ProductHistoryItem {
     pub total_price_cents: i64,
     pub invoice_number: Option<String>,
     pub invoice_type: Option<String>,
+    /// Factura que sigue existiendo con ese número y tipo (los números nunca
+    /// se reutilizan); `None` si se eliminó, para no abrir un detalle ajeno.
+    pub invoice_id: Option<i64>,
     pub user_name: String,
     pub product_id_original: i64,
 }

@@ -24,11 +24,17 @@ async function initializeClientesView() {
   removeLegacyInlineHandlers();
   removeLegacyDateField();
   bindPageChangeListener();
-  bindTabButtons();
-  bindSearch();
-  bindForm();
-  bindTableActions();
-  bindDetailActions();
+  // Cada page:change vuelve a inicializar la vista: los listeners se enlazan
+  // una sola vez para que un envío no cree el cliente dos veces.
+  const page = document.getElementById("page-clientes");
+  if (page?.dataset.clientesBound !== "1") {
+    if (page) page.dataset.clientesBound = "1";
+    bindTabButtons();
+    bindSearch();
+    bindForm();
+    bindTableActions();
+    bindDetailActions();
+  }
   await loadClients();
   showClienteTab("list", document.getElementById("tab-cliente-list"));
 }
@@ -95,6 +101,10 @@ function bindForm() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void handleClientSubmit();
+  });
+  document.getElementById("cliente-cancelar")?.addEventListener("click", () => {
+    resetClientForm();
+    showClienteTab("list", document.getElementById("tab-cliente-list"));
   });
 }
 
@@ -382,13 +392,22 @@ async function handleDeleteClient(clientId) {
   const client = clients.find((item) => Number(item.id) === Number(clientId));
   if (!client) return;
 
-  const invoiceCount = Number(client.invoiceCount ?? 0);
+  // El listado no trae el recuento: se pide el detalle antes de confirmar (CL-05).
+  let invoiceCount = 0;
+  try {
+    const detail = await getClientDetail(clientId);
+    // Se cuentan todas, también las canceladas: todas conservan la copia.
+    invoiceCount = detail?.invoiceHistory?.length ?? 0;
+  } catch {
+    // Sin el detalle se confirma igual, sin el recuento.
+  }
+  const name = client.fullName ?? "este cliente";
   const confirmed = await confirmDialog({
     title: "Eliminar cliente",
     message:
       invoiceCount > 0
-        ? `Se conservarán ${invoiceCount} facturas asociadas a ${client.fullName ?? "este cliente"}.\n¿Deseas continuar?`
-        : `¿Deseas eliminar a ${client.fullName ?? "este cliente"}?`,
+        ? `${name} tiene ${invoiceCount} ${invoiceCount === 1 ? "factura" : "facturas"}; se conservarán con la copia de sus datos.\n¿Deseas eliminarlo?`
+        : `¿Deseas eliminar a ${name}?`,
     confirmText: "Eliminar",
   });
 

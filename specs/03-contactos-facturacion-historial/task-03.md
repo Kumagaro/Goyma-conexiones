@@ -989,80 +989,101 @@ La revisión contra `spec-03` (requisito por requisito, leyendo código) encontr
 
 *(FE-01, FS-01 a FS-05. Hoy los buscadores descartan los resultados y el "+" agrega líneas sin `productId`, así que solo se puede crear una pérdida.)*
 
-- [ ] Test (Vitest + jsdom, HTML de producción): en entrada, venta, servicio, garantía e insumos, escribir en el buscador de **cliente/proveedor** muestra las coincidencias del backend (`searchClients`/`searchSuppliers`) y elegir una deja el contacto seleccionado; volver a escribir lo deselecciona.
-- [ ] Test: en esos cinco formularios, el buscador de **producto** muestra las coincidencias de `searchProductsForInvoice` con su stock; elegir una agrega la línea con su `productId`, nombre y unidad. Un producto repetido no se agrega dos veces (mensaje claro).
-- [ ] Test: la línea permite editar la cantidad (y el costo unitario en entrada) como texto, y quitarla. El total preliminar se recalcula con los valores tecleados (plan-03 §9, total preliminar en el frontend).
-- [ ] Test: en garantía e insumos, elegir el cliente llena el `<select>` de la factura asociada (comportamiento de §4.5.3/§4.5.4, ahora sin `__testHooks`).
-- [ ] Test (**extremo a extremo en jsdom**): para cada uno de los cinco tipos, el usuario elige contacto y producto, escribe la cantidad, guarda, y se llama a `create*Invoice` con los ids correctos; nunca se envía `productId: NaN`.
-- [ ] Test: "Agregar Fila" agrega una línea vacía con su propio buscador de producto (o se elimina el botón si el buscador superior basta; decidir en `plan-03` §5).
-- [ ] Implementación: sustituir los buscadores de `facturasView.js` por `createCombobox` (sin "Agregar nuevo" en producto; el alta rápida de contacto llega en §7.4) y guardar `productId` en cada línea.
+- [x] Test (Vitest + jsdom, HTML de producción): en entrada, venta, servicio, garantía e insumos, escribir en el buscador de **cliente/proveedor** muestra las coincidencias del backend (`searchClients`/`searchSuppliers`) y elegir una deja el contacto seleccionado; volver a escribir lo deselecciona.
+- [x] Test: en esos cinco formularios, el buscador de **producto** muestra las coincidencias de `searchProductsForInvoice` con su stock; elegir una agrega la línea con su `productId`, nombre y unidad. Un producto repetido no se agrega dos veces (mensaje claro).
+- [x] Test: la línea permite editar la cantidad (y el costo unitario en entrada) como texto, y quitarla. El total preliminar se recalcula con los valores tecleados (plan-03 §9, total preliminar en el frontend).
+  - Venta y servicio usan el precio vigente (`ProductMatch.sellingPriceCents`, nuevo); garantía e insumos muestran "Se calcula al guardar" porque van a costo real (FIFO).
+- [x] Test: en garantía e insumos, elegir el cliente llena el `<select>` de la factura asociada (comportamiento de §4.5.3/§4.5.4, ahora sin `__testHooks`).
+- [x] Test (**extremo a extremo en jsdom**): para cada uno de los cinco tipos, el usuario elige contacto y producto, escribe la cantidad, guarda, y se llama a `create*Invoice` con los ids correctos; nunca se envía `productId: NaN`.
+- [x] Test: "Agregar Fila" agrega una línea vacía con su propio buscador de producto (o se elimina el botón si el buscador superior basta; decidir en `plan-03` §5).
+  - **Decisión del dueño (2026-10-28):** se eliminan "Agregar Fila" y el "+" del buscador de producto (`plan-03` §10.7). El test del HTML de producción de servicio comprueba que ya no existen.
+- [x] Implementación: sustituir los buscadores de `facturasView.js` por `createCombobox` (sin "Agregar nuevo" en producto; el alta rápida de contacto llega en §7.4) y guardar `productId` en cada línea.
+  - `facturasView.js` pasa a un submódulo genérico (`createInvoiceSubmodule`) para los cinco tipos. Tests en `facturasFormularios.test.js` (nuevo, HTML de producción, helper `__tests__/helpers/invoiceUi.js`); los tests por tipo y el de avisos de purga ya no usan `__testHooks` para elegir.
 - [ ] Verificación manual (cuando el entorno lo permita): crear una factura de cada tipo desde la interfaz.
+  - **Pendiente:** el entorno no permite operar la ventana de Tauri.
 
 ### 7.2 Buscador de productos para facturas
 
 *(FS-01: un producto con stock 0 se ve como "Agotado" y no se puede agregar a una salida. FE-01: una entrada sí puede reponerlo. FP-01: la pérdida admite un descontinuado con stock.)*
 
-- [ ] Test (Rust, `search_products_for_invoice_inner`): devuelve los productos **activos** con stock 0 marcados `isOutOfStock = true` (hoy los excluye).
-- [ ] Test (Rust): con un parámetro de contexto (por ejemplo `purpose: "entry" | "outgoing" | "loss"`), solo la pérdida incluye los **descontinuados con stock** (`isDiscontinued = true`); entrada y salidas los siguen excluyendo (S-22).
-- [ ] Test (Vitest): en salidas, un producto "Agotado" se muestra pero no se puede elegir; en entrada sí se puede elegir; en pérdida aparece el descontinuado con stock.
-- [ ] Test (Rust): fila de la matriz de autorización actualizada si cambia la firma.
-- [ ] Implementación: `search.rs` y `products.rs::search_products_for_invoice_inner`, wrapper de `historyService.js` (hoy la vista llama a `invoke` directamente: moverlo al servicio, como pide plan-03 §5.1), y los tres formularios.
+- [x] Test (Rust, `search_products_for_invoice_inner`): devuelve los productos **activos** con stock 0 marcados `isOutOfStock = true` (hoy los excluye).
+- [x] Test (Rust): con un parámetro de contexto (por ejemplo `purpose: "entry" | "outgoing" | "loss"`), solo la pérdida incluye los **descontinuados con stock** (`isDiscontinued = true`); entrada y salidas los siguen excluyendo (S-22).
+  - `invoice_product_search_marks_out_of_stock_and_offers_discontinued_only_for_loss` y `product_search_purpose_defaults_to_outgoing_and_rejects_unknown_values` (`search.rs`); el de `products.rs` comprueba además que un `purpose` desconocido es `validationFailed`.
+- [x] Test (Vitest): en salidas, un producto "Agotado" se muestra pero no se puede elegir; en entrada sí se puede elegir; en pérdida aparece el descontinuado con stock.
+  - `combobox.js` gana `isOptionDisabled` (opción con `disabled` y `aria-disabled`).
+- [x] Test (Rust): fila de la matriz de autorización actualizada si cambia la firma.
+- [x] Implementación: `search.rs` y `products.rs::search_products_for_invoice_inner`, wrapper de `historyService.js` (hoy la vista llama a `invoke` directamente: moverlo al servicio, como pide plan-03 §5.1), y los tres formularios.
 
 ### 7.3 Editar facturas y cambiar su estado
 
 *(FE-04, FE-06, FS-01. Los comandos `update*Invoice` y `changeInvoiceStatus` existen con tests en Rust; ninguna vista los llama. Hoy el botón "Editar" abre un formulario de alta vacío.)*
 
-- [ ] Test (Vitest): en el detalle de una factura **pendiente**, "Editar" abre el formulario **cargado** con sus datos (contacto, fecha, descripción, factura asociada y líneas con su `productIdOriginal`); guardar llama a `update*Invoice` con `invoiceId` y las líneas; no llama a `create*Invoice`.
-- [ ] Test: en salidas, las líneas existentes conservan su precio emitido en la vista previa; las nuevas toman el vigente (FS-01). Las líneas de productos eliminados o descontinuados se muestran sin poder cambiarlas (solo quitar o, en descontinuados, reducir).
-- [ ] Test: el detalle ofrece las transiciones válidas de §7.5 según tipo y estado (por ejemplo, Por Pagar → Pagada o Cancelada; Cancelada no ofrece nada), con `confirmDialog` para Cancelar; al completar entrada/venta/servicio se puede elegir el método de pago; llama a `changeInvoiceStatus` y repinta el detalle y el listado.
-- [ ] Test: una factura no pendiente no muestra "Editar"; un error del backend (`invalidState`, `stockInsuficiente`) se muestra en español sin perder lo tecleado.
-- [ ] Test: el aviso `expiredCleanupWarning` de `update*Invoice` y `changeInvoiceStatus` se muestra con `showCleanupWarning` (completa la casilla pendiente de §5 bis).
-- [ ] Test (Rust, refuerzo): `changeInvoiceStatus` a Cancelada devuelve los consumos a sus lotes y registra una Reversión por línea; Pagada → Por Pagar borra fecha y método de pago; cancelar una entrada deja sus lotes a 0 sin borrarlos.
-- [ ] Implementación: modo edición en los submódulos de `facturasView.js` (entrada, venta, servicio y la fábrica de garantía/insumos; la pérdida no se edita) y controles de cambio de estado en los detalles.
+- [x] Test (Vitest): en el detalle de una factura **pendiente**, "Editar" abre el formulario **cargado** con sus datos (contacto, fecha, descripción, factura asociada y líneas con su `productIdOriginal`); guardar llama a `update*Invoice` con `invoiceId` y las líneas; no llama a `create*Invoice`.
+  - Para cargarlo, `InvoiceDetail` trae ahora `contactId` y `associatedInvoiceId` (ids vigentes, `null` si se eliminaron) y cada línea su `productStatus`. Test Rust `get_invoice_inner_exposes_current_ids_and_product_status_for_editing`.
+- [x] Test: en salidas, las líneas existentes conservan su precio emitido en la vista previa; las nuevas toman el vigente (FS-01). Las líneas de productos eliminados o descontinuados se muestran sin poder cambiarlas (solo quitar o, en descontinuados, reducir).
+- [x] Test: el detalle ofrece las transiciones válidas de §7.5 según tipo y estado (por ejemplo, Por Pagar → Pagada o Cancelada; Cancelada no ofrece nada), con `confirmDialog` para Cancelar; al completar entrada/venta/servicio se puede elegir el método de pago; llama a `changeInvoiceStatus` y repinta el detalle y el listado.
+- [x] Test: una factura no pendiente no muestra "Editar"; un error del backend (`invalidState`, `stockInsuficiente`) se muestra en español sin perder lo tecleado.
+- [x] Test: el aviso `expiredCleanupWarning` de `update*Invoice` y `changeInvoiceStatus` se muestra con `showCleanupWarning` (completa la casilla pendiente de §5 bis).
+- [x] Test (Rust, refuerzo): `changeInvoiceStatus` a Cancelada devuelve los consumos a sus lotes y registra una Reversión por línea; Pagada → Por Pagar borra fecha y método de pago; cancelar una entrada deja sus lotes a 0 sin borrarlos.
+  - `change_invoice_status_restores_lots_records_reversals_and_clears_payment`. La Reversión se registra por consumo, con `invoiceNumber` y sin `invoiceId` (comportamiento existente).
+- [x] Implementación: modo edición en los submódulos de `facturasView.js` (entrada, venta, servicio y la fábrica de garantía/insumos; la pérdida no se edita) y controles de cambio de estado en los detalles.
+  - En la entrada, editar también permite reemplazar o quitar el PDF adjunto (`saveInvoiceAttachment` con ruta o `null`).
 
 ### 7.4 Alta rápida de cliente y proveedor desde la factura
 
 *(CL-06, PV-06. Hoy el "+" solo cambia de página y nada escucha los eventos `*:openClientForm`.)*
 
-- [ ] Test (Vitest): si el buscador no encuentra coincidencias, ofrece "Crear nuevo cliente/proveedor", que abre un formulario rápido (modal) con los mismos campos y validaciones de CL-01/PV-01; al guardar llama a `createClient`/`createSupplier` y deja el contacto **seleccionado** en la factura, sin perder lo tecleado en ella.
-- [ ] Test: cancelar el formulario rápido vuelve a la factura sin cambios; un CI duplicado muestra el error del backend.
-- [ ] Implementación: `onAddNew` del combobox de §7.1 con un formulario rápido reutilizable (preferir el de `clientesView.js`/`proveedoresView.js` antes que duplicarlo).
+- [x] Test (Vitest): si el buscador no encuentra coincidencias, ofrece "Crear nuevo cliente/proveedor", que abre un formulario rápido (modal) con los mismos campos y validaciones de CL-01/PV-01; al guardar llama a `createClient`/`createSupplier` y deja el contacto **seleccionado** en la factura, sin perder lo tecleado en ella.
+- [x] Test: cancelar el formulario rápido vuelve a la factura sin cambios; un CI duplicado muestra el error del backend.
+- [x] Implementación: `onAddNew` del combobox de §7.1 con un formulario rápido reutilizable (preferir el de `clientesView.js`/`proveedoresView.js` antes que duplicarlo).
+  - `components/quickContactDialog.js`: los formularios de Contactos son páginas con `id` fijos y no se pueden montar en un modal sin duplicar `id`; el modal reproduce sus campos y el backend valida igual (CL-01/PV-01). El "+" junto al buscador abre el mismo modal.
+  - **Hallazgo y corrección:** el HTML de producción no tenía `id="cliente-form"` ni `id="proveedor-form"`, así que `clientesView.js`/`proveedoresView.js` nunca enlazaban el envío (guardar recargaba la página). Se añadieron los `id` (y los de sus botones "Cancelar") y las dos vistas enlazan sus listeners una sola vez; test `volver a inicializar la vista no enlaza dos veces el envío del formulario`.
 
 ### 7.5 Historial de compras del proveedor
 
 *(PV-07. Hoy siempre muestra el estado vacío y no carga datos.)*
 
-- [ ] Decidir la fuente en `plan-03` §4: `getSupplierDetail().invoiceHistory` (ya trae las entradas del proveedor) o un filtro `supplierId` en `listInvoices`. Recomendado: reutilizar `getSupplierDetail` si cubre el rango de fechas en el frontend; si no, el filtro en el backend con su test.
-- [ ] Test (Vitest): elegir un proveedor en `#historial-proveedor-select` pinta sus facturas de entrada (número, fecha, total, estado) con `textContent`; los filtros `#historial-proveedor-desde/hasta` acotan el resultado; el encabezado "Fecha" ordena; "Ver" abre el detalle de la factura.
-- [ ] Test: sin facturas, el estado vacío actual; con error, mensaje en español.
-- [ ] Implementación en `proveedoresView.js`.
+- [x] Decidir la fuente en `plan-03` §4: `getSupplierDetail().invoiceHistory` (ya trae las entradas del proveedor) o un filtro `supplierId` en `listInvoices`. Recomendado: reutilizar `getSupplierDetail` si cubre el rango de fechas en el frontend; si no, el filtro en el backend con su test.
+  - **Decisión del dueño (2026-10-28):** `getSupplierDetail` (`plan-03` §10.7). Solo se consulta con la pestaña de historial abierta.
+- [x] Test (Vitest): elegir un proveedor en `#historial-proveedor-select` pinta sus facturas de entrada (número, fecha, total, estado) con `textContent`; los filtros `#historial-proveedor-desde/hasta` acotan el resultado; el encabezado "Fecha" ordena; "Ver" abre el detalle de la factura.
+  - El encabezado de la tabla pasa a Fecha, No. Factura, Estado, Total y Acciones (las columnas anteriores no tenían datos de donde salir).
+- [x] Test: sin facturas, el estado vacío actual; con error, mensaje en español.
+- [x] Implementación en `proveedoresView.js`.
 
 ### 7.6 "Facturas Asociadas" del producto
 
 *(HP-04. `getProductAssociatedInvoices` existe y no tiene llamador; `#producto-ver-facturas` sigue oculto. PEN-09 la da por resuelta.)*
 
-- [ ] Test (Vitest): el detalle del producto muestra la sección con las facturas del backend (número, tipo, fecha, estado y cantidad); "Ver" abre la factura; sin facturas, estado vacío claro; nombres con HTML se muestran como texto.
-- [ ] Implementación: wrapper `getProductAssociatedInvoices` en `historyService.js` y pintado en `productosView.js`; quitar `get_product_associated_invoices` de `pendingWrapper` en `environment.test.js`.
+- [x] Test (Vitest): el detalle del producto muestra la sección con las facturas del backend (número, tipo, fecha, estado y cantidad); "Ver" abre la factura; sin facturas, estado vacío claro; nombres con HTML se muestran como texto.
+- [x] Implementación: wrapper `getProductAssociatedInvoices` en `historyService.js` y pintado en `productosView.js`; quitar `get_product_associated_invoices` de `pendingWrapper` en `environment.test.js`.
+  - Las dos tarjetas fijas del HTML ("Factura de Compra"/"Factura de Venta") se sustituyen por `#producto-ver-facturas-lista`. `pendingWrapper` queda vacío.
 
 ### 7.7 Filtros de los listados de facturas
 
 *(FE-02, FS-01, FP-01, FG-01. El backend ya acepta `status`, `fromDate` y `toDate`.)*
 
-- [ ] Test (Vitest): cada listado por tipo y la lista general envían los filtros de estado (excepto pérdidas) y de rango de fechas a `listInvoices`; un rango invertido muestra el mensaje del backend.
-- [ ] Implementación: controles en el HTML de cada página (con `<label>` visibles) y lectura en los loaders de `facturasView.js`.
+- [x] Test (Vitest): cada listado por tipo y la lista general envían los filtros de estado (excepto pérdidas) y de rango de fechas a `listInvoices`; un rango invertido muestra el mensaje del backend.
+- [x] Implementación: controles en el HTML de cada página (con `<label>` visibles) y lectura en los loaders de `facturasView.js`.
 
 ### 7.8 Avisos y navegación menores
 
-- [ ] Test + implementación (CL-05): el aviso al eliminar un cliente dice cuántas facturas se conservan. Hoy usa `invoiceCount`, que `ContactListItem` no trae: añadir el recuento al DTO del listado (Rust, con test) o pedir el detalle antes de confirmar.
-- [ ] Test + implementación (PV-05): ídem en proveedores.
-- [ ] Test + implementación (FE-05): la confirmación al eliminar una compra detalla las unidades que se pierden o ya se consumieron (datos del detalle).
-- [ ] Test + implementación (HP-02): en el historial, el número de factura abre su detalle con `irAFacturaDesdeGeneral` si la factura todavía existe.
-- [ ] Test (Vitest, §14): un doble clic en "Guardar Factura" produce una sola llamada a `create*Invoice` (deshabilitar el botón mientras guarda).
+- [x] Test + implementación (CL-05): el aviso al eliminar un cliente dice cuántas facturas se conservan. Hoy usa `invoiceCount`, que `ContactListItem` no trae: añadir el recuento al DTO del listado (Rust, con test) o pedir el detalle antes de confirmar.
+  - Se pide el detalle antes de confirmar y se cuenta `invoiceHistory` completo (las canceladas también conservan la copia).
+- [x] Test + implementación (PV-05): ídem en proveedores.
+- [x] Test + implementación (FE-05): la confirmación al eliminar una compra detalla las unidades que se pierden o ya se consumieron (datos del detalle).
+  - Las líneas de compra traen `remainingQuantity`/`consumedQuantity` (consumos de salidas no canceladas); test Rust en `get_invoice_inner_exposes_current_ids_and_product_status_for_editing`.
+- [x] Test + implementación (HP-02): en el historial, el número de factura abre su detalle con `irAFacturaDesdeGeneral` si la factura todavía existe.
+  - `ProductHistoryItem.invoiceId` se resuelve por número y tipo (`LEFT JOIN invoices`; los números nunca se reutilizan) y es `null` si la factura se eliminó. Test Rust ampliado en `history.rs`.
+- [x] Test (Vitest, §14): un doble clic en "Guardar Factura" produce una sola llamada a `create*Invoice` (deshabilitar el botón mientras guarda).
 
 ### 7.9 Verificación y cierre de §7
 
-- [ ] Destapar `#sidebar-facturas` y las 7 páginas de facturas (quitar `hidden`) y los botones "Ver Historial" y "Ver Facturas"; test de que son visibles.
+- [x] Destapar `#sidebar-facturas` y las 7 páginas de facturas (quitar `hidden`) y los botones "Ver Historial" y "Ver Facturas"; test de que son visibles.
+  - "Ver Facturas" es la sección "Facturas Asociadas" del detalle del producto (no hay otro control con ese nombre). Test en `productos.test.js`. Se corrigió además el texto "Servicos" del menú.
 - [ ] Completar las casillas abiertas de §5 bis (avisos tras editar) y de §6 que dependían de §7: revisión contra la spec, visibilidad de la sección de facturas y `pendientes.md` (PEN-09).
-- [ ] `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `npm test` y `npx prettier --check .` pasan; anotar los recuentos.
+  - Hecho: aviso tras editar y tras cambiar el estado (§7.3), visibilidad de la sección y PEN-09 en `pendientes.md`. **Abierto:** la revisión requisito por requisito contra `spec-03` de §6 y la verificación manual.
+- [x] `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `npm test` y `npx prettier --check .` pasan; anotar los recuentos.
+  - 2026-10-28: `cargo test` **371/371**; `npm test` **292/292** (35 archivos); clippy estricto, `cargo fmt --check` y `prettier --check` limpios.
 - [ ] Verificación manual de extremo a extremo de §6 (`tauri:dev` y `tauri:build`), como Administrador y como Contador.
+  - **Pendiente:** el entorno no permite operar la ventana de Tauri.
 - [ ] Commit siguiendo Conventional Commits.

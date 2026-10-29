@@ -149,8 +149,10 @@ describe("facturasView submódulo loss (HTML de producción)", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     const listbox = document.getElementById("factura-perdida-producto-listbox");
     await vi.waitFor(() => expect(listbox.hidden).toBe(false));
+    // La pérdida admite descontinuados con stock (FP-01, S-22).
     expect(invoke).toHaveBeenCalledWith("search_products_for_invoice", {
       query: "cab",
+      purpose: "loss",
     });
     expect(listbox.textContent).toContain("Cable · stock 4 m");
     expect(listbox.querySelector("[data-combobox-add]")).toBeNull();

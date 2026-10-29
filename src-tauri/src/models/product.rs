@@ -28,6 +28,9 @@ pub struct ProductMatch {
     pub category_name: Option<String>,
     pub unit_abbreviation: Option<String>,
     pub stock: String,
+    /// Precio de venta vigente: solo sirve para el total preliminar del
+    /// formulario; el backend recalcula el precio al guardar.
+    pub selling_price_cents: i64,
     pub is_out_of_stock: bool,
     pub is_discontinued: bool,
 }
