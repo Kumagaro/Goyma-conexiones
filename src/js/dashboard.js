@@ -125,7 +125,6 @@ function showPage(pageId, el, label) {
       document.getElementById("tab-producto-list"),
     );
   }
-  if (targetId === "notificaciones") renderNotificaciones();
   // bubbles: las vistas escuchan en window, que solo lo recibe si sube.
   document.dispatchEvent(
     new CustomEvent("page:change", {
@@ -150,23 +149,13 @@ const ACCIONES_CLICK = {
   closeMobileSidebar: () => toggleMobileSidebar(false),
   togglePassword: (el) => togglePassword(el.dataset.target, el),
   showConfigTab: (el) => showConfigTab(el.dataset.tab, el),
-  showNotifTab: (el) => showNotifTab(el.dataset.tab, el),
   cambiarPeriodoDashboard: (el) =>
     window.cambiarPeriodoDashboard?.(el.dataset.periodo),
   alternarSerieIngresos: (el) =>
     window.alternarSerieIngresos?.(Number(el.dataset.serie), el),
-  guardarTasasCambioDemo: () => guardarTasasCambioDemo(),
-  marcarTodasNotificacionesLeidas: () => marcarTodasNotificacionesLeidas(),
-  marcarNotificacionLeida: (el) =>
-    marcarNotificacionLeida(Number(el.dataset.id)),
   irAPagina: (el) => irAPagina(el.dataset.tabla, Number(el.dataset.pagina)),
   ordenarHistorialTasas: () =>
     toggleOrdenFecha("historialTasas", renderHistorialTasas),
-  limpiarFechaNotificacion: () => {
-    const fecha = document.getElementById("notificacion-fecha");
-    if (fecha) fecha.value = "";
-    renderNotificaciones();
-  },
   // shortcut: botones de demostración del mockup; la fase 3 (CF) los sustituye.
   avisoDemo: (el) =>
     import("./utils/feedback.js").then(({ notifyInfo }) =>
@@ -174,7 +163,6 @@ const ACCIONES_CLICK = {
     ),
 };
 const ACCIONES_CAMPO = {
-  renderNotificaciones: () => renderNotificaciones(),
   cambiarTamPagina: (el) => cambiarTamPagina(el.value),
   activarMoneda: (el) => {
     const moneda = monedasData[Number(el.dataset.indice)];
@@ -679,144 +667,10 @@ function actualizarEquivalencia(input) {
 }
 
 // =====================================================
-// ===================== Notificaciones =================
-// =====================================================
-let notificacionesData = [];
-let nextNotificacionId = 1;
-let notifTabActual = "todas";
-
-const notifIconos = {
-  factura: "icon-receipt",
-  pago: "icon-alert",
-  tasa: "icon-coins",
-  usuario: "icon-user-circle",
-};
-
-function crearNotificacion(tipo, titulo, descripcion, fechaISO) {
-  const ahora = new Date();
-  notificacionesData.unshift({
-    id: nextNotificacionId++,
-    tipo,
-    titulo,
-    descripcion,
-    fechaISO: fechaISO || ahora.toISOString().slice(0, 10),
-    hora: ahora.toLocaleTimeString("es-ES", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    leida: false,
-  });
-  renderNotificaciones();
-  actualizarBadgesNotificaciones();
-}
-
-function guardarTasasCambioDemo() {
-  crearNotificacion(
-    "tasa",
-    "Tasa de Cambio Actualizada",
-    "Se guardaron nuevas tasas de cambio para las monedas activas del sistema.",
-  );
-  alert("Tasas de cambio guardadas (demo).");
-}
-
-function showNotifTab(tab, btn) {
-  notifTabActual = tab;
-  document
-    .querySelectorAll("#page-notificaciones .view-tabs .tab")
-    .forEach((t) => t.classList.remove("active"));
-  btn.classList.add("active");
-  renderNotificaciones();
-}
-
-function marcarNotificacionLeida(id) {
-  const n = notificacionesData.find((x) => x.id === id);
-  if (n && !n.leida) {
-    n.leida = true;
-    renderNotificaciones();
-    actualizarBadgesNotificaciones();
-  }
-}
-
-function marcarTodasNotificacionesLeidas() {
-  notificacionesData.forEach((n) => (n.leida = true));
-  renderNotificaciones();
-  actualizarBadgesNotificaciones();
-}
-
-function actualizarBadgesNotificaciones() {
-  const noLeidas = notificacionesData.filter((n) => !n.leida).length;
-  const sidebarBadge = document.getElementById("sidebar-notif-badge");
-  const topbarBadge = document.getElementById("topbar-notif-badge");
-  const tabBadge = document.getElementById("notif-unread-count");
-  [sidebarBadge, topbarBadge, tabBadge].forEach((el) => {
-    if (!el) return;
-    if (noLeidas > 0) {
-      el.textContent = noLeidas > 99 ? "99+" : noLeidas;
-      el.style.display = "";
-    } else {
-      el.style.display = "none";
-    }
-  });
-}
-
-function formatearFechaHoraNotif(fechaISO) {
-  const hoy = new Date().toISOString().slice(0, 10);
-  const ayer = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  if (fechaISO === hoy) return "Hoy";
-  if (fechaISO === ayer) return "Ayer";
-  return formatearFecha(fechaISO);
-}
-
-function renderNotificaciones() {
-  const cont = document.getElementById("notificaciones-list");
-  if (!cont) return;
-  const query = (
-    document.getElementById("notificacion-search")?.value || ""
-  ).toLowerCase();
-  const fechaFiltro =
-    document.getElementById("notificacion-fecha")?.value || "";
-
-  const rows = notificacionesData.filter((n) => {
-    const coincideTab = notifTabActual === "todas" || !n.leida;
-    const coincideBusqueda =
-      n.titulo.toLowerCase().includes(query) ||
-      n.descripcion.toLowerCase().includes(query);
-    const coincideFecha = !fechaFiltro || n.fechaISO === fechaFiltro;
-    return coincideTab && coincideBusqueda && coincideFecha;
-  });
-
-  if (rows.length === 0) {
-    cont.innerHTML =
-      '<div class="empty-row">No hay notificaciones que coincidan con los filtros.</div>';
-    return;
-  }
-
-  cont.innerHTML = rows
-    .map(
-      (n) => `
-                <div class="notif-row notif-tipo-${n.tipo} ${n.leida ? "" : "no-leida"}" data-action="marcarNotificacionLeida" data-id="${n.id}">
-                    <div class="notif-icon">
-                        <svg class="icon" style="width:26px;height:26px"><use href="#${notifIconos[n.tipo] || "icon-bell"}"></use></svg>
-                    </div>
-                    <div class="notif-body">
-                        <div class="notif-title">${n.titulo} ${n.leida ? "" : '<span class="notif-dot"></span>'}</div>
-                        <div class="notif-desc">${n.descripcion}</div>
-                    </div>
-                    <div class="notif-time">${formatearFechaHoraNotif(n.fechaISO)} Â· ${n.hora}</div>
-                </div>
-            `,
-    )
-    .join("");
-}
-
-// =====================================================
 // ========================= Perfil =====================
 // =====================================================
 // Estado inicial
 inicializarIconosOrdenFecha();
-
-actualizarBadgesNotificaciones();
-renderNotificaciones();
 
 /* =========================================================================
            PAGINACIÓN GENÉRICA DE TABLAS Y LISTADOS

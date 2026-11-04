@@ -143,8 +143,6 @@ describe("Vitest con jsdom", () => {
         "grid.innerHTML = monedasData",
         "body.innerHTML = filas",
         "wrap.innerHTML = rateCardsData",
-        // Fase 2 (NT-01): pestaña de notificaciones.
-        "cont.innerHTML = rows",
         // Fase 4 (DB-01): KPIs, listas y gastos del dashboard.
         "valor.innerHTML = valorHtml(def, k);",
         "$('[data-role=\"delta\"]', fila).innerHTML = variacion(",
@@ -258,7 +256,11 @@ describe("Vitest con jsdom", () => {
       (script) => script.getAttribute("src") === "./js/dashboard.js",
     );
 
-    expect(moduleSources.slice(-4)).toEqual(featureModules);
+    // spec-04: la pestaña de notificaciones va tras los módulos de spec-03.
+    expect(moduleSources.slice(-5)).toEqual([
+      ...featureModules,
+      "./js/views/notificacionesView.js",
+    ]);
     expect(dashboardIndex).toBeGreaterThan(
       Array.from(parsed.scripts).findIndex(
         (script) =>

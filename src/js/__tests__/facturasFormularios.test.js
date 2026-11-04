@@ -1096,3 +1096,167 @@ describe("huecos de la revisión contra spec-03", () => {
     );
   });
 });
+
+describe.each(TYPES.filter((t) => t.type === "V" || t.type === "S"))(
+  "reservas en $name (spec-04 RS-01, RS-03)",
+  (t) => {
+    const reserveField = () =>
+      document.getElementById(`${t.field}-reserva-field`);
+
+    it("'Reservar hasta' solo se ve Por Cobrar y se envía al crear", async () => {
+      invoices[t.create].mockResolvedValue({
+        invoiceId: 40,
+        number: `${t.type}-00040`,
+        expiredCleanupWarning: null,
+      });
+      expect(reserveField().hidden).toBe(false);
+      setValue(`${t.field}-estado`, "completed", "change");
+      expect(reserveField().hidden).toBe(true);
+      setValue(`${t.field}-estado`, "pending", "change");
+      expect(reserveField().hidden).toBe(false);
+
+      await chooseContact(t);
+      await chooseFromCombobox(t.productInput, "cable", "Cable UTP");
+      setValue(`${t.field}-fecha-emision`, "2026-02-10");
+      setValue(`${t.field}-reservar-hasta`, "2026-02-15");
+      submitForm(`${t.view}-form`);
+      await vi.waitFor(() => expect(invoices[t.create]).toHaveBeenCalled());
+      expect(invoices[t.create].mock.calls[0][0]).toMatchObject({
+        status: "pending",
+        reservedUntil: "2026-02-15",
+      });
+    });
+
+    it("una factura Cobrada no envía la reserva aunque el campo tenga fecha", async () => {
+      invoices[t.create].mockResolvedValue({
+        invoiceId: 41,
+        number: `${t.type}-00041`,
+        expiredCleanupWarning: null,
+      });
+      await chooseContact(t);
+      await chooseFromCombobox(t.productInput, "cable", "Cable UTP");
+      setValue(`${t.field}-fecha-emision`, "2026-02-10");
+      setValue(`${t.field}-reservar-hasta`, "2026-02-15");
+      setValue(`${t.field}-estado`, "completed", "change");
+      submitForm(`${t.view}-form`);
+      await vi.waitFor(() => expect(invoices[t.create]).toHaveBeenCalled());
+      expect(invoices[t.create].mock.calls[0][0]).not.toHaveProperty(
+        "reservedUntil",
+      );
+    });
+
+    it("el filtro 'Reservas activas' pide status=reserved y la fecha límite sale en el listado y el detalle", async () => {
+      expect(
+        document.querySelector(
+          `#${t.view}-filtro-estado option[value="reserved"]`,
+        ).textContent,
+      ).toBe("Reservas activas");
+      invoices.listInvoices.mockResolvedValue([
+        {
+          id: 12,
+          number: `${t.type}-00012`,
+          invoiceType: t.type,
+          contactName: "Ana Pérez",
+          date: "2026-02-10",
+          totalCents: 500,
+          status: "pending",
+          productCount: 1,
+          reservedUntil: "2026-02-15",
+        },
+      ]);
+      setValue(`${t.view}-filtro-estado`, "reserved", "change");
+      await vi.waitFor(() =>
+        expect(invoices.listInvoices).toHaveBeenLastCalledWith(
+          expect.objectContaining({ invoiceType: t.type, status: "reserved" }),
+        ),
+      );
+      const body =
+        t.type === "V" ? "facturas-venta-body" : "facturas-servicios-body";
+      await vi.waitFor(() =>
+        expect(document.getElementById(body).textContent).toContain(
+          "15/02/2026",
+        ),
+      );
+
+      invoices.getInvoice.mockResolvedValue({
+        ...PENDING_SALE,
+        invoiceType: t.type,
+        reservedUntil: "2026-02-15",
+      });
+      await openDetail(t, 12);
+      expect(
+        document.getElementById(`${t.field}-ver-reserva-card`).hidden,
+      ).toBe(false);
+      expect(
+        document.getElementById(`${t.field}-ver-reserva`).textContent,
+      ).toBe("15/02/2026");
+      invoices.getInvoice.mockResolvedValue({
+        ...PENDING_SALE,
+        invoiceType: t.type,
+      });
+      await openDetail(t, 12);
+      expect(
+        document.getElementById(`${t.field}-ver-reserva-card`).hidden,
+      ).toBe(true);
+    });
+  },
+);
+
+describe("reserva al editar (spec-04 RS-01)", () => {
+  it("carga la fecha, envía la nueva y quitarla la omite (venta normal)", async () => {
+    invoices.getInvoice.mockResolvedValue({
+      ...PENDING_SALE,
+      reservedUntil: "2026-02-15",
+    });
+    invoices.updateSaleInvoice.mockResolvedValue({
+      invoiceId: 1,
+      number: "V-00001",
+      expiredCleanupWarning: null,
+    });
+    await view.__testHooks.openSaleDetail(1);
+    document.getElementById("factura-venta-editar").click();
+    expect(document.getElementById("factura-venta-reserva-field").hidden).toBe(
+      false,
+    );
+    expect(document.getElementById("factura-venta-reservar-hasta").value).toBe(
+      "2026-02-15",
+    );
+
+    setValue("factura-venta-reservar-hasta", "2026-02-20");
+    submitForm("factura-venta-form");
+    await vi.waitFor(() =>
+      expect(invoices.updateSaleInvoice).toHaveBeenCalledTimes(1),
+    );
+    expect(invoices.updateSaleInvoice.mock.calls[0][0].reservedUntil).toBe(
+      "2026-02-20",
+    );
+    // Tras guardar, la vista recarga el detalle: se espera a que termine.
+    await vi.waitFor(() =>
+      expect(invoices.getInvoice).toHaveBeenCalledTimes(2),
+    );
+    await vi.waitFor(() =>
+      expect(
+        document
+          .getElementById("factura-venta-ver")
+          .classList.contains("active"),
+      ).toBe(true),
+    );
+
+    document.getElementById("factura-venta-editar").click();
+    setValue("factura-venta-reservar-hasta", "");
+    submitForm("factura-venta-form");
+    await vi.waitFor(() =>
+      expect(invoices.updateSaleInvoice).toHaveBeenCalledTimes(2),
+    );
+    expect(invoices.updateSaleInvoice.mock.calls[1][0]).not.toHaveProperty(
+      "reservedUntil",
+    );
+  });
+
+  it("garantía e insumos no tienen el campo", () => {
+    expect(
+      document.getElementById("factura-garantia-reserva-field"),
+    ).toBeNull();
+    expect(document.getElementById("factura-insumo-reserva-field")).toBeNull();
+  });
+});

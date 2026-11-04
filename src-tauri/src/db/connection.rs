@@ -56,6 +56,8 @@ pub fn initialize_database(app_data_dir: &Path, now: DateTime<Utc>) -> Result<Co
         append_error_log(app_data_dir, &error.to_string());
         "No se pudo abrir la base de datos".to_owned()
     })?;
+    // spec-04 §7.1: purga, avisos de situación y notificaciones antiguas.
+    crate::automation::run_startup_processes(&mut conn, now);
     Ok(conn)
 }
 

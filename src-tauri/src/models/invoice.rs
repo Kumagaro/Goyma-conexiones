@@ -25,6 +25,8 @@ pub struct InvoiceListItem {
     pub product_count: i64,
     /// Usuario que registró la factura (responsable, PV-07).
     pub created_by_name: String,
+    /// RS-03: fecha límite si es (o fue) una reserva.
+    pub reserved_until: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -65,6 +67,8 @@ pub struct InvoiceDetail {
     pub created_by_name: String,
     pub created_at: String,
     pub updated_at: String,
+    /// RS-03: "Reservada hasta"; se conserva tras cobrar o cancelar.
+    pub reserved_until: Option<String>,
     pub lines: Vec<crate::models::invoice_line::InvoiceLineDetail>,
 }
 
@@ -158,6 +162,9 @@ pub struct CreateSaleInvoiceInput {
     #[serde(default)]
     pub payment_method: Option<String>,
     pub lines: Vec<SaleInvoiceLineInput>,
+    /// RS-01: fecha límite de la reserva (`AAAA-MM-DD`); sin ella, venta normal.
+    #[serde(default)]
+    pub reserved_until: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -179,6 +186,9 @@ pub struct CreateServiceInvoiceInput {
     #[serde(default)]
     pub payment_method: Option<String>,
     pub lines: Vec<ServiceInvoiceLineInput>,
+    /// RS-01: fecha límite de la reserva (`AAAA-MM-DD`); sin ella, venta normal.
+    #[serde(default)]
+    pub reserved_until: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -250,6 +260,9 @@ pub struct UpdateSaleInvoiceInput {
     #[serde(default)]
     pub notes: Option<String>,
     pub lines: Vec<UpdateOutgoingInvoiceLineInput>,
+    /// RS-01: fecha límite de la reserva (`AAAA-MM-DD`); sin ella, venta normal.
+    #[serde(default)]
+    pub reserved_until: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -261,6 +274,9 @@ pub struct UpdateServiceInvoiceInput {
     #[serde(default)]
     pub notes: Option<String>,
     pub lines: Vec<UpdateOutgoingInvoiceLineInput>,
+    /// RS-01: fecha límite de la reserva (`AAAA-MM-DD`); sin ella, venta normal.
+    #[serde(default)]
+    pub reserved_until: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -342,6 +358,7 @@ mod tests {
             quantity: None,
             product_count: 1,
             created_by_name: "admin".to_owned(),
+            reserved_until: None,
         };
         let value: Value = serde_json::to_value(item).unwrap();
         assert_eq!(value["invoiceType"], "V");

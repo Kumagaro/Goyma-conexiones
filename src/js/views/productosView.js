@@ -505,6 +505,26 @@ async function openProductDetail(productId) {
   }
 }
 
+// RS-03: cantidad en reservas activas y un enlace a cada factura.
+function renderReservations(detail) {
+  const invoices = detail.reservedInvoices ?? [];
+  const card = document.getElementById("producto-ver-reservado-card");
+  if (card) card.hidden = invoices.length === 0;
+  setText("producto-ver-reservado", detail.reservedQuantity ?? "0");
+  document.getElementById("producto-ver-reservas")?.replaceChildren(
+    ...invoices.map((invoice) => {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "action-link";
+      link.textContent = `${invoice.number} · ${invoice.quantity} · hasta ${formatCalendarDate(invoice.reservedUntil)}`;
+      link.addEventListener("click", () =>
+        window.irAFacturaDesdeGeneral?.(invoice.invoiceType, invoice.id),
+      );
+      return link;
+    }),
+  );
+}
+
 function renderProductDetail(detail) {
   const discontinued = Boolean(detail.isDiscontinued);
   setText("producto-ver-id", formatId(detail.id));
@@ -525,6 +545,7 @@ function renderProductDetail(detail) {
   setText("producto-ver-valor-total", formatMoney(detail.valorTotalCents));
   setText("producto-ver-ganancia", detail.profitPercent ?? "—");
   setText("producto-ver-stock", detail.quantity ?? "—");
+  renderReservations(detail);
   setText(
     "producto-ver-caducidad",
     detail.expiresOn ? formatCalendarDate(detail.expiresOn) : "No Aplica",

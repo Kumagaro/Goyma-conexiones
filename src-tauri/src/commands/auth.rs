@@ -58,6 +58,30 @@ impl Actor {
     }
 }
 
+/// Quién firma un movimiento (`plan-04` §3.2, D-02): un usuario con sesión o
+/// el sistema (vencimiento de reservas, purga). `System` no autoriza nada:
+/// no da acceso a `users` ni `sessions`, solo firma con "Sistema".
+pub enum Author<'a> {
+    User(&'a Actor),
+    System,
+}
+
+impl Author<'_> {
+    pub fn id(&self) -> Option<i64> {
+        match self {
+            Self::User(actor) => Some(actor.id()),
+            Self::System => None,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::User(actor) => actor.username(),
+            Self::System => "Sistema",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminActor {
     id: i64,

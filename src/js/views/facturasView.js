@@ -260,6 +260,8 @@ function createInvoiceSubmodule(cfg) {
   const isEntry = cfg.invoiceType === "E";
   const hasPayment = ["E", "V", "S"].includes(cfg.invoiceType);
   const showsSalePrice = cfg.invoiceType === "V" || cfg.invoiceType === "S";
+  // RS-01: solo ventas y servicios se reservan.
+  const reservable = showsSalePrice;
   const associated = cfg.associated ?? null;
   const contactNoun = cfg.contact === "client" ? "cliente" : "proveedor";
 
@@ -376,6 +378,10 @@ function createInvoiceSubmodule(cfg) {
     method.style.display = display;
     const wrapper = method.closest(".field");
     if (wrapper) wrapper.style.display = display;
+    const reserve = field("reserva-field");
+    if (reserve) {
+      reserve.hidden = !(reservable && (editing || status.value === "pending"));
+    }
   }
 
   // ---------- Buscadores ----------
@@ -873,6 +879,8 @@ function createInvoiceSubmodule(cfg) {
     if (date) date.value = detail.date ?? "";
     const notes = field(cfg.notesField);
     if (notes) notes.value = detail.notes ?? "";
+    const reservedUntil = field("reservar-hasta");
+    if (reservedUntil) reservedUntil.value = detail.reservedUntil ?? "";
     lines = (detail.lines ?? []).map((line) => ({
       productIdOriginal: line.productIdOriginal,
       productId: line.productStatus ? line.productIdOriginal : null,
@@ -937,6 +945,15 @@ function createInvoiceSubmodule(cfg) {
       }
     }
     if (notes) input.notes = notes;
+    // Sin fecha (o al quitarla) es una venta normal (RS-01).
+    const reservedUntil = field("reservar-hasta")?.value;
+    if (
+      reservable &&
+      reservedUntil &&
+      (editing || input.status === "pending")
+    ) {
+      input.reservedUntil = reservedUntil;
+    }
     input.lines = lines.map((line) => {
       const item = {};
       if (editing && line.productIdOriginal != null) {
@@ -1083,6 +1100,9 @@ function createInvoiceSubmodule(cfg) {
         formatMoney(item?.totalCents ?? 0),
         cfg.statusLabels[item?.status] ?? item?.status ?? "—",
       );
+      if (reservable) {
+        texts.push(item?.reservedUntil ? formatDate(item.reservedUntil) : "—");
+      }
       if (cfg.showsProductCount) texts.push(String(item?.productCount ?? "—"));
       const cells = texts.map((text) => {
         const cell = document.createElement("td");
@@ -1171,6 +1191,14 @@ function createInvoiceSubmodule(cfg) {
     set(cfg.contactField, detail?.contactFullName ?? "—");
     set("numero", detail?.number ?? "");
     set("emision", detail?.date ? formatDate(detail.date) : "—");
+    if (reservable) {
+      set(
+        "reserva",
+        detail?.reservedUntil ? formatDate(detail.reservedUntil) : "—",
+      );
+      const card = document.getElementById(`${cfg.field}-ver-reserva-card`);
+      if (card) card.hidden = !detail?.reservedUntil;
+    }
     set("descripcion", detail?.notes ?? "—");
     if (isEntry) {
       set("observaciones", detail?.notes ?? "—");

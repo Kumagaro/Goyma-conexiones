@@ -65,40 +65,44 @@
 
 ### 2.1 Esquema (migraciones 2 y 3)
 
-- [ ] Test (Rust): `notifications` acepta `entityType`/`entityId` juntos o ninguno y `audience` `all`/`admin`; `notificationWatches` rechaza duplicados; `invoices.reservedUntil` solo en V/S y posterior a la emisión.
-- [ ] Implementación: migraciones 2 y 3.
+- [x] Test (Rust): `notifications` acepta `entityType`/`entityId` juntos o ninguno y `audience` `all`/`admin`; `notificationWatches` rechaza duplicados; `invoices.reservedUntil` solo en V/S y posterior a la emisión.
+- [x] Implementación: migraciones 2 y 3. La 2 reconstruye `notifications` (SQLite no añade `CHECK` a columnas existentes) conservando ids y datos; la 3 es un `ADD COLUMN` con su `CHECK`.
 
 ### 2.2 Generación y "una vez por situación" (NT-02, NT-03)
 
-- [ ] Test (Rust): `watch_enter`/`watch_leave`: entrar avisa una vez; seguir no repite; salir y volver avisa de nuevo; stock bajo → agotado genera N-02.
-- [ ] Test (Rust), una casilla por aviso con su mensaje exacto y prioridad:
-  - [ ] N-02 al quedar en 0 y al intentar vender un agotado (se inserta aunque la venta se rechace).
-  - [ ] N-03 con el umbral por defecto y con uno cambiado.
-  - [ ] N-04 (hoy a hoy + 29) y N-07 (< 10 días).
-  - [ ] N-05 (< 3 días) y N-06 (vencida).
-  - [ ] N-10 (compra Por Pagar y venta Por Cobrar con más de los días configurados).
-  - [ ] N-11 (sin copia en los días configurados).
-  - [ ] N-12 (purga) y N-13 (usuarios, `audience='admin'`).
-- [ ] Implementación: `db/notifications.rs` (`notify`, `watch_*`), `automation.rs` (`run_startup_processes`, `before_operation`, `after_inventory_change`) y las llamadas desde productos, facturas y usuarios.
+- [x] Test (Rust): `watch_enter`/`watch_leave`: entrar avisa una vez; seguir no repite; salir y volver avisa de nuevo; stock bajo → agotado genera N-02.
+- [x] Test (Rust), una casilla por aviso con su mensaje exacto y prioridad:
+  - [x] N-02 al quedar en 0 y al intentar vender un agotado (se inserta aunque la venta se rechace). Vender un producto en 0 se rechaza con `validationFailed` ("agotado"), no con `stockInsuficiente`: la evaluación aparte se hace tras cualquier salida rechazada (`after_rejected_outgoing`), y NT-03 evita repeticiones.
+  - [x] N-03 con el umbral por defecto y con uno cambiado.
+  - [x] N-04 (hoy a hoy + 29) y N-07 (< 10 días).
+  - [x] N-05 (< 3 días) y N-06 (vencida). N-06 se prueba con `expire_reservations` (§2.4).
+  - [x] N-10 (compra Por Pagar y venta Por Cobrar con más de los días configurados).
+  - [x] N-11 (sin copia en los días configurados). `evaluate_backup_watch` está hecho y probado; **se conecta en la fase 5**, cuando existan las copias y `lastBackupAt`: llamarlo antes avisaría de copias que todavía no se pueden hacer.
+  - [x] N-12 (purga) y N-13 (usuarios, `audience='admin'`). N-13 en crear, editar (por el Administrador) y eliminar; el alta pasa a una transacción para que usuario y aviso sean atómicos.
+- [x] Implementación: `db/notifications.rs` (`notify`, `watch_*`), `automation.rs` (`run_startup_processes`, `before_operation`, `after_inventory_change`) y las llamadas desde productos, facturas y usuarios.
+  - Avance: `notify`, `watch_enter`/`watch_leave`, `automation.rs` (`evaluate_watches` por conjuntos en SQL, `evaluate_watches_best_effort` con `SAVEPOINT`, `after_rejected_outgoing`, `run_startup_processes` con purga de notificaciones de más de 90 días). La evaluación va antes del commit de éxito de 9 operaciones de facturas y 4 de productos (no al recalcular la caché, para no avisar de un 0 transitorio). Umbrales por defecto (5 unidades, 30 días) hasta la fase 3 (`thresholds()`, marcado `shortcut:`). `before_operation`: `purge_best_effort` llama además a `expire_reservations_best_effort`, así que las reservas vencen al arrancar y antes de cada operación sin tocar cada comando.
 
 ### 2.3 Comandos y pestaña (NT-01, NT-04, TO-02)
 
-- [ ] Test (Rust): los 7 comandos de `notifications.rs` (listar con filtros, contar, desde un id, marcar una y todas, eliminar una y las filtradas); el Contador no ve ni cuenta las de `audience='admin'`; purga a los 90 días. Filas de la matriz de autorización.
+- [x] Test (Rust): los 7 comandos de `notifications.rs` (listar con filtros, contar, desde un id, marcar una y todas, eliminar una y las filtradas); el Contador no ve ni cuenta las de `audience='admin'`; purga a los 90 días. Filas de la matriz de autorización.
 - [ ] Test (Vitest, HTML de producción): la pestaña lista datos reales con prioridad y fecha; "Todas"/"No leídas", buscador y fecha filtran; clic marca leída y abre el producto o la factura (o avisa si ya no existe); "Marcar todas", eliminar una y todas sin confirmación; contador de cabecera y pestaña se actualizan.
 - [ ] Test (Vitest): tras un comando de escritura, `notificationFeed` pide las nuevas y muestra un toast por cada una con su prioridad; al iniciar sesión, un único toast resumen.
-- [ ] Implementación: `notificationsService.js`, `notificationFeed.js`, evento `command:success` en `invoke.js` (con su test sin romper el existente), `notificacionesView.js`; retirar `notificacionesData` y `renderNotificaciones` de `dashboard.js`.
+- [x] Implementación: `notificationsService.js`, `notificationFeed.js`, evento `command:success` en `invoke.js` (con su test sin romper el existente), `notificacionesView.js`; retirar `notificacionesData` y `renderNotificaciones` de `dashboard.js`.
+  - Hecho: `commands/notifications.rs` (7 comandos, búsqueda sin acentos y fecha local en Rust, "Eliminar todas" = las visibles con los filtros) y su fila en la matriz; purga de 90 días en `run_startup_processes`. En la pestaña: prioridad como etiqueta y color del icono (clases nuevas en `toast.css`), botón eliminar por fila y "Eliminar todas" sin confirmación, filas accesibles con teclado. El botón "Guardar tasas" del mockup, que creaba una notificación simulada, pasa a `avisoDemo` hasta la fase 3.
 
 ### 2.4 Reservas (RS-01 a RS-03)
 
-- [ ] Test (Rust): crear y editar venta/servicio con `reservedUntil` válido; rechazos (antes o igual a la emisión, más de 365 días, garantía/insumos/entrada/pérdida, estado no pendiente); cobrar o cancelar la desactiva; quitar la fecha la convierte en venta normal.
-- [ ] Test (Rust): `expire_reservations` cancela solo las vencidas, devuelve los consumos a sus lotes, registra la Reversión con "Sistema", genera N-06 y la entrada `expire`, y respeta el invariante de cachés; se ejecuta al arrancar y en `before_operation`.
-- [ ] Test (Rust): `listInvoices` con `status='reserved'`; `getInvoice` y `InvoiceListItem` con `reservedUntil`; `getProduct` con `reservedQuantity`.
-- [ ] Test (Vitest): campo "Reservar hasta" en venta y servicio (oculto si el estado no es Por Cobrar), se envía al crear y editar; filtro "Reservas activas" y columna de fecha límite; detalle con "Reservada hasta"; detalle del producto con la cantidad reservada y enlaces.
-- [ ] Implementación en `commands/invoices.rs`, `commands/products.rs`, `facturasView.js`, `productosView.js` y el HTML.
+- [x] Test (Rust): crear y editar venta/servicio con `reservedUntil` válido; rechazos (antes o igual a la emisión, más de 365 días, garantía/insumos/entrada/pérdida, estado no pendiente); cobrar o cancelar la desactiva; quitar la fecha la convierte en venta normal.
+- [x] Test (Rust): `expire_reservations` cancela solo las vencidas, devuelve los consumos a sus lotes, registra la Reversión con "Sistema", genera N-06 y la entrada `expire`, y respeta el invariante de cachés; se ejecuta al arrancar y en `before_operation`.
+- [x] Test (Rust): `listInvoices` con `status='reserved'`; `getInvoice` y `InvoiceListItem` con `reservedUntil`; `getProduct` con `reservedQuantity`.
+- [x] Test (Vitest): campo "Reservar hasta" en venta y servicio (oculto si el estado no es Por Cobrar), se envía al crear y editar; filtro "Reservas activas" y columna de fecha límite; detalle con "Reservada hasta"; detalle del producto con la cantidad reservada y enlaces.
+- [x] Implementación en `commands/invoices.rs`, `commands/products.rs`, `facturasView.js`, `productosView.js` y el HTML.
+  - Hecho: `validate_reserved_until` (fecha válida, > emisión, ≤ emisión + 365, solo Por Cobrar); al editar, la fecha solo cambia si la factura sigue Por Cobrar (se conserva como dato histórico). `Author::{User, System}` en `auth.rs` (D-02) para la Reversión firmada por "Sistema" sin fabricar un `Actor`. `InvoiceListItem`/`InvoiceDetail` con `reservedUntil`; `ProductDetail` con `reservedQuantity` y `reservedInvoices` (enlaces). En la interfaz: campo "Reservar hasta" (oculto si no está Por Cobrar), filtro "Reservas activas", columna "Reservada hasta", tarjeta en el detalle de la factura y tarjeta "Reservado" en el detalle del producto.
+  - **Pendiente para la fase 5:** la entrada `expire` del registro de actividad (RS-02) llega con la migración 7 (`activityLog`).
 
 ### 2.5 Cierre de la fase 2
 
-- [ ] Suites, lint, formato, `pendientes.md` (PEN-01, PEN-02, PEN-14, PEN-18) y commit.
+- [x] Suites, lint, formato, `pendientes.md` (PEN-01, PEN-02, PEN-14, PEN-18) y commit. `cargo test` 399/399, `npm test` 347/347 (39 archivos), `clippy --all-targets -D warnings`, `cargo fmt --check` y `prettier --check .` limpios. En `pendientes.md` además: PEN-08 resuelto (N-02 al intentar vender) y PEN-12 parcialmente resuelto (fase 1).
 
 ## 3. Fase 3 — Configuración, impresión y conversiones
 

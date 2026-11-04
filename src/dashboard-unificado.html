@@ -2124,6 +2124,22 @@
                 </div>
                 <div class="kpi-sec-value" id="producto-ver-stock"></div>
               </div>
+              <div
+                class="kpi-secondary"
+                id="producto-ver-reservado-card"
+                hidden
+              >
+                <div class="kpi-sec-top">
+                  <div class="kpi-sec-label">
+                    <span class="kpi-icon"
+                      ><svg class="icon"><use href="#icon-calendar"></use></svg
+                    ></span>
+                    <span class="txt">Reservado</span>
+                  </div>
+                </div>
+                <div class="kpi-sec-value" id="producto-ver-reservado"></div>
+                <div class="col-acciones" id="producto-ver-reservas"></div>
+              </div>
               <div class="kpi-secondary">
                 <div class="kpi-sec-top">
                   <div class="kpi-sec-label">
@@ -3852,6 +3868,7 @@
                   <option value="pending">Por Cobrar</option>
                   <option value="completed">Cobrada</option>
                   <option value="cancelled">Cancelada</option>
+                  <option value="reserved">Reservas activas</option>
                 </select>
               </div>
               <div class="field">
@@ -3873,6 +3890,7 @@
                   </th>
                   <th style="text-align: right">Total</th>
                   <th>Estado</th>
+                  <th>Reservada hasta</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -3950,6 +3968,12 @@
                     <option value="card">Tarjeta</option>
                     <option value="zelle">Zelle</option>
                   </select>
+                </div>
+                <div class="field" id="factura-venta-reserva-field">
+                  <label for="factura-venta-reservar-hasta"
+                    >Reservar hasta</label
+                  >
+                  <input type="date" id="factura-venta-reservar-hasta" />
                 </div>
               </div>
 
@@ -4133,6 +4157,24 @@
                   id="factura-venta-ver-emision"
                 ></div>
               </div>
+              <div
+                class="kpi-secondary"
+                id="factura-venta-ver-reserva-card"
+                hidden
+              >
+                <div class="kpi-sec-top">
+                  <div class="kpi-sec-label">
+                    <span class="kpi-icon"
+                      ><svg class="icon"><use href="#icon-calendar"></use></svg
+                    ></span>
+                    <span class="txt">Reservada hasta</span>
+                  </div>
+                </div>
+                <div
+                  class="kpi-sec-value pv-text"
+                  id="factura-venta-ver-reserva"
+                ></div>
+              </div>
               <div class="kpi-secondary">
                 <div class="kpi-sec-top">
                   <div class="kpi-sec-label">
@@ -4268,6 +4310,7 @@
                   <option value="pending">Por Cobrar</option>
                   <option value="completed">Cobrada</option>
                   <option value="cancelled">Cancelada</option>
+                  <option value="reserved">Reservas activas</option>
                 </select>
               </div>
               <div class="field">
@@ -4289,6 +4332,7 @@
                   </th>
                   <th style="text-align: right">Total</th>
                   <th>Estado</th>
+                  <th>Reservada hasta</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -4368,6 +4412,12 @@
                     <option value="card">Tarjeta</option>
                     <option value="zelle">Zelle</option>
                   </select>
+                </div>
+                <div class="field" id="factura-servicio-reserva-field">
+                  <label for="factura-servicio-reservar-hasta"
+                    >Reservar hasta</label
+                  >
+                  <input type="date" id="factura-servicio-reservar-hasta" />
                 </div>
               </div>
 
@@ -4555,6 +4605,24 @@
                 <div
                   class="kpi-sec-value pv-text"
                   id="factura-servicio-ver-emision"
+                ></div>
+              </div>
+              <div
+                class="kpi-secondary"
+                id="factura-servicio-ver-reserva-card"
+                hidden
+              >
+                <div class="kpi-sec-top">
+                  <div class="kpi-sec-label">
+                    <span class="kpi-icon"
+                      ><svg class="icon"><use href="#icon-calendar"></use></svg
+                    ></span>
+                    <span class="txt">Reservada hasta</span>
+                  </div>
+                </div>
+                <div
+                  class="kpi-sec-value pv-text"
+                  id="factura-servicio-ver-reserva"
                 ></div>
               </div>
               <div class="kpi-secondary">
@@ -6337,7 +6405,8 @@
               <button
                 type="button"
                 class="btn-primary"
-                data-action="guardarTasasCambioDemo"
+                data-action="avisoDemo"
+                data-mensaje="Tasas de cambio guardadas (demo)."
               >
                 Guardar Tasas de Cambio
               </button>
@@ -6349,20 +6418,10 @@
         <div id="page-notificaciones" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
-              <button
-                class="tab active"
-                id="tab-notif-todas"
-                data-action="showNotifTab"
-                data-tab="todas"
-              >
+              <button type="button" class="tab active" id="tab-notif-todas">
                 Todas
               </button>
-              <button
-                class="tab"
-                id="tab-notif-no-leidas"
-                data-action="showNotifTab"
-                data-tab="no-leidas"
-              >
+              <button type="button" class="tab" id="tab-notif-no-leidas">
                 No Leídas
                 <span
                   class="tab-badge"
@@ -6377,7 +6436,6 @@
                 type="text"
                 id="notificacion-search"
                 placeholder="Buscar notificación..."
-                data-input-action="renderNotificaciones"
               />
               <button type="button" aria-label="Buscar">
                 <svg class="icon" style="color: #fff">
@@ -6392,13 +6450,13 @@
               <input
                 type="date"
                 id="notificacion-fecha"
-                data-change-action="renderNotificaciones"
+                aria-label="Fecha de la notificación"
               />
             </label>
             <button
               type="button"
               class="btn-secondary"
-              data-action="limpiarFechaNotificacion"
+              id="notif-limpiar-fecha"
             >
               Limpiar fecha
             </button>
@@ -6406,12 +6464,22 @@
               type="button"
               class="btn-secondary"
               style="margin-left: auto"
-              data-action="marcarTodasNotificacionesLeidas"
+              id="notif-marcar-todas"
             >
               <svg class="icon" style="width: 16px; height: 16px">
                 <use href="#icon-check"></use>
               </svg>
               Marcar todas como leídas
+            </button>
+            <button
+              type="button"
+              class="btn-secondary"
+              id="notif-eliminar-todas"
+            >
+              <svg class="icon" style="width: 16px; height: 16px">
+                <use href="#icon-trash"></use>
+              </svg>
+              Eliminar todas
             </button>
           </div>
           <div class="notif-list" id="notificaciones-list"></div>
@@ -6788,6 +6856,7 @@
     <script type="module" src="./js/views/proveedoresView.js"></script>
     <script type="module" src="./js/views/facturasView.js"></script>
     <script type="module" src="./js/views/historialView.js"></script>
+    <script type="module" src="./js/views/notificacionesView.js"></script>
     <!-- Dashboard principal -->
     <script src="./js/libs/chart.umd.min.js"></script>
     <script src="./js/dashboard.js"></script>

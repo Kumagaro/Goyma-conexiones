@@ -174,8 +174,8 @@ describe("mock de facturas de salida eliminado (tarea 4.5.9)", () => {
     expect(dashboardSource).not.toMatch(
       /crearNotificacion\(\s*["']factura["']/,
     );
-    // crearNotificacion se conserva para la página de notificaciones.
-    expect(dashboardSource).toMatch(/^function crearNotificacion\(/m);
+    // spec-04 NT-01: la pestaña usa datos reales; el mock ya no existe.
+    expect(dashboardSource).not.toMatch(/function crearNotificacion\(/);
   });
 
   it("las páginas de facturas del HTML no tienen manejadores inline", () => {

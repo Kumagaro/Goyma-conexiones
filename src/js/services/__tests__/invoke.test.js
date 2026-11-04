@@ -9,6 +9,31 @@ describe("invoke Tauri", () => {
     vi.restoreAllMocks();
   });
 
+  it("TO-02: emite command:success solo tras un comando de escritura correcto", async () => {
+    const seen = [];
+    const listener = (event) => seen.push(event.detail.command);
+    window.addEventListener("command:success", listener);
+    const tauriInvoke = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(3)
+      .mockResolvedValueOnce({ status: "active" })
+      .mockResolvedValueOnce({ invoiceId: 1 })
+      .mockRejectedValueOnce({ code: "validationFailed", message: "No" });
+    window.__TAURI__ = { core: { invoke: tauriInvoke } };
+
+    await invoke("list_notifications");
+    await invoke("count_unread_notifications");
+    await invoke("touch_session");
+    await invoke("create_sale_invoice", { input: {} });
+    await expect(invoke("delete_notification")).rejects.toMatchObject({
+      code: "validationFailed",
+    });
+    window.removeEventListener("command:success", listener);
+
+    expect(seen).toEqual(["create_sale_invoice"]);
+  });
+
   it("invoca comandos mediante la API global de Tauri v2", async () => {
     const tauriInvoke = vi.fn().mockResolvedValue({ username: "admin" });
     window.__TAURI__ = { core: { invoke: tauriInvoke } };

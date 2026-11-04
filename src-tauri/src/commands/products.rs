@@ -10,8 +10,8 @@ use crate::models::product::{
     format_profit_percent_hundredths, format_quantity_milli, CreateProductInput, ExpiryFilter,
     PreviewSellingPriceInput, PriceQuote, ProductActionResult, ProductAssociatedInvoice,
     ProductConditionFilter, ProductConditionItem, ProductConditionList, ProductDetail,
-    ProductFilters, ProductListItem, ProductMatch, StockFilter, UpdateProductInput,
-    UpdateProductResult,
+    ProductFilters, ProductListItem, ProductMatch, ReservedInvoice, StockFilter,
+    UpdateProductInput, UpdateProductResult,
 };
 use crate::pricing::selling_price_cents;
 use crate::text::{clean_name, normalize_text, sort_spanish, spanish_sort_key};
@@ -272,6 +272,8 @@ pub fn create_product_inner(
         is_low_stock: quantity_milli < 5_000,
     };
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "createProduct", &[]))?;
@@ -765,6 +767,8 @@ pub fn get_product_inner(
         _ => return Err(internal_product_error("product has an invalid status")),
     };
 
+    let reserved_invoices = reserved_invoices_of_product(&transaction, id)?;
+    let reserved_milli: i64 = reserved_invoices.iter().map(|(_, milli)| milli).sum();
     let detail = ProductDetail {
         product: ProductListItem {
             id,
@@ -788,12 +792,49 @@ pub fn get_product_inner(
         discontinued_at,
         remaining_days,
         expired_cleanup_warning,
+        reserved_quantity: format_quantity_milli(reserved_milli),
+        reserved_invoices: reserved_invoices
+            .into_iter()
+            .map(|(invoice, _)| invoice)
+            .collect(),
     };
 
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "getProduct", &[]))?;
     Ok(detail)
+}
+
+/// RS-03: reservas activas con este producto y la cantidad de cada una.
+fn reserved_invoices_of_product(
+    connection: &Connection,
+    product_id: i64,
+) -> Result<Vec<(ReservedInvoice, i64)>, AppError> {
+    connection
+        .prepare(
+            "SELECT i.id, i.number, i.type, i.reservedUntil, SUM(l.quantityMilli)
+             FROM invoices i JOIN invoiceLines l ON l.invoiceId = i.id
+             WHERE l.productId = ?1 AND i.status = 'pending' AND i.reservedUntil IS NOT NULL
+             GROUP BY i.id ORDER BY i.reservedUntil, i.id",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([product_id], |row| {
+                    let milli: i64 = row.get(4)?;
+                    Ok((
+                        ReservedInvoice {
+                            id: row.get(0)?,
+                            number: row.get(1)?,
+                            invoice_type: row.get(2)?,
+                            reserved_until: row.get(3)?,
+                            quantity: format_quantity_milli(milli),
+                        },
+                        milli,
+                    ))
+                })?
+                .collect()
+        })
+        .map_err(|error| map_db_error(error, "getProduct", &[]))
 }
 
 #[tauri::command]
@@ -969,6 +1010,8 @@ pub fn update_product_inner(
         is_low_stock: quantity_milli > 0 && quantity_milli < 5_000,
     };
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "updateProduct", &[]))?;
@@ -1077,6 +1120,8 @@ pub fn delete_product_inner(
         ));
     }
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "deleteProduct", &[]))?;
@@ -1181,6 +1226,8 @@ fn transition_product_status(
         return Err(mapped_error);
     }
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, operation, &[]))?;
@@ -1189,7 +1236,10 @@ fn transition_product_status(
     })
 }
 
-fn remaining_product_days(now: DateTime<Utc>, discontinued_at: &str) -> Result<i64, AppError> {
+pub(crate) fn remaining_product_days(
+    now: DateTime<Utc>,
+    discontinued_at: &str,
+) -> Result<i64, AppError> {
     let discontinued_at = parse_utc_timestamp(discontinued_at).ok_or_else(|| {
         internal_product_error("product has an invalid discontinuation timestamp")
     })?;
@@ -1334,13 +1384,28 @@ pub fn purge_expired_products(
     now: DateTime<Utc>,
 ) -> Result<usize, AppError> {
     let cutoff = expired_products_cutoff(now);
-    connection
+    let purged: Vec<(i64, String)> = connection
+        .prepare(
+            "SELECT id, name FROM products
+             WHERE status = 'discontinued' AND discontinuedAt <= ?1",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([&cutoff], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect()
+        })
+        .map_err(|error| map_db_error(error, "purge_expired_products", &[]))?;
+    let deleted = connection
         .execute(
             "DELETE FROM products
              WHERE status = 'discontinued' AND discontinuedAt <= ?1",
             [&cutoff],
         )
-        .map_err(|error| map_db_error(error, "purge_expired_products", &[]))
+        .map_err(|error| map_db_error(error, "purge_expired_products", &[]))?;
+    // N-12 (NT-02): en el mismo SAVEPOINT de la purga.
+    crate::db::notifications::insert_purged_products_notification(connection, &purged, now)
+        .map_err(|error| map_db_error(error, "purge_expired_products", &[]))?;
+    Ok(deleted)
 }
 
 pub fn purge_best_effort(
@@ -1349,7 +1414,11 @@ pub fn purge_best_effort(
 ) -> Result<Option<String>, AppError> {
     let fallback_directory: PathBuf = std::env::temp_dir();
     let app_data_dir = current_app_data_dir().unwrap_or(&fallback_directory);
-    purge_best_effort_with_app_data_dir(connection, now, app_data_dir)
+    let warning = purge_best_effort_with_app_data_dir(connection, now, app_data_dir)?;
+    // spec-04 S-04, D-09 (`before_operation`): las reservas vencidas se
+    // cancelan antes de cada operación, en el mismo punto que la purga.
+    crate::automation::expire_reservations_best_effort(connection, now);
+    Ok(warning)
 }
 
 fn purge_best_effort_with_app_data_dir(
@@ -3317,10 +3386,23 @@ mod tests {
         assert_eq!(expired.message, "El producto ya no existe");
         assert!(!product_exists(&connection, expired_id));
 
-        let notification_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM notifications", [], |row| row.get(0))
+        // Borrar a mano no avisa; la purga automática sí (N-12, spec-04).
+        let notifications: Vec<(String, String, String)> = connection
+            .prepare("SELECT type, priority, message FROM notifications")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert_eq!(notification_count, 0);
+        assert_eq!(
+            notifications,
+            vec![(
+                "N-12".to_owned(),
+                "INFORMATIVO".to_owned(),
+                "Se eliminaron automáticamente estos productos descontinuados: Producto vencido"
+                    .to_owned(),
+            )]
+        );
     }
 
     #[test]
@@ -3647,7 +3729,7 @@ mod tests {
 
         transaction
             .execute(
-                "INSERT INTO notifications (type, priority, message, createdAt) VALUES ('test', 'test', 'usable', '2026-10-03T12:00:00Z')",
+                "INSERT INTO notifications (type, priority, message, createdAt) VALUES ('test', 'INFORMATIVO', 'usable', '2026-10-03T12:00:00Z')",
                 [],
             )
             .unwrap();

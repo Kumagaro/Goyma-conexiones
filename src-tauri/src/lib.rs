@@ -1,4 +1,5 @@
 pub mod attachments;
+pub mod automation;
 pub mod commands;
 pub mod db;
 pub mod errors;
@@ -111,6 +112,13 @@ pub fn run() {
             commands::invoices::download_invoice_attachment,
             commands::invoices::change_invoice_status,
             commands::invoices::delete_invoice,
+            commands::notifications::list_notifications,
+            commands::notifications::count_unread_notifications,
+            commands::notifications::list_notifications_since,
+            commands::notifications::mark_notification_read,
+            commands::notifications::mark_all_notifications_read,
+            commands::notifications::delete_notification,
+            commands::notifications::delete_notifications,
             commands::users::create_user,
             commands::users::list_users,
             commands::users::get_user_profile,

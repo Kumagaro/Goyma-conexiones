@@ -758,6 +758,80 @@ describe("listados y detalle de productos", () => {
     });
   });
 
+  it("RS-03: el detalle muestra la cantidad reservada con un enlace a cada reserva", async () => {
+    // La tarjeta "Reservado" del HTML de producción, dentro del detalle.
+    const html = await readFile(
+      path.resolve(process.cwd(), "src", "dashboard-unificado.html"),
+      "utf8",
+    );
+    const card = new DOMParser()
+      .parseFromString(html, "text/html")
+      .getElementById("producto-ver-reservado-card");
+    document.getElementById("producto-ver-stock").after(card);
+    window.irAFacturaDesdeGeneral = vi.fn();
+    productServiceMocks.listProducts.mockResolvedValue([activeProducts[1]]);
+    const detail = {
+      ...activeProducts[1],
+      description: null,
+      isDiscontinued: false,
+      discontinuedAt: null,
+      remainingDays: null,
+      expiredCleanupWarning: null,
+      reservedQuantity: "4,5",
+      reservedInvoices: [
+        {
+          id: 8,
+          number: "V-00008",
+          invoiceType: "V",
+          reservedUntil: "2026-10-08",
+          quantity: "1,5",
+        },
+        {
+          id: 9,
+          number: "S-00009",
+          invoiceType: "S",
+          reservedUntil: "2026-10-10",
+          quantity: "3",
+        },
+      ],
+    };
+    productServiceMocks.getProduct.mockResolvedValue(detail);
+    const view = await openProductsView();
+    await view.showProductoTab("list");
+    document
+      .querySelector('#productos-body [data-product-action="view"]')
+      .click();
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("producto-ver-reservado").textContent,
+      ).toBe("4,5"),
+    );
+    expect(document.getElementById("producto-ver-reservado-card").hidden).toBe(
+      false,
+    );
+    const links = [
+      ...document.querySelectorAll("#producto-ver-reservas button"),
+    ];
+    expect(links.map((link) => link.textContent)).toEqual([
+      "V-00008 · 1,5 · hasta 08/10/2026",
+      "S-00009 · 3 · hasta 10/10/2026",
+    ]);
+    links[1].click();
+    expect(window.irAFacturaDesdeGeneral).toHaveBeenCalledWith("S", 9);
+
+    // Sin reservas, la tarjeta se oculta.
+    productServiceMocks.getProduct.mockResolvedValue({
+      ...detail,
+      reservedQuantity: "0",
+      reservedInvoices: [],
+    });
+    await window.productosView.openProductDetail(2);
+    expect(document.getElementById("producto-ver-reservado-card").hidden).toBe(
+      true,
+    );
+    delete window.irAFacturaDesdeGeneral;
+  });
+
   it("el detalle activa solo acciones permitidas y confirma pérdida de stock antes de descontinuar/eliminar", async () => {
     productServiceMocks.listProducts.mockResolvedValue([activeProducts[1]]);
     productServiceMocks.getProduct.mockResolvedValue({

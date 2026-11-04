@@ -185,3 +185,75 @@
   font-size: 13px;
   color: #ef4444;
 }
+
+/* ---------- Pestaña de notificaciones (spec-04 NT-01) ---------- */
+/* Prioridad con la misma paleta de los toasts; dashboard.css no se toca. */
+.notif-row-critico .notif-icon,
+.notif-row-critico.no-leida .notif-icon {
+  background-color: #ef44441a;
+  color: #ef4444;
+}
+
+.notif-row-advertencia .notif-icon,
+.notif-row-advertencia.no-leida .notif-icon {
+  background-color: #f484301a;
+  color: #f48430;
+}
+
+.notif-row-informativo .notif-icon,
+.notif-row-informativo.no-leida .notif-icon {
+  background-color: #2563eb1a;
+  color: #2563eb;
+}
+
+.notif-prioridad {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.notif-prioridad-critico {
+  background-color: #ef44441a;
+  color: #b91c1c;
+}
+
+.notif-prioridad-advertencia {
+  background-color: #f484301a;
+  color: #b45309;
+}
+
+.notif-prioridad-informativo {
+  background-color: #2563eb1a;
+  color: #1d4ed8;
+}
+
+.notif-row:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.notif-delete {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #020f1e80;
+  cursor: pointer;
+}
+
+.notif-delete:hover,
+.notif-delete:focus-visible {
+  background-color: #ef44441a;
+  color: #ef4444;
+}
+
+.notif-delete .icon {
+  width: 18px;
+  height: 18px;
+}

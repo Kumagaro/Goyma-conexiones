@@ -430,7 +430,7 @@ mod tests {
 
         create_fail_notification_insert_trigger(&connection).unwrap();
         assert!(connection.execute(
-            "INSERT INTO notifications (type, priority, message, createdAt) VALUES ('test', 'test', 'test', '2026-10-03T00:00:00Z')",
+            "INSERT INTO notifications (type, priority, message, createdAt) VALUES ('test', 'INFORMATIVO', 'test', '2026-10-03T00:00:00Z')",
             [],
         ).is_err());
         let notification_count: i64 = connection

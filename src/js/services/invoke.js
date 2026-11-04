@@ -7,6 +7,10 @@ export function setSessionExpiredRedirect(redirect) {
   sessionExpiredRedirect = redirect;
 }
 
+// Comandos que solo leen: no generan notificaciones (spec-04 TO-02).
+const READ_ONLY_COMMAND =
+  /^(?:get_|list_|search_|count_)|^(?:touch_session|preview_selling_price|convert_quantity|verify_recovery_identity)$/;
+
 export async function invoke(command, args) {
   try {
     const result = await window.__TAURI__.core.invoke(command, args);
@@ -15,6 +19,12 @@ export async function invoke(command, args) {
     }
     if (command === "touch_session" && result?.status === "expired") {
       redirectToExpiredLogin();
+    }
+    // TO-02 (D-04): tras una escritura, el feed busca notificaciones nuevas.
+    if (!READ_ONLY_COMMAND.test(command)) {
+      window.dispatchEvent(
+        new CustomEvent("command:success", { detail: { command } }),
+      );
     }
     return result;
   } catch (error) {

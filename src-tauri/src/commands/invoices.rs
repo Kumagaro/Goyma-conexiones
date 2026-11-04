@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::attachments::{attachment_path, delete_attachment, store_attachment};
-use crate::commands::auth::{require_session, Actor};
+use crate::commands::auth::{require_session, Actor, Author};
 use crate::commands::products::purge_best_effort;
 use crate::db::connection::current_app_data_dir;
 use crate::errors::{append_error_log, log_error, map_db_error, AppError};
@@ -37,6 +37,46 @@ use crate::validators::{
 
 fn validation_failed(message: &str, cause: &str) -> AppError {
     AppError::new("validationFailed", message, cause)
+}
+
+/// RS-01: "Reservar hasta" es opcional; si llega, la factura debe estar Por
+/// Cobrar y la fecha ser posterior a la emisión y a 365 días como máximo.
+fn validate_reserved_until(
+    raw: Option<&str>,
+    invoice_date: NaiveDate,
+    status: &str,
+) -> Result<Option<String>, AppError> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if status != "pending" {
+        return Err(validation_failed(
+            "Solo se puede reservar una factura Por Cobrar",
+            "reservation on a non-pending invoice",
+        ));
+    }
+    let date = NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+        .ok()
+        .filter(|date| date.format("%Y-%m-%d").to_string() == raw)
+        .ok_or_else(|| {
+            validation_failed(
+                "La fecha de reserva no es válida",
+                "invalid reservation date",
+            )
+        })?;
+    if date <= invoice_date {
+        return Err(validation_failed(
+            "La fecha de reserva debe ser posterior a la fecha de emisión",
+            "reservation date is not after the issue date",
+        ));
+    }
+    if date > invoice_date + chrono::Duration::days(365) {
+        return Err(validation_failed(
+            "La reserva no puede superar los 365 días desde la emisión",
+            "reservation date is more than 365 days after the issue date",
+        ));
+    }
+    Ok(Some(raw.to_owned()))
 }
 
 #[derive(Debug, Clone)]
@@ -271,6 +311,7 @@ pub fn list_invoices_inner(
             "pendientes" => "pending".to_owned(),
             "completadas" => "completed".to_owned(),
             "canceladas" => "cancelled".to_owned(),
+            "reservas" => "reserved".to_owned(),
             _ => value,
         });
     let phone_query = filters
@@ -308,7 +349,7 @@ pub fn list_invoices_inner(
         .prepare(
                 "SELECT i.id, i.number, i.type, i.contactFullName, i.contactCompany, i.contactNationalId,
                     i.contactPhone, i.invoiceDate, i.status, i.associatedNumber, i.associatedType,
-                    l.productName, l.quantityMilli
+                    l.productName, l.quantityMilli, i.reservedUntil
              FROM invoices i
              -- La pérdida tiene una sola línea: de ella salen producto y cantidad.
              LEFT JOIN invoiceLines l ON i.type = 'P' AND l.invoiceId = i.id AND l.position = 1
@@ -332,6 +373,7 @@ pub fn list_invoices_inner(
                 row.get::<_, Option<String>>(10)?,
                 row.get::<_, Option<String>>(11)?,
                 row.get::<_, Option<i64>>(12)?,
+                row.get::<_, Option<String>>(13)?,
             ))
         })
         .map_err(|error| map_db_error(error, "listInvoices", &[]))?;
@@ -352,6 +394,7 @@ pub fn list_invoices_inner(
             associated_type,
             product_name,
             quantity_milli,
+            reserved_until,
         ) = row.map_err(|error| map_db_error(error, "listInvoices", &[]))?;
 
         let invoice_day = match NaiveDate::parse_from_str(&invoice_date, "%Y-%m-%d") {
@@ -380,7 +423,13 @@ pub fn list_invoices_inner(
             if invoice_type_value == "P" {
                 continue;
             }
-            if status_value.as_deref() != Some(expected_status.as_str()) {
+            // RS-03: "Reservas activas" = Por Cobrar con fecha límite.
+            let matches = if expected_status == "reserved" {
+                status_value.as_deref() == Some("pending") && reserved_until.is_some()
+            } else {
+                status_value.as_deref() == Some(expected_status.as_str())
+            };
+            if !matches {
                 continue;
             }
         }
@@ -440,6 +489,7 @@ pub fn list_invoices_inner(
             quantity: quantity_milli.map(format_quantity_milli),
             product_count,
             created_by_name,
+            reserved_until,
         });
     }
 
@@ -559,6 +609,13 @@ pub fn get_invoice_inner(
         ));
     };
 
+    let reserved_until: Option<String> = connection
+        .query_row(
+            "SELECT reservedUntil FROM invoices WHERE id = ?1",
+            [invoice_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
     let total_cents: i64 = connection
         .query_row(
             "SELECT COALESCE(SUM(subtotalCents), 0) FROM invoiceLines WHERE invoiceId = ?1",
@@ -650,6 +707,7 @@ pub fn get_invoice_inner(
         created_by_name,
         created_at,
         updated_at,
+        reserved_until,
         lines,
     })
 }
@@ -706,7 +764,7 @@ pub fn list_invoices(
 
 fn insert_reversal_movement(
     transaction: &Connection,
-    actor: &Actor,
+    author: &Author<'_>,
     movement: ReversalMovementInput<'_>,
     now: DateTime<Utc>,
 ) -> Result<(), AppError> {
@@ -740,17 +798,17 @@ fn insert_reversal_movement(
                 None::<i64>,
                 movement.invoice_number,
                 movement.invoice_type,
-                actor.id(),
-                actor.username(),
+                author.id(),
+                author.name(),
             ],
         )
         .map_err(|error| map_db_error(error, "changeInvoiceStatus", &[]))?;
     Ok(())
 }
 
-fn reverse_outgoing_invoice_consumptions(
+pub(crate) fn reverse_outgoing_invoice_consumptions(
     transaction: &Connection,
-    actor: &Actor,
+    author: &Author<'_>,
     invoice_id: i64,
     invoice_number: &str,
     invoice_type: &str,
@@ -799,7 +857,7 @@ fn reverse_outgoing_invoice_consumptions(
             if let Some(product_id) = restoration.product_id {
                 insert_reversal_movement(
                     transaction,
-                    actor,
+                    author,
                     ReversalMovementInput {
                         invoice_number,
                         invoice_type,
@@ -1296,6 +1354,8 @@ pub fn create_entry_invoice_inner(
         ).map_err(|error| map_db_error(error, "createEntryInvoice", &[]))?;
     }
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "createEntryInvoice", &[]))?;
@@ -1324,6 +1384,7 @@ fn create_client_outgoing_invoice_inner(
     notes: Option<&str>,
     payment_method: Option<&str>,
     lines: &[(i64, String)],
+    reserved_until: Option<&str>,
 ) -> Result<InvoiceActionResult, AppError> {
     let _actor = require_session(connection, now)?;
     let transaction = connection
@@ -1374,6 +1435,7 @@ fn create_client_outgoing_invoice_inner(
             &format!("{kind} status rejected"),
         ));
     }
+    let reserved_until = validate_reserved_until(reserved_until, invoice_date, normalized_status)?;
 
     let notes = notes.map(validate_invoice_notes).transpose()?.flatten();
 
@@ -1535,11 +1597,12 @@ fn create_client_outgoing_invoice_inner(
 
     connection.execute(
         "INSERT INTO invoices (type, number, invoiceDate, status, clientId, contactFullName, contactFullNameNormalized,
-            contactNationalId, contactPhone, notes, paymentMethod, paidAt, createdByUserId, createdByName, createdAt, updatedAt)
+            contactNationalId, contactPhone, notes, paymentMethod, paidAt, createdByUserId, createdByName, createdAt, updatedAt,
+            reservedUntil)
          VALUES (?1, ?2, ?3, ?4, ?5, (SELECT firstName || ' ' || lastName FROM clients WHERE id = ?5),
             (SELECT lower(firstName || ' ' || lastName) FROM clients WHERE id = ?5),
             (SELECT nationalId FROM clients WHERE id = ?5), (SELECT phone FROM clients WHERE id = ?5), ?6, ?7, ?8,
-            ?9, ?10, ?11, ?11)",
+            ?9, ?10, ?11, ?11, ?12)",
         params![
             invoice_type,
             &number,
@@ -1552,6 +1615,7 @@ fn create_client_outgoing_invoice_inner(
             _actor.id(),
             _actor.username(),
             &timestamp,
+            reserved_until.as_deref(),
         ],
     ).map_err(|error| map_db_error(error, op, &[]))?;
 
@@ -1633,6 +1697,8 @@ fn create_client_outgoing_invoice_inner(
         ).map_err(|error| map_db_error(error, op, &[]))?;
     }
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, op, &[]))?;
@@ -1654,7 +1720,7 @@ pub fn create_sale_invoice_inner(
         .iter()
         .map(|line| (line.product_id, line.quantity.clone()))
         .collect();
-    create_client_outgoing_invoice_inner(
+    let result = create_client_outgoing_invoice_inner(
         connection,
         now,
         "createSaleInvoice",
@@ -1667,7 +1733,9 @@ pub fn create_sale_invoice_inner(
         input.notes.as_deref(),
         input.payment_method.as_deref(),
         &lines,
-    )
+        input.reserved_until.as_deref(),
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 
 pub fn create_service_invoice_inner(
@@ -1680,7 +1748,7 @@ pub fn create_service_invoice_inner(
         .iter()
         .map(|line| (line.product_id, line.quantity.clone()))
         .collect();
-    create_client_outgoing_invoice_inner(
+    let result = create_client_outgoing_invoice_inner(
         connection,
         now,
         "createServiceInvoice",
@@ -1693,7 +1761,9 @@ pub fn create_service_invoice_inner(
         input.notes.as_deref(),
         input.payment_method.as_deref(),
         &lines,
-    )
+        input.reserved_until.as_deref(),
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 
 /// Núcleo compartido de las facturas de gasto de garantía y de insumos de
@@ -1991,6 +2061,8 @@ fn create_associated_outgoing_invoice_inner(
         ).map_err(|error| map_db_error(error, op, &[]))?;
     }
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, op, &[]))?;
@@ -2012,7 +2084,7 @@ pub fn create_guarantee_invoice_inner(
         .iter()
         .map(|line| (line.product_id, line.quantity.clone()))
         .collect();
-    create_associated_outgoing_invoice_inner(
+    let result = create_associated_outgoing_invoice_inner(
         connection,
         now,
         "createGuaranteeInvoice",
@@ -2026,7 +2098,8 @@ pub fn create_guarantee_invoice_inner(
         input.status.as_deref(),
         input.notes.as_deref(),
         &lines,
-    )
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 
 pub fn create_installation_invoice_inner(
@@ -2039,7 +2112,7 @@ pub fn create_installation_invoice_inner(
         .iter()
         .map(|line| (line.product_id, line.quantity.clone()))
         .collect();
-    create_associated_outgoing_invoice_inner(
+    let result = create_associated_outgoing_invoice_inner(
         connection,
         now,
         "createInstallationInvoice",
@@ -2053,7 +2126,8 @@ pub fn create_installation_invoice_inner(
         input.status.as_deref(),
         input.notes.as_deref(),
         &lines,
-    )
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 
 /// Línea de una factura de salida leída para editar.
@@ -2244,6 +2318,7 @@ fn update_priced_outgoing_invoice_inner(
     invoice_date: &str,
     notes: Option<&str>,
     lines: &[UpdateOutgoingInvoiceLineInput],
+    reserved_until: Option<&str>,
 ) -> Result<InvoiceActionResult, AppError> {
     let type_code = invoice_type.as_str();
     let actor = require_session(connection, now)?;
@@ -2284,6 +2359,7 @@ fn update_priced_outgoing_invoice_inner(
             &format!("{op} date is in the future"),
         ));
     }
+    let reserved_until = validate_reserved_until(reserved_until, invoice_date, &status)?;
     let client: Option<(String, String, String, String)> = connection
         .query_row(
             "SELECT firstName, lastName, nationalId, phone FROM clients WHERE id = ?1",
@@ -2760,7 +2836,9 @@ fn update_priced_outgoing_invoice_inner(
         .execute(
             "UPDATE invoices SET clientId = ?1, invoiceDate = ?2, notes = ?3,
                 contactFullName = ?4, contactFullNameNormalized = ?5, contactNationalId = ?6,
-                contactPhone = ?7, updatedAt = ?8 WHERE id = ?9",
+                contactPhone = ?7, updatedAt = ?8,
+                reservedUntil = CASE WHEN status = 'pending' THEN ?10 ELSE reservedUntil END
+                WHERE id = ?9",
             params![
                 client_id,
                 invoice_date,
@@ -2771,10 +2849,13 @@ fn update_priced_outgoing_invoice_inner(
                 client_phone,
                 timestamp,
                 invoice_id,
+                reserved_until,
             ],
         )
         .map_err(|error| map_db_error(error, op, &[]))?;
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, op, &[]))?;
@@ -3326,6 +3407,8 @@ fn update_costed_outgoing_invoice_inner(
         )
         .map_err(|error| map_db_error(error, op, &[]))?;
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, op, &[]))?;
@@ -3341,7 +3424,7 @@ pub fn update_sale_invoice_inner(
     input: UpdateSaleInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
     let lines = input.lines;
-    update_priced_outgoing_invoice_inner(
+    let result = update_priced_outgoing_invoice_inner(
         connection,
         now,
         "updateSaleInvoice",
@@ -3359,7 +3442,9 @@ pub fn update_sale_invoice_inner(
                 quantity: line.quantity.clone(),
             })
             .collect::<Vec<_>>(),
-    )
+        input.reserved_until.as_deref(),
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 
 pub fn update_service_invoice_inner(
@@ -3368,7 +3453,7 @@ pub fn update_service_invoice_inner(
     input: UpdateServiceInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
     let lines = input.lines;
-    update_priced_outgoing_invoice_inner(
+    let result = update_priced_outgoing_invoice_inner(
         connection,
         now,
         "updateServiceInvoice",
@@ -3386,7 +3471,9 @@ pub fn update_service_invoice_inner(
                 quantity: line.quantity.clone(),
             })
             .collect::<Vec<_>>(),
-    )
+        input.reserved_until.as_deref(),
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 
 pub fn update_guarantee_invoice_inner(
@@ -3395,7 +3482,7 @@ pub fn update_guarantee_invoice_inner(
     input: UpdateGuaranteeInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
     let lines = input.lines;
-    update_costed_outgoing_invoice_inner(
+    let result = update_costed_outgoing_invoice_inner(
         connection,
         now,
         "updateGuaranteeInvoice",
@@ -3416,7 +3503,8 @@ pub fn update_guarantee_invoice_inner(
                 quantity: line.quantity.clone(),
             })
             .collect::<Vec<_>>(),
-    )
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 
 pub fn update_installation_invoice_inner(
@@ -3425,7 +3513,7 @@ pub fn update_installation_invoice_inner(
     input: UpdateInstallationInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
     let lines = input.lines;
-    update_costed_outgoing_invoice_inner(
+    let result = update_costed_outgoing_invoice_inner(
         connection,
         now,
         "updateInstallationInvoice",
@@ -3446,9 +3534,19 @@ pub fn update_installation_invoice_inner(
                 quantity: line.quantity.clone(),
             })
             .collect::<Vec<_>>(),
-    )
+    );
+    crate::automation::after_rejected_outgoing(connection, now, result)
 }
 pub fn create_loss_invoice_inner(
+    connection: &mut Connection,
+    now: DateTime<Utc>,
+    input: CreateLossInvoiceInput,
+) -> Result<InvoiceActionResult, AppError> {
+    let result = create_loss_invoice_tx(connection, now, input);
+    crate::automation::after_rejected_outgoing(connection, now, result)
+}
+
+fn create_loss_invoice_tx(
     connection: &mut Connection,
     now: DateTime<Utc>,
     input: CreateLossInvoiceInput,
@@ -3616,6 +3714,8 @@ pub fn create_loss_invoice_inner(
         ],
     ).map_err(|error| map_db_error(error, "createLossInvoice", &[]))?;
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "createLossInvoice", &[]))?;
@@ -4176,6 +4276,8 @@ pub fn update_entry_invoice_inner(
         )
         .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
@@ -4184,6 +4286,59 @@ pub fn update_entry_invoice_inner(
         number: invoice_number,
         expired_cleanup_warning,
     })
+}
+
+/// RS-02: cancela las reservas cuya fecha límite ya pasó (en hora local),
+/// exactamente como una cancelación manual pero firmada por "Sistema":
+/// los consumos vuelven a sus lotes con su Reversión y se genera N-06.
+/// Excepción documentada a `spec-03` §3.2. Devuelve cuántas canceló.
+pub fn expire_reservations(connection: &Connection, now: DateTime<Utc>) -> Result<usize, AppError> {
+    let today = today_local(now).format("%Y-%m-%d").to_string();
+    let expired: Vec<(i64, String, String, String)> = connection
+        .prepare(
+            "SELECT id, number, type, COALESCE(contactFullName, '') FROM invoices
+             WHERE status = 'pending' AND reservedUntil IS NOT NULL AND reservedUntil < ?1
+             ORDER BY reservedUntil, id",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([&today], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?
+                .collect()
+        })
+        .map_err(|error| map_db_error(error, "expireReservations", &[]))?;
+
+    let timestamp = format_utc_timestamp(now);
+    for (invoice_id, number, invoice_type, contact) in &expired {
+        connection
+            .execute(
+                "UPDATE invoices SET status = 'cancelled', updatedAt = ?1 WHERE id = ?2",
+                params![timestamp, invoice_id],
+            )
+            .map_err(|error| map_db_error(error, "expireReservations", &[]))?;
+        reverse_outgoing_invoice_consumptions(
+            connection,
+            &Author::System,
+            *invoice_id,
+            number,
+            invoice_type,
+            now,
+        )?;
+        crate::db::notifications::notify(
+            connection,
+            "N-06",
+            crate::db::notifications::INFO,
+            &format!(
+                "Factura de reserva cancelada: Factura # {number} - Cliente: {contact} - Motivo: Tiempo límite excedido"
+            ),
+            Some(crate::db::notifications::Entity::Invoice(*invoice_id)),
+            crate::db::notifications::Audience::All,
+            now,
+        )
+        .map_err(|error| map_db_error(error, "expireReservations", &[]))?;
+    }
+    Ok(expired.len())
 }
 
 pub fn change_invoice_status_inner(
@@ -4299,7 +4454,7 @@ pub fn change_invoice_status_inner(
             | InvoiceType::Installation => {
                 reverse_outgoing_invoice_consumptions(
                     &transaction,
-                    &actor,
+                    &Author::User(&actor),
                     invoice_id,
                     &number,
                     &invoice_type_value,
@@ -4309,7 +4464,7 @@ pub fn change_invoice_status_inner(
             InvoiceType::Loss => {
                 reverse_outgoing_invoice_consumptions(
                     &transaction,
-                    &actor,
+                    &Author::User(&actor),
                     invoice_id,
                     &number,
                     &invoice_type_value,
@@ -4319,6 +4474,8 @@ pub fn change_invoice_status_inner(
         }
     }
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "changeInvoiceStatus", &[]))?;
@@ -4949,7 +5106,7 @@ fn delete_invoice_inner_with_app_data_dir(
             if current_status != Some(InvoiceStatus::Cancelled) {
                 reverse_outgoing_invoice_consumptions(
                     &transaction,
-                    &actor,
+                    &Author::User(&actor),
                     invoice_id,
                     &number,
                     &invoice_type_value,
@@ -4960,7 +5117,7 @@ fn delete_invoice_inner_with_app_data_dir(
         InvoiceType::Loss => {
             reverse_outgoing_invoice_consumptions(
                 &transaction,
-                &actor,
+                &Author::User(&actor),
                 invoice_id,
                 &number,
                 &invoice_type_value,
@@ -4980,6 +5137,8 @@ fn delete_invoice_inner_with_app_data_dir(
         ));
     }
 
+    // NT-02/NT-03: avisos de situación con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "deleteInvoice", &[]))?;
@@ -6434,6 +6593,7 @@ mod tests {
         status: Option<&str>,
     ) -> crate::models::invoice::CreateSaleInvoiceInput {
         crate::models::invoice::CreateSaleInvoiceInput {
+            reserved_until: None,
             client_id,
             invoice_date: "2026-10-04".to_owned(),
             status: status.map(str::to_owned),
@@ -6771,6 +6931,131 @@ mod tests {
         assert_eq!(invoices, 0);
     }
 
+    fn notification_messages(connection: &rusqlite::Connection) -> Vec<String> {
+        connection
+            .prepare("SELECT message FROM notifications ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn n02_and_n03_follow_the_stock_left_by_a_sale_and_a_rejected_sale() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "salewatch",
+            "12345678951",
+            "+5355559120",
+            "12345678952",
+            "+5355559121",
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Leche",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        assert!(notification_messages(&connection).is_empty());
+
+        // La venta deja 4: stock bajo (N-03).
+        super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "6")], None),
+        )
+        .unwrap();
+        assert_eq!(
+            notification_messages(&connection),
+            vec!["Producto con stock bajo: Leche - Cantidad actual: 4"]
+        );
+
+        // Una venta rechazada no deja nada nuevo: la situación no cambió.
+        let error = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "9")], None),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "stockInsuficiente");
+        assert_eq!(notification_messages(&connection).len(), 1);
+
+        // La que lo agota genera N-02 en su propia transacción.
+        super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "4")], None),
+        )
+        .unwrap();
+        assert_eq!(
+            notification_messages(&connection)
+                .last()
+                .map(String::as_str),
+            Some("Producto agotado: Leche")
+        );
+    }
+
+    #[test]
+    fn n02_is_saved_even_when_the_sale_of_an_out_of_stock_product_is_rejected() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, _) = setup_sale_fixture(
+            "saleempty",
+            "12345678953",
+            "+5355559122",
+            "12345678954",
+            "+5355559123",
+            now,
+        );
+        // Agotado sin aviso previo (por ejemplo, la app no ha arrancado aún).
+        let empty_id = insert_product_fixture(
+            &connection,
+            "Mantequilla",
+            None,
+            None,
+            100,
+            0,
+            0,
+            "active",
+            None,
+            None,
+        );
+
+        let error = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(empty_id, "1")], None),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "validationFailed");
+        assert_eq!(
+            notification_messages(&connection),
+            vec!["Producto agotado: Mantequilla"]
+        );
+        let invoices: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM invoices WHERE type = 'V'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(invoices, 0);
+
+        // Otro intento no lo repite (NT-03).
+        super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(empty_id, "1")], None),
+        )
+        .unwrap_err();
+        assert_eq!(notification_messages(&connection).len(), 1);
+    }
+
     #[test]
     fn create_sale_invoice_rejects_discontinued_and_out_of_stock_products() {
         let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
@@ -7077,6 +7362,7 @@ mod tests {
         status: Option<&str>,
     ) -> crate::models::invoice::CreateServiceInvoiceInput {
         crate::models::invoice::CreateServiceInvoiceInput {
+            reserved_until: None,
             client_id,
             invoice_date: "2026-10-04".to_owned(),
             status: status.map(str::to_owned),
@@ -8152,6 +8438,7 @@ mod tests {
         lines: Vec<crate::models::invoice::UpdateOutgoingInvoiceLineInput>,
     ) -> crate::models::invoice::UpdateSaleInvoiceInput {
         crate::models::invoice::UpdateSaleInvoiceInput {
+            reserved_until: None,
             invoice_id,
             client_id,
             invoice_date: "2026-10-04".to_owned(),
@@ -8166,6 +8453,7 @@ mod tests {
         lines: Vec<crate::models::invoice::UpdateOutgoingInvoiceLineInput>,
     ) -> crate::models::invoice::UpdateServiceInvoiceInput {
         crate::models::invoice::UpdateServiceInvoiceInput {
+            reserved_until: None,
             invoice_id,
             client_id,
             invoice_date: "2026-10-04".to_owned(),
@@ -12879,5 +13167,353 @@ mod tests {
         assert_allows_both_roles(|connection, now| {
             list_invoices_inner(connection, now, InvoiceFilters::default())
         });
+    }
+
+    // ---------- spec-04 RS-01 a RS-03: reservas ----------
+
+    fn reservation_fixture(
+        username: &str,
+        seed: u32,
+    ) -> (rusqlite::Connection, chrono::DateTime<Utc>, i64, i64) {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 16, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            username,
+            &format!("123456789{seed:02}"),
+            &format!("+53555591{seed:02}"),
+            &format!("123456788{seed:02}"),
+            &format!("+53555592{seed:02}"),
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Leche",
+            100,
+            0,
+            "20",
+            "1,00",
+        );
+        (connection, now, client_id, product_id)
+    }
+
+    fn reserved_sale(
+        connection: &mut rusqlite::Connection,
+        now: chrono::DateTime<Utc>,
+        client_id: i64,
+        product_id: i64,
+        quantity: &str,
+        reserved_until: &str,
+    ) -> i64 {
+        let mut input = sale_input(client_id, vec![sale_line(product_id, quantity)], None);
+        input.reserved_until = Some(reserved_until.to_owned());
+        super::create_sale_invoice_inner(connection, now, input)
+            .unwrap()
+            .invoice_id
+    }
+
+    fn reserved_until_of(connection: &rusqlite::Connection, invoice_id: i64) -> Option<String> {
+        connection
+            .query_row(
+                "SELECT reservedUntil FROM invoices WHERE id = ?1",
+                [invoice_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn product_quantity(connection: &rusqlite::Connection, product_id: i64) -> i64 {
+        connection
+            .query_row(
+                "SELECT quantityMilli FROM products WHERE id = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn rs01_sales_and_services_are_reserved_on_create_and_edit_and_validated() {
+        let (mut connection, now, client_id, product_id) = reservation_fixture("reservaok", 61);
+
+        let sale = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "2",
+            "2026-10-10",
+        );
+        assert_eq!(
+            reserved_until_of(&connection, sale).as_deref(),
+            Some("2026-10-10")
+        );
+        // La reserva consume stock como cualquier venta Por Cobrar.
+        assert_eq!(product_quantity(&connection, product_id), 18_000);
+
+        let mut service = service_input(client_id, vec![service_line(product_id, "1")], None);
+        service.reserved_until = Some("2027-10-04".to_owned());
+        let service_id = super::create_service_invoice_inner(&mut connection, now, service)
+            .unwrap()
+            .invoice_id;
+        assert_eq!(
+            reserved_until_of(&connection, service_id).as_deref(),
+            Some("2027-10-04")
+        );
+
+        // Editar cambia la fecha y quitarla la convierte en una venta normal.
+        let mut update = update_sale_input(
+            sale,
+            client_id,
+            vec![update_outgoing_line(
+                Some(product_id),
+                Some(product_id),
+                "2",
+            )],
+        );
+        update.reserved_until = Some("2026-10-20".to_owned());
+        super::update_sale_invoice_inner(&mut connection, now, update.clone()).unwrap();
+        assert_eq!(
+            reserved_until_of(&connection, sale).as_deref(),
+            Some("2026-10-20")
+        );
+        update.reserved_until = None;
+        super::update_sale_invoice_inner(&mut connection, now, update).unwrap();
+        assert_eq!(reserved_until_of(&connection, sale), None);
+
+        let reject =
+            |connection: &mut rusqlite::Connection, reserved: &str, status: Option<&str>| {
+                let mut input = sale_input(client_id, vec![sale_line(product_id, "1")], status);
+                input.reserved_until = Some(reserved.to_owned());
+                super::create_sale_invoice_inner(connection, now, input).unwrap_err()
+            };
+        for (reserved, status, message) in [
+            (
+                "2026-10-04",
+                None,
+                "La fecha de reserva debe ser posterior a la fecha de emisión",
+            ),
+            (
+                "2026-10-03",
+                None,
+                "La fecha de reserva debe ser posterior a la fecha de emisión",
+            ),
+            (
+                "2027-10-05",
+                None,
+                "La reserva no puede superar los 365 días desde la emisión",
+            ),
+            ("2026-02-30", None, "La fecha de reserva no es válida"),
+            ("10/10/2026", None, "La fecha de reserva no es válida"),
+            (
+                "2026-10-10",
+                Some("completed"),
+                "Solo se puede reservar una factura Por Cobrar",
+            ),
+        ] {
+            let error = reject(&mut connection, reserved, status);
+            assert_eq!(error.code, "validationFailed", "{reserved}");
+            assert_eq!(error.message, message, "{reserved}");
+        }
+        // Garantía, insumos, entrada y pérdida no tienen el campo; el esquema
+        // además lo rechaza (migración 3, probado en db::migrations).
+        let invoices: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM invoices WHERE type = 'V'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(invoices, 1);
+    }
+
+    #[test]
+    fn rs03_active_reservations_in_the_list_the_detail_and_the_product() {
+        let (mut connection, now, client_id, product_id) = reservation_fixture("reservalist", 63);
+        let reserved = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "3",
+            "2026-10-10",
+        );
+        let second = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "1,5",
+            "2026-10-08",
+        );
+        let paid = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "1",
+            "2026-10-09",
+        );
+        super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "1")], None),
+        )
+        .unwrap();
+        // Cobrar desactiva la reserva pero conserva la fecha.
+        change_invoice_status_inner(&mut connection, now, paid, "completed", Some("cash")).unwrap();
+
+        let reserved_ids: Vec<i64> = list_invoices_inner(
+            &mut connection,
+            now,
+            InvoiceFilters {
+                status: Some("reserved".to_owned()),
+                ..InvoiceFilters::default()
+            },
+        )
+        .unwrap()
+        .iter()
+        .map(|item| item.id)
+        .collect();
+        assert_eq!(reserved_ids, vec![second, reserved]);
+
+        let detail = get_invoice_inner(&mut connection, now, paid).unwrap();
+        assert_eq!(detail.reserved_until.as_deref(), Some("2026-10-09"));
+        let item = list_invoices_inner(&mut connection, now, InvoiceFilters::default())
+            .unwrap()
+            .into_iter()
+            .find(|item| item.id == reserved)
+            .unwrap();
+        assert_eq!(item.reserved_until.as_deref(), Some("2026-10-10"));
+
+        let product =
+            crate::commands::products::get_product_inner(&mut connection, now, product_id).unwrap();
+        assert_eq!(product.reserved_quantity, "4,5");
+        assert_eq!(
+            product
+                .reserved_invoices
+                .iter()
+                .map(|invoice| (invoice.id, invoice.quantity.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(second, "1,5"), (reserved, "3")]
+        );
+    }
+
+    #[test]
+    fn rs02_expired_reservations_are_cancelled_by_the_system_before_the_next_operation() {
+        let (mut connection, now, client_id, product_id) = reservation_fixture("reservaexp", 65);
+        let expiring = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "5",
+            "2026-10-05",
+        );
+        let alive = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "2",
+            "2026-10-06",
+        );
+        assert_eq!(product_quantity(&connection, product_id), 13_000);
+
+        // El 6 de octubre (hora local) la del día 5 ya venció; la del 6 no.
+        let later = Utc.with_ymd_and_hms(2026, 10, 6, 16, 0, 0).unwrap();
+        // Gancho previo a cada operación (donde se llama la purga).
+        crate::commands::products::purge_best_effort(&connection, later).unwrap();
+
+        let status = |connection: &rusqlite::Connection, id: i64| -> String {
+            connection
+                .query_row("SELECT status FROM invoices WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(status(&connection, expiring), "cancelled");
+        assert_eq!(status(&connection, alive), "pending");
+        assert_eq!(
+            reserved_until_of(&connection, expiring).as_deref(),
+            Some("2026-10-05")
+        );
+        // Los consumos vuelven a sus lotes y la caché sigue a los lotes.
+        assert_eq!(product_quantity(&connection, product_id), 18_000);
+        let lots: i64 = connection
+            .query_row(
+                "SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(lots, 18_000);
+
+        let reversal: (Option<i64>, String, i64) = connection
+            .query_row(
+                "SELECT userId, userName, quantityMilli FROM productMovements WHERE type = 'reversal'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(reversal, (None, "Sistema".to_owned(), 5_000));
+
+        let n06: (String, String, Option<i64>) = connection
+            .query_row(
+                "SELECT priority, message, entityId FROM notifications WHERE type = 'N-06'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let number: String = connection
+            .query_row(
+                "SELECT number FROM invoices WHERE id = ?1",
+                [expiring],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            n06,
+            (
+                "INFORMATIVO".to_owned(),
+                format!("Factura de reserva cancelada: Factura # {number} - Cliente: Luis García - Motivo: Tiempo límite excedido"),
+                Some(expiring),
+            )
+        );
+
+        // Volver a pasar no la cancela otra vez ni repite el aviso.
+        assert_eq!(super::expire_reservations(&connection, later).unwrap(), 0);
+        let n06_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE type = 'N-06'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(n06_count, 1);
+    }
+
+    #[test]
+    fn rs02_reservations_also_expire_at_startup() {
+        let (mut connection, now, client_id, product_id) = reservation_fixture("reservaini", 67);
+        let expiring = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "1",
+            "2026-10-05",
+        );
+        let later = Utc.with_ymd_and_hms(2026, 10, 9, 16, 0, 0).unwrap();
+
+        crate::automation::run_startup_processes(&mut connection, later);
+        let status: String = connection
+            .query_row(
+                "SELECT status FROM invoices WHERE id = ?1",
+                [expiring],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "cancelled");
     }
 }

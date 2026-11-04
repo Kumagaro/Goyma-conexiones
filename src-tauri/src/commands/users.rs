@@ -65,7 +65,10 @@ fn insert_user(
     let password_hash = hash_password(user.password)
         .map_err(|_| internal_error("create_user password hashing failed"))?;
     let created_at = now.to_rfc3339_opts(SecondsFormat::Secs, true);
-    connection
+    let transaction = connection
+        .transaction()
+        .map_err(|_| internal_error("create_user transaction start failed"))?;
+    transaction
         .execute(
             "INSERT INTO users (username, passwordHash, role, phone, nationalId, createdAt)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -80,7 +83,11 @@ fn insert_user(
         )
         .map_err(map_create_user_error)?;
 
-    let id = connection.last_insert_rowid();
+    let id = transaction.last_insert_rowid();
+    notify_user_change(&transaction, "creado", user.username, now)?;
+    transaction
+        .commit()
+        .map_err(|_| internal_error("create_user transaction commit failed"))?;
     Ok(UserListItem {
         id,
         username: user.username.to_owned(),
@@ -418,6 +425,7 @@ pub fn update_user_inner(
             (&username, role, phone, national_id, user_id),
         )
         .map_err(|error| map_user_unique_error(error, "update_user"))?;
+    notify_user_change(&transaction, "editado", &username, now)?;
     transaction
         .commit()
         .map_err(|_| internal_error("update_user transaction commit failed"))?;
@@ -521,13 +529,15 @@ pub fn delete_user_inner(
         .transaction()
         .map_err(|_| internal_error("delete_user transaction start failed"))?;
 
-    let current_role: Option<String> = transaction
-        .query_row("SELECT role FROM users WHERE id = ?1", [user_id], |row| {
-            row.get(0)
-        })
+    let target: Option<String> = transaction
+        .query_row(
+            "SELECT username FROM users WHERE id = ?1",
+            [user_id],
+            |row| row.get(0),
+        )
         .optional()
         .map_err(|_| internal_error("delete_user target lookup failed"))?;
-    let Some(_current_role) = current_role else {
+    let Some(deleted_username) = target else {
         return Err(user_not_found("delete_user target does not exist"));
     };
 
@@ -536,6 +546,7 @@ pub fn delete_user_inner(
     transaction
         .execute("DELETE FROM users WHERE id = ?1", [user_id])
         .map_err(|_| internal_error("delete_user database deletion failed"))?;
+    notify_user_change(&transaction, "eliminado", &deleted_username, now)?;
 
     transaction
         .commit()
@@ -655,6 +666,25 @@ pub fn reset_user_password(
     result
 }
 
+/// N-13 (NT-02): solo lo ve el Administrador, en la misma transacción.
+fn notify_user_change(
+    connection: &Connection,
+    action: &str,
+    username: &str,
+    now: DateTime<Utc>,
+) -> Result<(), AppError> {
+    crate::db::notifications::notify(
+        connection,
+        "N-13",
+        crate::db::notifications::INFO,
+        &format!("Usuario {action}: {username}"),
+        None,
+        crate::db::notifications::Audience::Admin,
+        now,
+    )
+    .map_err(|_| internal_error("user change notification failed"))
+}
+
 fn user_not_found(cause: &str) -> AppError {
     AppError::new("notFound", USER_NOT_FOUND_MESSAGE, cause)
 }
@@ -757,6 +787,73 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(error.code, code);
         assert_eq!(error.message, message);
+    }
+
+    #[test]
+    fn n13_creating_editing_and_deleting_a_user_notify_only_the_administrator() {
+        let now = Utc::now();
+        let mut connection = setup_test_db();
+        create_admin_session(&connection, now);
+
+        let created = create_user(
+            &mut connection,
+            now,
+            "nuevocontador",
+            "contador",
+            "+5350000021",
+            "12345678921",
+            VALID_PASSWORD,
+        )
+        .unwrap();
+        update_user_inner(
+            &mut connection,
+            now,
+            created.id,
+            "contadoredit",
+            "contador",
+            "+5350000021",
+            "12345678921",
+        )
+        .unwrap();
+        crate::commands::users::delete_user_inner(&mut connection, now, created.id).unwrap();
+        // Un rechazo no avisa.
+        assert!(create_user(
+            &mut connection,
+            now,
+            "otrocontador",
+            "contador",
+            "+5350000021",
+            "12345678921",
+            "corta",
+        )
+        .is_err());
+
+        let rows: Vec<(String, String, String, String, Option<String>)> = connection
+            .prepare("SELECT type, priority, message, audience, entityType FROM notifications ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let expected = |message: &str| {
+            (
+                "N-13".to_owned(),
+                "INFORMATIVO".to_owned(),
+                message.to_owned(),
+                "admin".to_owned(),
+                None,
+            )
+        };
+        assert_eq!(
+            rows,
+            vec![
+                expected("Usuario creado: nuevocontador"),
+                expected("Usuario editado: contadoredit"),
+                expected("Usuario eliminado: contadoredit"),
+            ]
+        );
     }
 
     #[test]

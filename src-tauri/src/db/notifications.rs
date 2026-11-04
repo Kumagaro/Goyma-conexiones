@@ -29,6 +29,83 @@ impl AffectedProductsKind {
     }
 }
 
+pub const CRITICAL: &str = "CRÍTICO";
+pub const WARNING: &str = "ADVERTENCIA";
+pub const INFO: &str = "INFORMATIVO";
+
+/// Lo que abre una notificación al hacer clic (NT-04).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entity {
+    Product(i64),
+    Invoice(i64),
+}
+
+/// Quién la ve: N-13 (gestión de usuarios) es solo del Administrador.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Audience {
+    All,
+    Admin,
+}
+
+/// Inserta una notificación con su entidad y audiencia (`plan-04` §3.3).
+pub fn notify(
+    connection: &Connection,
+    notification_type: &str,
+    priority: &str,
+    message: &str,
+    entity: Option<Entity>,
+    audience: Audience,
+    now: DateTime<Utc>,
+) -> rusqlite::Result<()> {
+    let (entity_type, entity_id) = match entity {
+        Some(Entity::Product(id)) => (Some("product"), Some(id)),
+        Some(Entity::Invoice(id)) => (Some("invoice"), Some(id)),
+        None => (None, None),
+    };
+    let audience = match audience {
+        Audience::All => "all",
+        Audience::Admin => "admin",
+    };
+    connection.execute(
+        "INSERT INTO notifications (type, priority, message, entityType, entityId, audience, createdAt)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![
+            notification_type,
+            priority,
+            message,
+            entity_type,
+            entity_id,
+            audience,
+            format_utc_timestamp(now)
+        ],
+    )?;
+    Ok(())
+}
+
+/// Marca que la situación ya avisó; devuelve `true` solo la primera vez
+/// (NT-03: una vez por situación).
+pub fn watch_enter(
+    connection: &Connection,
+    kind: &str,
+    key: &str,
+    now: DateTime<Utc>,
+) -> rusqlite::Result<bool> {
+    let inserted = connection.execute(
+        "INSERT OR IGNORE INTO notificationWatches (kind, entityKey, createdAt) VALUES (?1, ?2, ?3)",
+        (kind, key, format_utc_timestamp(now)),
+    )?;
+    Ok(inserted == 1)
+}
+
+/// La situación terminó: si vuelve, avisará de nuevo.
+pub fn watch_leave(connection: &Connection, kind: &str, key: &str) -> rusqlite::Result<()> {
+    connection.execute(
+        "DELETE FROM notificationWatches WHERE kind = ?1 AND entityKey = ?2",
+        (kind, key),
+    )?;
+    Ok(())
+}
+
 pub fn insert_notification(
     connection: &Connection,
     notification_type: &str,
@@ -60,20 +137,11 @@ pub fn insert_affected_products_notification(
     });
 
     let affected_count = ordered_products.len();
-    let mut message = format!(
+    let message = format!(
         "{}: {}",
         kind.message_prefix(),
-        ordered_products
-            .iter()
-            .take(MAX_LISTED_PRODUCTS)
-            .map(|(_, name)| name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
+        product_list(&ordered_products)
     );
-
-    if affected_count > MAX_LISTED_PRODUCTS {
-        message.push_str(&format!(" y {} más", affected_count - MAX_LISTED_PRODUCTS));
-    }
 
     insert_notification(
         connection,
@@ -84,6 +152,50 @@ pub fn insert_affected_products_notification(
     )?;
 
     Ok(affected_count)
+}
+
+/// Nombres separados por comas; a partir del 21.º, "y N más".
+fn product_list(ordered_products: &[(i64, String)]) -> String {
+    let mut list = ordered_products
+        .iter()
+        .take(MAX_LISTED_PRODUCTS)
+        .map(|(_, name)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if ordered_products.len() > MAX_LISTED_PRODUCTS {
+        list.push_str(&format!(
+            " y {} más",
+            ordered_products.len() - MAX_LISTED_PRODUCTS
+        ));
+    }
+    list
+}
+
+/// N-12: la purga automática (P-08) eliminó estos descontinuados.
+pub fn insert_purged_products_notification(
+    connection: &Connection,
+    products: &[(i64, String)],
+    now: DateTime<Utc>,
+) -> rusqlite::Result<()> {
+    if products.is_empty() {
+        return Ok(());
+    }
+    let mut ordered_products = products.to_vec();
+    sort_spanish(&mut ordered_products, |(id, name)| {
+        (spanish_sort_key(name), *id)
+    });
+    notify(
+        connection,
+        "N-12",
+        INFO,
+        &format!(
+            "Se eliminaron automáticamente estos productos descontinuados: {}",
+            product_list(&ordered_products)
+        ),
+        None,
+        Audience::All,
+        now,
+    )
 }
 
 #[cfg(test)]

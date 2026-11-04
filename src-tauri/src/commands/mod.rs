@@ -5,6 +5,7 @@ pub mod conversions;
 pub mod dashboard;
 pub mod history;
 pub mod invoices;
+pub mod notifications;
 pub mod products;
 pub mod suppliers;
 pub mod units;

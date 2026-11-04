@@ -202,6 +202,7 @@ describe("facturasView submódulo service", () => {
       "Emisión",
       "Total",
       "Estado",
+      "Reservada hasta",
       "Acciones",
     ]);
     // Las líneas de servicio son insumos cobrados a precio de venta (FS-03).

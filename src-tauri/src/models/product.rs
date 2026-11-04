@@ -99,6 +99,20 @@ pub struct ProductDetail {
     pub discontinued_at: Option<String>,
     pub remaining_days: Option<i64>,
     pub expired_cleanup_warning: Option<String>,
+    /// RS-03: suma de sus líneas en reservas activas.
+    pub reserved_quantity: String,
+    pub reserved_invoices: Vec<ReservedInvoice>,
+}
+
+/// Una reserva activa que incluye el producto (enlace desde su detalle).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReservedInvoice {
+    pub id: i64,
+    pub number: String,
+    pub invoice_type: String,
+    pub reserved_until: String,
+    pub quantity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -342,11 +356,13 @@ mod tests {
             discontinued_at: Some("2026-10-03T12:00:00Z".to_owned()),
             remaining_days: Some(30),
             expired_cleanup_warning: None,
+            reserved_quantity: "0".to_owned(),
+            reserved_invoices: vec![],
         };
         let detail_json = serde_json::to_value(detail).unwrap();
         assert_eq!(
             detail_json,
-            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null})
+            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null, "reservedQuantity": "0", "reservedInvoices": []})
         );
         assert_eq!(detail_json["isDiscontinued"], true);
         assert_eq!(detail_json["discontinuedAt"], "2026-10-03T12:00:00Z");
@@ -359,6 +375,8 @@ mod tests {
             discontinued_at: None,
             remaining_days: None,
             expired_cleanup_warning: Some("aviso".to_owned()),
+            reserved_quantity: "0".to_owned(),
+            reserved_invoices: vec![],
         };
         assert_eq!(
             serde_json::to_value(detail_with_warning).unwrap()["expiredCleanupWarning"],

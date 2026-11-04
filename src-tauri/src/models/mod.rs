@@ -5,6 +5,7 @@ pub mod conversion;
 pub mod invoice;
 pub mod invoice_line;
 pub mod lot;
+pub mod notification;
 pub mod product;
 pub mod product_movement;
 pub mod session;

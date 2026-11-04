@@ -587,6 +587,7 @@ fn supplier_invoice_history(
                     quantity: None,
                     product_count,
                     created_by_name,
+                    reserved_until: None,
                 }
             },
         )
