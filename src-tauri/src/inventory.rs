@@ -420,6 +420,212 @@ fn internal_error(cause: &str) -> AppError {
     AppError::new("internal", "Ocurrió un error inesperado", cause)
 }
 
+// ---------- Unidad por línea (spec-04 CV-01, D-10) ----------
+
+const NO_CONVERSION_MESSAGE: &str = "No hay una conversión entre esas unidades";
+
+/// Unidad que el usuario eligió en una línea, distinta de la del producto.
+/// La conversión es de un paso, directa o inversa (S-08), y se guarda como
+/// fracción exacta: 1 unidad elegida = `numerator / denominator` unidades del
+/// producto. El inventario siempre va en la unidad del producto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineUnit {
+    pub unit_id: i64,
+    pub name: String,
+    pub abbreviation: String,
+    pub entered_milli: i64,
+    numerator: i128,
+    denominator: i128,
+}
+
+impl LineUnit {
+    /// Cantidad en la unidad del producto, a 3 decimales (mitad hacia arriba).
+    pub fn product_milli(&self) -> i64 {
+        round_half_up(
+            i128::from(self.entered_milli) * self.numerator,
+            self.denominator,
+        ) as i64
+    }
+
+    /// Factor guardado en la línea (unidades del producto por unidad elegida).
+    pub fn factor_micro(&self) -> i64 {
+        round_half_up(self.numerator * 1_000_000, self.denominator) as i64
+    }
+
+    /// Precio por unidad elegida → por unidad del producto (costo del lote).
+    pub fn per_product_unit(&self, cents: i64) -> i64 {
+        round_half_up(i128::from(cents) * self.denominator, self.numerator) as i64
+    }
+
+    /// Precio por unidad del producto → por unidad elegida (precio de venta).
+    pub fn per_entered_unit(&self, cents: i64) -> i64 {
+        round_half_up(i128::from(cents) * self.numerator, self.denominator) as i64
+    }
+}
+
+/// Resuelve la unidad elegida para una línea. `None` si no se eligió o es la
+/// del producto; error si no hay conversión de un paso con la del producto.
+pub fn resolve_line_unit(
+    connection: &Connection,
+    product_id: i64,
+    unit_id: Option<i64>,
+    entered_milli: i64,
+) -> Result<Option<LineUnit>, AppError> {
+    let Some(unit_id) = unit_id else {
+        return Ok(None);
+    };
+    let product_unit: Option<i64> = connection
+        .query_row(
+            "SELECT unitId FROM products WHERE id = ?1",
+            [product_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| internal_error("failed to read product unit for line"))?
+        .flatten();
+    if product_unit == Some(unit_id) {
+        return Ok(None);
+    }
+    let no_conversion = || {
+        AppError::new(
+            "validationFailed",
+            NO_CONVERSION_MESSAGE,
+            "line unit has no one-step conversion to the product unit",
+        )
+    };
+    let product_unit = product_unit.ok_or_else(no_conversion)?;
+    let unit: (String, String) = connection
+        .query_row(
+            "SELECT name, abbreviation FROM units WHERE id = ?1",
+            [unit_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| internal_error("failed to read line unit"))?
+        .ok_or_else(|| AppError::new("notFound", "La unidad ya no existe", "line unit missing"))?;
+    // Directa: 1 elegida = f producto. Inversa: 1 producto = f elegidas.
+    let (from_id, factor_micro): (i64, i64) = connection
+        .query_row(
+            "SELECT fromUnitId, factorMicro FROM unitConversions
+             WHERE (fromUnitId = ?1 AND toUnitId = ?2) OR (fromUnitId = ?2 AND toUnitId = ?1)",
+            [unit_id, product_unit],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|_| internal_error("failed to read line unit conversion"))?
+        .ok_or_else(no_conversion)?;
+    let (numerator, denominator) = if from_id == unit_id {
+        (i128::from(factor_micro), 1_000_000)
+    } else {
+        (1_000_000, i128::from(factor_micro))
+    };
+    let line_unit = LineUnit {
+        unit_id,
+        name: unit.0,
+        abbreviation: unit.1,
+        entered_milli,
+        numerator,
+        denominator,
+    };
+    if !(1..=999_999_999).contains(&line_unit.product_milli()) {
+        return Err(AppError::new(
+            "validationFailed",
+            "La cantidad convertida a la unidad del producto no es válida",
+            "converted line quantity out of range",
+        ));
+    }
+    Ok(Some(line_unit))
+}
+
+#[cfg(test)]
+mod line_unit_tests {
+    use super::resolve_line_unit;
+    use crate::test_utils::{
+        insert_conversion_fixture, insert_product_fixture, insert_unit_fixture, setup_test_db,
+    };
+
+    #[test]
+    fn direct_and_inverse_one_step_conversions_round_to_three_decimals() {
+        let connection = setup_test_db();
+        let unit = insert_unit_fixture(&connection, "Unidad", "u");
+        let box_unit = insert_unit_fixture(&connection, "Caja", "cj");
+        let dozen = insert_unit_fixture(&connection, "Docena", "dz");
+        let pallet = insert_unit_fixture(&connection, "Palé", "pl");
+        // 1 Caja = 12 u (directa); 1 u = 0,083333 Docena (se usa al revés).
+        insert_conversion_fixture(&connection, box_unit, unit, 12_000_000);
+        insert_conversion_fixture(&connection, unit, dozen, 83_333);
+        insert_conversion_fixture(&connection, pallet, box_unit, 40_000_000);
+        let product = insert_product_fixture(
+            &connection,
+            "Cable",
+            None,
+            Some(unit),
+            100,
+            0,
+            0,
+            "active",
+            None,
+            None,
+        );
+
+        assert_eq!(
+            resolve_line_unit(&connection, product, None, 2_000).unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_line_unit(&connection, product, Some(unit), 2_000).unwrap(),
+            None
+        );
+
+        let boxes = resolve_line_unit(&connection, product, Some(box_unit), 2_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (boxes.product_milli(), boxes.factor_micro()),
+            (24_000, 12_000_000)
+        );
+        assert_eq!(
+            (boxes.name.as_str(), boxes.abbreviation.as_str()),
+            ("Caja", "cj")
+        );
+        // Compra: 30,00 la caja → 2,50 la unidad. Venta: 2,50 la unidad → 30,00 la caja.
+        assert_eq!(boxes.per_product_unit(3_000), 250);
+        assert_eq!(boxes.per_entered_unit(250), 3_000);
+
+        // Inversa: 1 u = 0,083333 Docena → 1 Docena ≈ 12,000048 u; 1,5 docenas = 18 u.
+        let dozens = resolve_line_unit(&connection, product, Some(dozen), 1_500)
+            .unwrap()
+            .unwrap();
+        assert_eq!(dozens.product_milli(), 18_000);
+
+        // Sin conversión de un paso (Palé → Caja → u no se encadena).
+        let error = resolve_line_unit(&connection, product, Some(pallet), 1_000).unwrap_err();
+        assert_eq!(error.message, "No hay una conversión entre esas unidades");
+
+        let without_unit = insert_product_fixture(
+            &connection,
+            "Suelto",
+            None,
+            None,
+            100,
+            0,
+            0,
+            "active",
+            None,
+            None,
+        );
+        let error =
+            resolve_line_unit(&connection, without_unit, Some(box_unit), 1_000).unwrap_err();
+        assert_eq!(error.message, "No hay una conversión entre esas unidades");
+        assert_eq!(
+            resolve_line_unit(&connection, product, Some(9_999), 1_000)
+                .unwrap_err()
+                .code,
+            "notFound"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};

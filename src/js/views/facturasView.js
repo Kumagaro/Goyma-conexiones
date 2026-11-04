@@ -11,6 +11,8 @@ import {
   createSaleInvoice,
   createServiceInvoice,
   deleteInvoice,
+  exportInvoicePdf,
+  getInvoicePrintModel,
   downloadInvoiceAttachment,
   getInvoice,
   listInvoices,
@@ -46,6 +48,8 @@ import {
 } from "../utils/feedback.js";
 import { bindDateSort, sortByDate } from "../utils/dateSort.js";
 import { debounce } from "../utils/requestGuard.js";
+import { openPrintPreview } from "./printPreview.js";
+import { listUnitOptionsForProduct } from "../services/productsService.js";
 
 const PAYMENT_LABELS = {
   cash: "Efectivo",
@@ -69,6 +73,12 @@ export function initFacturasView() {
 }
 
 // ===================== Utilidades comunes =====================
+
+/** Factor "12" o "0,083333" de listUnitOptionsForProduct → número. */
+function parseFactor(value) {
+  const factor = Number(String(value ?? "1").replace(",", "."));
+  return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
 
 function setText(id, value) {
   const el = document.getElementById(id);
@@ -522,6 +532,8 @@ function createInvoiceSubmodule(cfg) {
         ? item.sellingPriceCents
         : null,
       productStatus: item?.isDiscontinued ? "discontinued" : "active",
+      unitId: null,
+      factor: 1,
     });
     renderLines();
     field("lineas-body")
@@ -580,12 +592,18 @@ function createInvoiceSubmodule(cfg) {
   const isDiscontinuedLine = (line) =>
     line.productIdOriginal != null && line.productStatus === "discontinued";
 
+  // CV-01: precio vigente × factor de la unidad elegida (total preliminar).
+  function linePriceCents(line) {
+    if (line.priceCents == null) return null;
+    return Math.round(line.priceCents * (line.factor ?? 1));
+  }
+
   function lineSubtotalCents(line) {
     const quantityMilli = parseDecimal(line.quantity, 3);
     const unitCents = isEntry
       ? parseDecimal(line.unitPrice, 2)
       : showsSalePrice
-        ? line.priceCents
+        ? linePriceCents(line)
         : null;
     if (quantityMilli == null || unitCents == null) return null;
     return Math.round((quantityMilli * unitCents) / 1000);
@@ -642,7 +660,7 @@ function createInvoiceSubmodule(cfg) {
       const quantity = document.createElement("div");
       quantity.append(lineInput(line, index, "quantity", "Cantidad", deleted));
       const unit = document.createElement("div");
-      unit.textContent = line.unitAbbreviation ?? "—";
+      unit.append(unitControl(line, index, deleted));
       const price = document.createElement("div");
       if (isEntry) {
         price.append(
@@ -657,7 +675,7 @@ function createInvoiceSubmodule(cfg) {
       } else {
         price.className = "li-costo";
         price.textContent = showsSalePrice
-          ? formatMoney(line.priceCents)
+          ? formatMoney(linePriceCents(line))
           : "Al guardar";
       }
       const subtotal = document.createElement("div");
@@ -683,6 +701,58 @@ function createInvoiceSubmodule(cfg) {
       container.append(row);
     });
     updateTotals();
+    lines.forEach((line) => void loadUnitOptions(line));
+  }
+
+  // ---------- Unidad por línea (spec-04 CV-01) ----------
+
+  /** Pide una vez las unidades del producto y repinta al llegar. */
+  async function loadUnitOptions(line) {
+    if (line.productId == null || line.unitOptions !== undefined) return;
+    line.unitOptions = null;
+    try {
+      line.unitOptions =
+        (await listUnitOptionsForProduct(line.productId)) ?? [];
+    } catch {
+      line.unitOptions = [];
+    }
+    const chosen = line.unitOptions.find(
+      (option) => option.unitId === line.unitId,
+    );
+    if (chosen) line.factor = parseFactor(chosen.factor);
+    if (lines.includes(line)) renderLines();
+  }
+
+  /** Selector si el producto tiene conversiones; si no, su unidad en texto. */
+  function unitControl(line, index, disabled) {
+    const options = line.unitOptions ?? [];
+    if (disabled || options.length < 2) {
+      const text = document.createElement("span");
+      text.textContent = line.unitAbbreviation ?? "—";
+      return text;
+    }
+    const select = document.createElement("select");
+    select.dataset.lineField = "unit";
+    select.setAttribute("aria-label", `Unidad de ${line.productName}`);
+    for (const option of options) {
+      const item = document.createElement("option");
+      item.value = String(option.unitId);
+      item.textContent = option.abbreviation;
+      select.append(item);
+    }
+    select.value = String(line.unitId ?? options[0].unitId);
+    select.addEventListener("change", () => {
+      const option = options.find(
+        (item) => String(item.unitId) === select.value,
+      );
+      // La primera es la del producto: elegirla es no convertir.
+      lines[index].unitId =
+        option && option !== options[0] ? option.unitId : null;
+      lines[index].unitAbbreviation = option?.abbreviation ?? null;
+      lines[index].factor = parseFactor(option?.factor);
+      renderLines();
+    });
+    return select;
   }
 
   function updateTotals() {
@@ -881,18 +951,31 @@ function createInvoiceSubmodule(cfg) {
     if (notes) notes.value = detail.notes ?? "";
     const reservedUntil = field("reservar-hasta");
     if (reservedUntil) reservedUntil.value = detail.reservedUntil ?? "";
-    lines = (detail.lines ?? []).map((line) => ({
-      productIdOriginal: line.productIdOriginal,
-      productId: line.productStatus ? line.productIdOriginal : null,
-      productName: line.productName ?? "",
-      unitAbbreviation: line.unitAbbreviation ?? null,
-      quantity: line.quantity ?? "",
-      originalQuantity: line.quantity ?? "",
-      unitPrice: centsToText(line.unitPriceCents),
-      // Las líneas existentes conservan su precio emitido (FS-01).
-      priceCents: line.unitPriceCents ?? null,
-      productStatus: line.productStatus ?? null,
-    }));
+    lines = (detail.lines ?? []).map((line) => {
+      const productId = line.productStatus ? line.productIdOriginal : null;
+      // CV-01: se edita lo escrito ("2 Caja"); un producto eliminado o una
+      // unidad que ya no existe se editan en la unidad del producto.
+      const entered =
+        productId != null && line.entered?.unitId != null ? line.entered : null;
+      const quantity = entered?.quantity ?? line.quantity ?? "";
+      const baseMilli = parseDecimal(line.quantity, 3);
+      const enteredMilli = entered ? parseDecimal(entered.quantity, 3) : null;
+      return {
+        productIdOriginal: line.productIdOriginal,
+        productId,
+        productName: line.productName ?? "",
+        unitAbbreviation:
+          entered?.abbreviation ?? line.unitAbbreviation ?? null,
+        quantity,
+        originalQuantity: quantity,
+        unitPrice: centsToText(entered?.unitPriceCents ?? line.unitPriceCents),
+        // Las líneas existentes conservan su precio emitido (FS-01).
+        priceCents: line.unitPriceCents ?? null,
+        productStatus: line.productStatus ?? null,
+        unitId: entered?.unitId ?? null,
+        factor: enteredMilli ? baseMilli / enteredMilli : 1,
+      };
+    });
     if (isEntry) setAttachmentLabel(detail.attachmentOriginalName ?? "");
     renderLines();
     showTab("create", createTab());
@@ -961,6 +1044,8 @@ function createInvoiceSubmodule(cfg) {
       }
       // Un producto eliminado no tiene id vigente: nunca se envía NaN.
       if (line.productId != null) item.productId = line.productId;
+      if (line.productId != null && line.unitId != null)
+        item.unitId = line.unitId;
       // El costo inicial del producto nuevo es el de su línea (FE-01).
       if (line.newProduct) {
         item.newProduct = {
@@ -1129,12 +1214,17 @@ function createInvoiceSubmodule(cfg) {
   // ---------- Detalle y cambio de estado ----------
 
   function bindDetailActions() {
+    const printButton = button("imprimir");
+    if (claim(printButton)) {
+      printButton.addEventListener("click", () => {
+        if (currentId != null) void printInvoice(currentId);
+      });
+    }
     const exportButton = button("exportar");
     if (claim(exportButton)) {
       exportButton.addEventListener("click", () => {
-        const exporter = window[cfg.exportFn];
-        if (currentDetail && typeof exporter === "function") {
-          exporter(currentDetail);
+        if (currentId != null) {
+          void exportInvoiceToPdf(currentId, currentDetail?.number);
         }
       });
     }
@@ -1220,12 +1310,17 @@ function createInvoiceSubmodule(cfg) {
         const row = document.createElement("div");
         row.className = "li-row li-body li-body-readonly";
         // En garantía e insumos el precio de la línea es el costo real.
+        // CV-01: se muestra lo escrito ("2 Caja"), no lo que se movió.
+        const entered = line?.entered ?? null;
         for (const text of [
           String(index + 1),
           line?.productName ?? "",
-          String(line?.quantity ?? ""),
-          line?.unitAbbreviation ?? line?.unitName ?? "—",
-          formatMoney(line?.unitPriceCents ?? 0),
+          String(entered?.quantity ?? line?.quantity ?? ""),
+          entered?.abbreviation ??
+            line?.unitAbbreviation ??
+            line?.unitName ??
+            "—",
+          formatMoney(entered?.unitPriceCents ?? line?.unitPriceCents ?? 0),
           formatMoney(line?.subtotalCents ?? 0),
         ]) {
           const cell = document.createElement("div");
@@ -1380,6 +1475,40 @@ function createInvoiceSubmodule(cfg) {
   };
 }
 
+// ---------- Imprimir y exportar (spec-04 IM-01, IM-02) ----------
+
+async function printInvoice(invoiceId) {
+  try {
+    openPrintPreview(await getInvoicePrintModel(invoiceId));
+  } catch (error) {
+    notifyError(error, "No se pudo preparar la impresión.");
+  }
+}
+
+async function chooseInvoicePdfDestination(number) {
+  try {
+    const path = await window.__TAURI__?.dialog?.save?.({
+      defaultPath: `${number ?? "factura"}.pdf`,
+      filters: [{ name: "Documento PDF", extensions: ["pdf"] }],
+    });
+    return typeof path === "string" && path ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+async function exportInvoiceToPdf(invoiceId, number) {
+  const destination = await chooseInvoicePdfDestination(number);
+  // Si el usuario cancela el diálogo, no pasa nada.
+  if (!destination) return;
+  try {
+    await exportInvoicePdf(invoiceId, destination);
+    notifySuccess("Factura exportada a PDF.");
+  } catch (error) {
+    notifyError(error, "No se pudo guardar el archivo.");
+  }
+}
+
 async function resolveDownloadDestination() {
   if (downloadDestinationOverride) return downloadDestinationOverride;
   try {
@@ -1414,7 +1543,6 @@ const entrySubmodule = createInvoiceSubmodule({
     "Las unidades que quedan de esta compra salen del inventario. Una factura cancelada no se puede reactivar ni editar.",
   noun: "entrada",
   title: "Factura de Entrada",
-  exportFn: "exportarFacturaPDF",
   windowFlag: "__facturasEntryPageChangeBound",
   create: (input) => createEntryInvoice(input),
   update: (input) => updateEntryInvoice(input),
@@ -1439,7 +1567,6 @@ const saleSubmodule = createInvoiceSubmodule({
   cancelMessage: OUTGOING_CANCEL_MESSAGE,
   noun: "venta",
   title: "Factura de Venta",
-  exportFn: "exportarFacturaVentaPDF",
   windowFlag: "__facturasSalePageChangeBound",
   create: (input) => createSaleInvoice(input),
   update: (input) => updateSaleInvoice(input),
@@ -1464,7 +1591,6 @@ const serviceSubmodule = createInvoiceSubmodule({
   cancelMessage: OUTGOING_CANCEL_MESSAGE,
   noun: "servicio",
   title: "Factura de Servicio",
-  exportFn: "exportarFacturaServicioPDF",
   windowFlag: "__facturasServicePageChangeBound",
   create: (input) => createServiceInvoice(input),
   update: (input) => updateServiceInvoice(input),
@@ -1499,7 +1625,6 @@ const guaranteeSubmodule = createInvoiceSubmodule({
   cancelMessage: OUTGOING_CANCEL_MESSAGE,
   noun: "garantía",
   title: "Factura de Garantía",
-  exportFn: "exportarFacturaGarantiaPDF",
   windowFlag: "__facturasGuaranteePageChangeBound",
   create: (input) => createGuaranteeInvoice(input),
   update: (input) => updateGuaranteeInvoice(input),
@@ -1532,7 +1657,6 @@ const installationSubmodule = createInvoiceSubmodule({
   cancelMessage: OUTGOING_CANCEL_MESSAGE,
   noun: "insumos",
   title: "Factura de Insumos",
-  exportFn: "exportarFacturaInsumoPDF",
   windowFlag: "__facturasInstallationPageChangeBound",
   create: (input) => createInstallationInvoice(input),
   update: (input) => updateInstallationInvoice(input),
@@ -1650,11 +1774,47 @@ function bindLossProductCombobox() {
     search: productSearch("loss"),
     formatOption: formatProductOption,
     isOptionDisabled: (item) => item?.isOutOfStock === true,
+    onSelect: (item) => void loadLossUnits(item),
   });
   // Se conserva el id del contrato de interfaz en el input real.
   const input = lossProductCombobox.getInput();
   input.id = "factura-perdida-producto";
   input.required = true;
+}
+
+// CV-01: la pérdida también puede escribirse en otra unidad del producto.
+async function loadLossUnits(product) {
+  const field = document.getElementById("factura-perdida-unidad-field");
+  const select = document.getElementById("factura-perdida-unidad");
+  if (!field || !select) return;
+  let options = [];
+  if (product?.id != null) {
+    try {
+      options = (await listUnitOptionsForProduct(Number(product.id))) ?? [];
+    } catch {
+      options = [];
+    }
+  }
+  // Otro producto pudo elegirse mientras llegaban las unidades.
+  if (lossProductCombobox?.getSelected()?.id !== product?.id) return;
+  select.replaceChildren(
+    ...options.map((option) => {
+      const item = document.createElement("option");
+      item.value = String(option.unitId);
+      item.textContent = option.abbreviation;
+      return item;
+    }),
+  );
+  field.hidden = options.length < 2;
+}
+
+function lossUnitId() {
+  const field = document.getElementById("factura-perdida-unidad-field");
+  const select = document.getElementById("factura-perdida-unidad");
+  // La primera opción es la del producto: elegirla es no convertir.
+  if (!field || field.hidden || !select || select.selectedIndex <= 0)
+    return null;
+  return Number(select.value);
 }
 
 function bindLossForm() {
@@ -1683,14 +1843,17 @@ function bindLossTableActions() {
 }
 
 function bindLossDetailActions() {
+  const printButton = document.getElementById("factura-perdida-imprimir");
+  if (claimLoss(printButton)) {
+    printButton.addEventListener("click", () => {
+      if (currentLossId != null) void printInvoice(currentLossId);
+    });
+  }
   const exportButton = document.getElementById("factura-perdida-exportar");
   if (claimLoss(exportButton)) {
     exportButton.addEventListener("click", () => {
-      if (
-        currentLossDetail &&
-        typeof window.exportarFacturaPerdidaPDF === "function"
-      ) {
-        window.exportarFacturaPerdidaPDF(currentLossDetail);
+      if (currentLossId != null) {
+        void exportInvoiceToPdf(currentLossId, currentLossDetail?.number);
       }
     });
   }
@@ -1786,9 +1949,11 @@ async function handleLossSubmit() {
   }
 
   // El costo no se envía: lo calcula el backend (FP-01).
+  const unitId = lossUnitId();
   const input = {
     productId: Number(product.id),
     quantity,
+    ...(unitId != null ? { unitId } : {}),
     invoiceDate,
     ...(notes ? { notes } : {}),
   };
@@ -1803,6 +1968,7 @@ async function handleLossSubmit() {
     notifySuccess("Pérdida registrada correctamente.");
     notifyWarning(result?.expiredCleanupWarning);
     lossProductCombobox?.setSelected(null);
+    void loadLossUnits(null);
     const cantidad = document.getElementById("factura-perdida-cantidad");
     if (cantidad) cantidad.value = "1";
     const descripcion = document.getElementById("factura-perdida-descripcion");
@@ -1833,7 +1999,10 @@ export async function openLossDetail(invoiceId) {
 function renderLossDetail(detail) {
   const line = detail?.lines?.[0] ?? null;
   const productName = line?.productName ?? "—";
-  const unit = line?.unitAbbreviation ?? line?.unitName ?? "";
+  // CV-01: lo escrito ("0,25 cj") y el costo por esa unidad.
+  const entered = line?.entered ?? null;
+  const unit =
+    entered?.abbreviation ?? line?.unitAbbreviation ?? line?.unitName ?? "";
   setText("factura-perdida-ver-numero-badge", detail?.number ?? "");
   setText(
     "factura-perdida-ver-titulo",
@@ -1847,11 +2016,15 @@ function renderLossDetail(detail) {
   );
   setText(
     "factura-perdida-ver-costo",
-    line ? formatMoney(line.unitPriceCents ?? 0) : "—",
+    line
+      ? formatMoney(entered?.unitPriceCents ?? line.unitPriceCents ?? 0)
+      : "—",
   );
   setText(
     "factura-perdida-ver-cantidad",
-    line ? `${line.quantity ?? ""}${unit ? ` ${unit}` : ""}` : "—",
+    line
+      ? `${entered?.quantity ?? line.quantity ?? ""}${unit ? ` ${unit}` : ""}`
+      : "—",
   );
   setText(
     "factura-perdida-ver-fecha",

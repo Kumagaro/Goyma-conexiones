@@ -150,7 +150,6 @@ describe("facturasView submódulo entry", () => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
     document.body.innerHTML = "";
-    delete window.exportarFacturaPDF;
     delete window.__facturasEntryPageChangeBound;
   });
 
@@ -390,28 +389,6 @@ describe("facturasView submódulo entry", () => {
         "/tmp/salida.pdf",
       );
     });
-  });
-
-  it('el botón "Exportar Factura" llama a exportarFacturaPDF con el DTO de getInvoice', async () => {
-    listInvoices.mockResolvedValue([]);
-    const detail = {
-      id: 4,
-      number: "E-00004",
-      invoiceType: "E",
-      status: "pending",
-      contactFullName: "Proveedor Cuatro",
-      date: "2026-02-10",
-      totalCents: 800,
-      lines: [],
-    };
-    getInvoice.mockResolvedValue(detail);
-    window.exportarFacturaPDF = vi.fn();
-    await initFacturasView();
-
-    const { __testHooks } = await import("../views/facturasView.js");
-    await __testHooks.openEntryDetail(4);
-    document.getElementById("factura-entrada-exportar").click();
-    expect(window.exportarFacturaPDF).toHaveBeenCalledWith(detail);
   });
 
   it("muestra un nombre de producto con HTML como texto (salida segura)", async () => {

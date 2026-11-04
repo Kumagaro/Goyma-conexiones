@@ -101,7 +101,6 @@ describe("facturasView submódulo guarantee (HTML de producción)", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
-    delete window.exportarFacturaGarantiaPDF;
     delete window.__facturasGuaranteePageChangeBound;
   });
 

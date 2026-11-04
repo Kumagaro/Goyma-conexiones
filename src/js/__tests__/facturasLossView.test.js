@@ -89,7 +89,6 @@ describe("facturasView submódulo loss (HTML de producción)", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
-    delete window.exportarFacturaPerdidaPDF;
     delete window.__facturasLossPageChangeBound;
   });
 
@@ -159,7 +158,7 @@ describe("facturasView submódulo loss (HTML de producción)", () => {
     expect(listbox.querySelector("[data-combobox-add]")).toBeNull();
   });
 
-  it("el formulario solo pide producto, cantidad, fecha y descripción", async () => {
+  it("el formulario solo pide producto, cantidad (con su unidad), fecha y descripción", async () => {
     await initFacturasView();
     const form = document.getElementById("factura-perdidas-form");
     const editable = Array.from(
@@ -170,6 +169,8 @@ describe("facturasView submódulo loss (HTML de producción)", () => {
     expect(editable).toEqual([
       "factura-perdida-producto",
       "factura-perdida-cantidad",
+      // spec-04 CV-01: oculto salvo que el producto tenga conversiones.
+      "factura-perdida-unidad",
       "factura-perdida-fecha",
       "factura-perdida-descripcion",
     ]);

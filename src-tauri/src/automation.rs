@@ -37,10 +37,28 @@ impl Default for Thresholds {
     }
 }
 
-/// shortcut: devuelve los valores por defecto de CF-04; la fase 3 (migración
-/// 4, `settings`) los leerá de la base.
-pub fn thresholds(_connection: &Connection) -> Thresholds {
-    Thresholds::default()
+/// Umbrales globales de CF-04 guardados en `settings` (migración 4); si
+/// falta una clave, su valor por defecto.
+pub fn thresholds(connection: &Connection) -> Thresholds {
+    let defaults = Thresholds::default();
+    let read = |key: &str, default: i64| {
+        connection
+            .query_row(
+                "SELECT CAST(value AS INTEGER) FROM settings WHERE key = ?1",
+                [key],
+                |row| row.get(0),
+            )
+            .unwrap_or(default)
+    };
+    Thresholds {
+        low_stock_units: read("lowStockThreshold", defaults.low_stock_units),
+        stale_invoice_days: read("staleInvoiceDays", defaults.stale_invoice_days),
+    }
+}
+
+/// "Stock bajo" en milésimas: 0 < cantidad < este valor (P-12, CF-04).
+pub fn low_stock_milli(connection: &Connection) -> i64 {
+    thresholds(connection).low_stock_units.saturating_mul(1_000)
 }
 
 /// Una entidad que hoy está en la situación vigilada y el aviso que le toca.

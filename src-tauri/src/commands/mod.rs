@@ -7,6 +7,7 @@ pub mod history;
 pub mod invoices;
 pub mod notifications;
 pub mod products;
+pub mod settings;
 pub mod suppliers;
 pub mod units;
 pub mod users;

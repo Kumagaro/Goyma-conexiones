@@ -1,4 +1,4 @@
-# Pendientes entre specs
+| PEN-20 | ~~Impresión de facturas y exportación formal a PDF.~~ **Resuelto** por `cierre-del-mvp` fase 3 (IM-01, IM-02: vista previa A4 con `window.print()` y PDF del backend con el mismo modelo, en los seis tipos y sin estado; jsPDF retirado). | undefined | — || PEN-19 | ~~Logo de la empresa en las facturas.~~ **Resuelto** por `cierre-del-mvp` fase 3 (CF-03: logo PNG/JPG de hasta 2 MB validado por contenido, junto a nombre, dirección, teléfono y NIT; encabeza la vista previa y el PDF). | undefined | — || PEN-07 | ~~Configuración: monedas adicionales al USD y tasas de cambio.~~ **Resuelto** por `cierre-del-mvp` fase 3 (CF-01, CF-02: monedas visibles por usuario, tasas con 6 decimales e historial inmutable, equivalentes en el detalle del producto; todo se sigue guardando en centavos de USD). Los equivalentes del dashboard llegan con la fase 4. | undefined | — || PEN-06 | ~~Uso real de las conversiones entre unidades en compras y ventas.~~ **Resuelto** por `cierre-del-mvp` fase 3 (CV-01: selector de unidad por línea en los seis tipos de factura, conversión directa o inversa de un paso; el inventario sigue en la unidad del producto y la línea guarda lo escrito). | undefined | — |# Pendientes entre specs
 
 Registro de lo que cada spec deja explícitamente fuera y debe retomarse en una spec posterior. Al redactar una spec nueva, revisar esta lista y marcar como resuelto (o mover) lo que le corresponda.
 
@@ -40,10 +40,10 @@ Registro de lo que cada spec deja explícitamente fuera y debe retomarse en una 
 
 **Estado actual de la tabla:** PEN-01 a PEN-22, de los cuales:
 
-- **Resueltos:** PEN-01, PEN-02, PEN-03, PEN-04, PEN-05, PEN-08, PEN-09, PEN-14, PEN-18.
+- **Resueltos:** PEN-01, PEN-02, PEN-03, PEN-04, PEN-05, PEN-06, PEN-07, PEN-08, PEN-09, PEN-14, PEN-18, PEN-19, PEN-20.
 - **Parcialmente resueltos:** PEN-10, PEN-12.
 - **Movidos:** PEN-11 (→ PEN-15).
-- **Pendientes:** PEN-06, PEN-07, PEN-13, PEN-15, PEN-16, PEN-17, PEN-19, PEN-20, PEN-21.
+- **Pendientes:** PEN-13, PEN-15, PEN-16, PEN-17, PEN-21.
 - **Decididos y en curso en `cierre-del-mvp`:** PEN-22 (intercambio CSV con Excel, fase 5).
 
 **Cobertura del documento de requisitos (revisión 2026-10-28):** RF-001 a RF-097 están en `autenticacion-y-usuarios`, `inventario-productos` y `contactos-facturacion-historial` (con las sustituciones decididas allí, p. ej. RF-097 → PEN-15 y RF-051 → FE-08). De RF-098 a RF-135, cada requisito tiene su pendiente: RF-098–RF-114 → PEN-16; RF-115–RF-118 y RF-121–RF-124 → PEN-01/PEN-02; RF-119–RF-120 → PEN-18; RF-125–RF-127 → PEN-07; RF-128 → PEN-19; RF-129–RF-132 → PEN-20; RF-133–RF-135 → PEN-21.

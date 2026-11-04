@@ -105,7 +105,6 @@ describe("facturasView submódulo installation (HTML de producción)", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
-    delete window.exportarFacturaInsumoPDF;
     delete window.__facturasInstallationPageChangeBound;
   });
 

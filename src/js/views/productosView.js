@@ -17,6 +17,11 @@ import {
   updateProduct,
 } from "../services/productsService.js";
 import { getProductAssociatedInvoices } from "../services/historyService.js";
+import {
+  getUserPreferences,
+  listExchangeRates,
+} from "../services/settingsService.js";
+import { equivalents } from "../utils/currency.js";
 import { searchUnits } from "../services/unitsService.js";
 import {
   formatCalendarDate,
@@ -525,6 +530,47 @@ function renderReservations(detail) {
   );
 }
 
+// CF-01: equivalentes en las monedas que eligió el usuario, con la tasa actual.
+async function renderEquivalents(detail) {
+  const card = document.getElementById("producto-ver-equivalentes-card");
+  const list = document.getElementById("producto-ver-equivalentes");
+  if (!card || !list) return;
+  card.hidden = true;
+  let preferences;
+  let rates;
+  try {
+    [preferences, rates] = await Promise.all([
+      getUserPreferences(),
+      listExchangeRates(),
+    ]);
+  } catch {
+    // Sin preferencias o tasas no hay equivalentes que mostrar.
+    return;
+  }
+  // Otro detalle pudo abrirse mientras llegaban las tasas.
+  if (currentProductDetail?.id !== detail.id) return;
+  const currencies = preferences?.visibleCurrencies ?? [];
+  const rows = [
+    ["Costo", detail.costCents],
+    ["Precio de venta", detail.sellingPriceCents],
+    ["Valor total", detail.valorTotalCents],
+  ]
+    .map(([label, cents]) => [
+      label,
+      equivalents(cents, currencies, rates ?? []),
+    ])
+    .filter(([, values]) => values.length);
+  list.replaceChildren(
+    ...rows.map(([label, values]) => {
+      const row = document.createElement("div");
+      row.className = "kpi-sec-value pv-text";
+      row.textContent = `${label}: ${values.join(" · ")}`;
+      return row;
+    }),
+  );
+  card.hidden = rows.length === 0;
+}
+
 function renderProductDetail(detail) {
   const discontinued = Boolean(detail.isDiscontinued);
   setText("producto-ver-id", formatId(detail.id));
@@ -546,6 +592,7 @@ function renderProductDetail(detail) {
   setText("producto-ver-ganancia", detail.profitPercent ?? "—");
   setText("producto-ver-stock", detail.quantity ?? "—");
   renderReservations(detail);
+  void renderEquivalents(detail);
   setText(
     "producto-ver-caducidad",
     detail.expiresOn ? formatCalendarDate(detail.expiresOn) : "No Aplica",

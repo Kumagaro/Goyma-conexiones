@@ -114,11 +114,6 @@ function showPage(pageId, el, label) {
     .forEach((a) => a.classList.remove("active"));
   if (el) el.classList.add("active");
 
-  if (targetId === "configuracion") {
-    renderMonedas();
-    renderHistorialTasas();
-    renderRateCards();
-  }
   if (targetId === "productos") {
     void window.showProductoTab?.(
       "list",
@@ -154,21 +149,6 @@ const ACCIONES_CLICK = {
   alternarSerieIngresos: (el) =>
     window.alternarSerieIngresos?.(Number(el.dataset.serie), el),
   irAPagina: (el) => irAPagina(el.dataset.tabla, Number(el.dataset.pagina)),
-  ordenarHistorialTasas: () =>
-    toggleOrdenFecha("historialTasas", renderHistorialTasas),
-  // shortcut: botones de demostración del mockup; la fase 3 (CF) los sustituye.
-  avisoDemo: (el) =>
-    import("./utils/feedback.js").then(({ notifyInfo }) =>
-      notifyInfo(el.dataset.mensaje),
-    ),
-};
-const ACCIONES_CAMPO = {
-  cambiarTamPagina: (el) => cambiarTamPagina(el.value),
-  activarMoneda: (el) => {
-    const moneda = monedasData[Number(el.dataset.indice)];
-    if (moneda) moneda.activo = el.checked;
-  },
-  actualizarEquivalencia: (el) => actualizarEquivalencia(el),
 };
 
 document.addEventListener("click", (event) => {
@@ -188,15 +168,6 @@ document.addEventListener("click", (event) => {
   const accion = boton && ACCIONES_CLICK[boton.dataset.action];
   if (accion) accion(boton);
 });
-for (const [tipo, atributo] of [
-  ["input", "inputAction"],
-  ["change", "changeAction"],
-]) {
-  document.addEventListener(tipo, (event) => {
-    const accion = ACCIONES_CAMPO[event.target?.dataset?.[atributo]];
-    if (accion) accion(event.target);
-  });
-}
 
 // ===== Sub-pestañas: Configuración =====
 function showConfigTab(tab, btn) {
@@ -316,65 +287,6 @@ function toggleOrdenFecha(clave, renderFn) {
 // Mock de facturas de entrada eliminado en la tarea 3.6.3: la sección
 // Facturas de Entrada se sirve desde SQLite vía facturasView.js.
 
-// DATOS DE PRUEBA - PLACEHOLDER
-// Estos datos serán reemplazados por llamadas al backend cuando se implemente
-// el módulo de tasas de cambio.
-const monedasData = [
-  { codigo: "USD", activo: true },
-  { codigo: "EUR", activo: true },
-  { codigo: "MLC", activo: true },
-  { codigo: "CAD", activo: false },
-  { codigo: "MXN", activo: false },
-  { codigo: "ZELLE", activo: false },
-  { codigo: "CLA", activo: false },
-  { codigo: "CUP", activo: true },
-];
-
-// DATOS DE PRUEBA - PLACEHOLDER
-// Estos datos serán reemplazados por llamadas al backend cuando se implemente
-// el módulo de historial de tasas.
-const historialTasasData = [
-  {
-    fecha: "01/01/2027, 9:30 AM",
-    moneda: "EUR",
-    anterior: "1 EUR = 1.080 USD",
-    nueva: "1 EUR = 1.095 USD",
-    referencia: "USD",
-    usuario: "@pepemilio",
-    rol: "Inversionista",
-  },
-  {
-    fecha: "01/01/2027, 11:49 AM",
-    moneda: "CUP",
-    anterior: "1 CUP = 0.150 USD",
-    nueva: "1 CUP = 0.095 USD",
-    referencia: "USD",
-    usuario: "@adamelisa",
-    rol: "Contadora",
-  },
-  {
-    fecha: "02/01/2027, 8:05 AM",
-    moneda: "MLC",
-    anterior: "1 MLC = 0.90 USD",
-    nueva: "1 MLC = 1.050 USD",
-    referencia: "USD",
-    usuario: "@adamelisa",
-    rol: "Contadora",
-  },
-];
-
-const rateCardsData = [
-  {
-    paso: 1,
-    codigo: "USD",
-    desc: "Moneda de referencia principal",
-    ref: "CUP",
-  },
-  { paso: 2, codigo: "CUP", desc: "Respecto a otras monedas", ref: "USD" },
-  { paso: 2, codigo: "EUR", desc: "Respecto a otras monedas", ref: "USD" },
-  { paso: 3, codigo: "MLC", desc: "Respecto al USD y CUP", ref: "USD" },
-];
-
 // =====================================================
 // ======================= Usuarios ====================
 // =====================================================
@@ -389,282 +301,12 @@ function formatearFecha(iso) {
   return `${d}/${m}/${y}`;
 }
 
-// ===== Exportación de facturas a PDF (tarea 4.5.8) =====
-// Las seis funciones reciben el DTO de `getInvoice` que les pasa
-// facturasView.js; ya no buscan en arreglos locales. jsPDF no interpreta
-// HTML, así que los textos del usuario no abren un riesgo de XSS.
-const PDF_PAYMENT_LABELS = {
-  cash: "Efectivo",
-  transfer: "Transferencia",
-  card: "Tarjeta",
-  zelle: "Zelle",
-};
-const PDF_TYPE_LABELS = {
-  E: "Entrada",
-  V: "Venta",
-  S: "Servicio",
-  GG: "Garantía",
-  GI: "Insumo",
-  P: "Pérdida",
-};
-const PDF_ENTRY_STATUS = {
-  pending: "Por Pagar",
-  completed: "Pagada",
-  cancelled: "Cancelada",
-};
-const PDF_SALE_STATUS = {
-  pending: "Por Cobrar",
-  completed: "Cobrada",
-  cancelled: "Cancelada",
-};
-const PDF_ASSOCIATED_STATUS = {
-  pending: "Pendiente",
-  completed: "Completada",
-  cancelled: "Cancelada",
-};
-
-function pdfMoney(cents) {
-  return (Number(cents || 0) / 100).toLocaleString("es-ES", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function exportarDetalleFacturaPDF(detail, config) {
-  if (!detail || typeof detail !== "object" || !window.jspdf) return false;
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  let y = 20;
-  doc.setFontSize(16);
-  doc.text(`${config.title} ${detail.number ?? ""}`, 14, y);
-  y += 10;
-
-  const header = [];
-  if (config.contactLabel) {
-    header.push(`${config.contactLabel}: ${detail.contactFullName || "—"}`);
-  }
-  header.push(
-    `${config.dateLabel ?? "Fecha de Emisión"}: ${formatearFecha(detail.date)}`,
-  );
-  if (config.statusLabels) {
-    header.push(
-      `Estado: ${config.statusLabels[detail.status] || detail.status || "—"}`,
-    );
-  }
-  if (config.withPayment) {
-    header.push(
-      `Método de Pago: ${PDF_PAYMENT_LABELS[detail.paymentMethod] || detail.paymentMethod || "—"}`,
-    );
-  }
-  if (config.associatedLabel) {
-    const associated = detail.associatedInvoice;
-    header.push(
-      `${config.associatedLabel}: ${
-        associated
-          ? `${associated.number} · ${PDF_TYPE_LABELS[associated.invoiceType] ?? associated.invoiceType}`
-          : "—"
-      }`,
-    );
-  }
-  doc.setFontSize(11);
-  for (const row of header) {
-    doc.text(row, 14, y);
-    y += 7;
-  }
-
-  y += 3;
-  doc.setFontSize(12);
-  doc.text(config.linesTitle ?? "Productos", 14, y);
-  y += 7;
-  doc.setFontSize(10);
-  doc.text("No.", 14, y);
-  doc.text("Producto", 26, y);
-  doc.text("Cant.", 110, y);
-  doc.text("Unidad", 130, y);
-  doc.text(config.priceLabel, 155, y);
-  doc.text("Subtotal", 175, y);
-  y += 5;
-  doc.line(14, y, 196, y);
-  y += 6;
-  (detail.lines || []).forEach((line, index) => {
-    doc.text(String(index + 1), 14, y);
-    doc.text(String(line.productName || "").slice(0, 35), 26, y);
-    doc.text(String(line.quantity ?? ""), 110, y);
-    doc.text(String(line.unitAbbreviation || line.unitName || "—"), 130, y);
-    doc.text(pdfMoney(line.unitPriceCents), 155, y);
-    doc.text(pdfMoney(line.subtotalCents), 175, y);
-    y += 7;
-  });
-
-  y += 5;
-  doc.setFontSize(12);
-  doc.text(`${config.totalLabel}: ${pdfMoney(detail.totalCents)} USD`, 140, y);
-  y += 10;
-  if (detail.notes) {
-    doc.setFontSize(10);
-    doc.text(
-      doc.splitTextToSize(`${config.notesLabel}: ${detail.notes}`, 182),
-      14,
-      y,
-    );
-  }
-  doc.save(`Factura_${detail.number}.pdf`);
-  return true;
-}
-
-function exportarFacturaPDF(detail) {
-  return exportarDetalleFacturaPDF(detail, {
-    title: "Factura de Entrada",
-    contactLabel: "Proveedor",
-    statusLabels: PDF_ENTRY_STATUS,
-    withPayment: true,
-    priceLabel: "Costo",
-    totalLabel: "Total",
-    notesLabel: "Observaciones",
-  });
-}
-
-function exportarFacturaVentaPDF(detail) {
-  return exportarDetalleFacturaPDF(detail, {
-    title: "Factura de Venta",
-    contactLabel: "Cliente",
-    statusLabels: PDF_SALE_STATUS,
-    withPayment: true,
-    priceLabel: "Precio",
-    totalLabel: "Total",
-    notesLabel: "Descripción",
-  });
-}
-
-function exportarFacturaServicioPDF(detail) {
-  return exportarDetalleFacturaPDF(detail, {
-    title: "Factura de Servicio",
-    contactLabel: "Cliente",
-    statusLabels: PDF_SALE_STATUS,
-    withPayment: true,
-    linesTitle: "Productos / Insumos",
-    priceLabel: "Precio",
-    totalLabel: "Total",
-    notesLabel: "Descripción",
-  });
-}
-
-function exportarFacturaGarantiaPDF(detail) {
-  return exportarDetalleFacturaPDF(detail, {
-    title: "Factura de Gasto de Garantía",
-    contactLabel: "Cliente",
-    statusLabels: PDF_ASSOCIATED_STATUS,
-    associatedLabel: "Factura Original",
-    priceLabel: "Costo",
-    totalLabel: "Costo Total",
-    notesLabel: "Descripción",
-  });
-}
-
-function exportarFacturaInsumoPDF(detail) {
-  return exportarDetalleFacturaPDF(detail, {
-    title: "Factura de Gasto de Insumos",
-    contactLabel: "Cliente",
-    statusLabels: PDF_ASSOCIATED_STATUS,
-    associatedLabel: "Factura de Servicio Asociada",
-    linesTitle: "Productos / Insumos",
-    priceLabel: "Costo",
-    totalLabel: "Costo Total",
-    notesLabel: "Descripción",
-  });
-}
-
-function exportarFacturaPerdidaPDF(detail) {
-  return exportarDetalleFacturaPDF(detail, {
-    title: "Factura de Pérdida",
-    dateLabel: "Fecha",
-    priceLabel: "Costo",
-    totalLabel: "Costo Total",
-    notesLabel: "Motivo de la Pérdida",
-  });
-}
-// ===== Fin de la exportación de facturas a PDF =====
+// spec-04 IM-01/IM-02: imprimir y exportar facturas viven en
+// views/printPreview.js y en el backend (invoice_print.rs); jsPDF se retiró.
 
 // Todas las facturas (entrada, venta, servicio, garantía, insumos, pérdidas
 // y lista general) las sirve facturasView.js desde SQLite; el mock se
 // eliminó en las tareas 3.6.3 y 4.5.9.
-
-function renderMonedas() {
-  const grid = document.getElementById("currency-grid");
-  if (!grid || grid.dataset.rendered) return;
-  grid.innerHTML = monedasData
-    .map(
-      (m, i) => `
-                <label class="currency-item">
-                    <span class="code"><span class="currency-flag">${m.codigo.slice(0, 3)}</span>${m.codigo}</span>
-                    <span class="switch">
-                        <input type="checkbox" ${m.activo ? "checked" : ""} data-change-action="activarMoneda" data-indice="${i}">
-                        <span class="track"></span>
-                    </span>
-                </label>
-            `,
-    )
-    .join("");
-  grid.dataset.rendered = "1";
-}
-
-function renderHistorialTasas() {
-  const body = document.getElementById("historial-tasas-body");
-  if (!body) return;
-  const filas = ordenarPorFecha(historialTasasData, "historialTasas", "fecha");
-  body.innerHTML = filas
-    .map(
-      (h) => `
-                <tr>
-                    <td>${h.fecha}</td>
-                    <td>${h.moneda}</td>
-                    <td>${h.anterior}</td>
-                    <td>${h.nueva}</td>
-                    <td>${h.referencia}</td>
-                    <td>${h.usuario}<span class="user-role">${h.rol}</span></td>
-                </tr>
-            `,
-    )
-    .join("");
-  body.dataset.rendered = "1";
-}
-
-function renderRateCards() {
-  const wrap = document.getElementById("rate-cards");
-  if (!wrap || wrap.dataset.rendered) return;
-  wrap.innerHTML = rateCardsData
-    .map(
-      (r) => `
-                <div class="rate-card">
-                    <div class="rate-card-head">
-                        <span class="rate-step">${r.paso}</span>
-                        <div>
-                            <div class="code">${r.codigo}</div>
-                            <div class="desc">${r.desc}</div>
-                        </div>
-                    </div>
-                    <div class="rate-row">
-                        <label>Tasa</label>
-                        <input type="text" placeholder="0.000" data-input-action="actualizarEquivalencia">
-                        <span class="rate-result">1 ${r.codigo} = xxxxxxx ${r.ref}</span>
-                    </div>
-                </div>
-            `,
-    )
-    .join("");
-  wrap.dataset.rendered = "1";
-}
-
-function actualizarEquivalencia(input) {
-  const card = input.closest(".rate-card");
-  const result = card.querySelector(".rate-result");
-  const base = result.textContent.split("=")[0].trim();
-  const ref = result.textContent.split(" ").pop();
-  const valor = parseFloat(input.value);
-  result.textContent = isNaN(valor)
-    ? `${base} = xxxxxxx ${ref}`
-    : `${base} = ${valor.toFixed(3)} ${ref}`;
-}
 
 // =====================================================
 // ========================= Perfil =====================
@@ -682,7 +324,6 @@ inicializarIconosOrdenFecha();
            ========================================================================= */
 const PAGINACION_OPCIONES = [10, 20, 50, 100];
 const PAGINACION_TAM_DEFECTO = 20;
-const PAGINACION_CLAVE_STORAGE = "tablasPorPagina";
 let PAGINACION_TAM = PAGINACION_TAM_DEFECTO;
 const paginacionEstado = {};
 
@@ -742,52 +383,18 @@ const PAGINABLES = [
   { id: "factura-garantia-ver-productos", filas: ".li-row.li-body" },
 ];
 
-/* ----- Tamaño de página (Configuración > General) ----- */
-function leerTamPaginaGuardado() {
-  let guardado = null;
-  try {
-    guardado = parseInt(localStorage.getItem(PAGINACION_CLAVE_STORAGE), 10);
-  } catch (e) {
-    guardado = null;
-  }
-  return PAGINACION_OPCIONES.includes(guardado)
-    ? guardado
-    : PAGINACION_TAM_DEFECTO;
-}
-
-function guardarTamPagina(valor) {
-  try {
-    localStorage.setItem(PAGINACION_CLAVE_STORAGE, String(valor));
-  } catch (e) {
-    /* Si el navegador bloquea el almacenamiento, el cambio igual aplica en esta sesión */
-  }
-}
-
-/* Se llama desde el select de Configuración > General */
-function cambiarTamPagina(valor) {
+/* ----- Tamaño de página (Configuración > General) -----
+   spec-04 CF-04: el tamaño es una preferencia del usuario guardada en la base;
+   configuracionView.js lo lee y lo aplica con esta función. */
+function establecerTamPagina(valor) {
   const nuevo = parseInt(valor, 10);
-  if (!PAGINACION_OPCIONES.includes(nuevo)) return;
-
+  if (!PAGINACION_OPCIONES.includes(nuevo) || nuevo === PAGINACION_TAM) return;
   PAGINACION_TAM = nuevo;
-  guardarTamPagina(nuevo);
-
   /* Todas las tablas vuelven a la página 1 con el nuevo tamaño */
   PAGINABLES.forEach((cfg) => {
     estadoPaginacion(cfg.id).pagina = 1;
     aplicarPaginacion(cfg);
   });
-
-  // spec-04 TO-01: el resultado sale como toast (script clásico: import dinámico).
-  import("./utils/feedback.js").then(({ notifySuccess }) =>
-    notifySuccess(
-      `Se mostrarán ${nuevo} elementos por página en todas las tablas.`,
-    ),
-  );
-}
-
-function sincronizarSelectPaginacion() {
-  const select = document.getElementById("config-elementos-pagina");
-  if (select) select.value = String(PAGINACION_TAM);
 }
 
 function configPaginacion(id) {
@@ -967,8 +574,6 @@ function alRepintarPaginable(cfg) {
 }
 
 function iniciarPaginacion() {
-  PAGINACION_TAM = leerTamPaginaGuardado();
-  sincronizarSelectPaginacion();
   PAGINABLES.forEach((cfg) => {
     const cont = document.getElementById(cfg.id);
     if (!cont) return;

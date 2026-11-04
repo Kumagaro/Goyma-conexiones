@@ -69,3 +69,13 @@ export function changeInvoiceStatus(invoiceId, status, paymentMethod) {
 export function deleteInvoice(invoiceId) {
   return invoke("delete_invoice", { invoiceId });
 }
+
+// spec-04 IM-01: documento de impresión (mismo modelo que el PDF).
+export function getInvoicePrintModel(invoiceId) {
+  return invoke("get_invoice_print_model", { invoiceId });
+}
+
+// spec-04 IM-02: PDF generado por el backend en la ruta elegida.
+export function exportInvoicePdf(invoiceId, destinationPath) {
+  return invoke("export_invoice_pdf", { invoiceId, destinationPath });
+}

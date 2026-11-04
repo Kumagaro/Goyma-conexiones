@@ -9,6 +9,7 @@ pub mod notification;
 pub mod product;
 pub mod product_movement;
 pub mod session;
+pub mod settings;
 pub mod supplier;
 pub mod unit;
 pub mod user;

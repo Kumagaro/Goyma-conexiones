@@ -1,4 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   chooseFromCombobox,
   lineInputs,
@@ -27,6 +35,8 @@ vi.mock("../services/invoicesService.js", () => ({
   downloadInvoiceAttachment: vi.fn(),
   deleteInvoice: vi.fn(),
   changeInvoiceStatus: vi.fn(),
+  getInvoicePrintModel: vi.fn(),
+  exportInvoicePdf: vi.fn(),
 }));
 
 vi.mock("../services/clientsService.js", () => ({
@@ -38,6 +48,10 @@ vi.mock("../services/clientsService.js", () => ({
 vi.mock("../services/suppliersService.js", () => ({
   searchSuppliers: vi.fn(),
   createSupplier: vi.fn(),
+}));
+
+vi.mock("../services/productsService.js", () => ({
+  listUnitOptionsForProduct: vi.fn(),
 }));
 
 vi.mock("../services/historyService.js", () => ({
@@ -63,7 +77,7 @@ vi.mock("../components/confirmDialog.js", () => ({
 
 // Con isolate:false los módulos se comparten entre archivos de test: se
 // recarga la vista para que use los mocks de este archivo.
-let invoices, clients, suppliers, history, confirmDialog, view;
+let invoices, clients, suppliers, history, products, confirmDialog, view;
 let pagesHtml = "";
 
 beforeAll(async () => {
@@ -72,6 +86,7 @@ beforeAll(async () => {
   clients = await import("../services/clientsService.js");
   suppliers = await import("../services/suppliersService.js");
   history = await import("../services/historyService.js");
+  products = await import("../services/productsService.js");
   ({ confirmDialog } = await import("../components/confirmDialog.js"));
   view = await import("../views/facturasView.js");
   pagesHtml = await loadInvoicePagesHtml();
@@ -213,6 +228,8 @@ beforeEach(async () => {
   clients.searchClients.mockResolvedValue([ANA]);
   suppliers.searchSuppliers.mockResolvedValue([ANA]);
   history.searchProductsForInvoice.mockResolvedValue([CABLE, AGOTADO]);
+  // Sin conversiones salvo que el test las pida (CV-01).
+  products.listUnitOptionsForProduct.mockResolvedValue([]);
   clients.getClientDetail.mockResolvedValue({
     invoiceHistory: [
       { id: 9, number: "V-00009", invoiceType: "V", status: "pending" },
@@ -1258,5 +1275,309 @@ describe("reserva al editar (spec-04 RS-01)", () => {
       document.getElementById("factura-garantia-reserva-field"),
     ).toBeNull();
     expect(document.getElementById("factura-insumo-reserva-field")).toBeNull();
+  });
+});
+
+describe("imprimir y exportar a PDF (spec-04 IM-01, IM-02)", () => {
+  const DETAILS = [
+    ["E", "factura-entrada", (id) => view.__testHooks.openEntryDetail(id)],
+    ["V", "factura-venta", (id) => view.__testHooks.openSaleDetail(id)],
+    ["S", "factura-servicio", (id) => view.__testHooks.openServiceDetail(id)],
+    [
+      "GG",
+      "factura-garantia",
+      (id) => view.__testHooks.openGuaranteeDetail(id),
+    ],
+    [
+      "GI",
+      "factura-insumo",
+      (id) => view.__testHooks.openInstallationDetail(id),
+    ],
+    ["P", "factura-perdida", (id) => view.openLossDetail(id)],
+  ];
+  const MODEL = {
+    title: "Factura de Venta",
+    number: "V-00001",
+    date: "10/02/2026",
+    company: {
+      name: "Goyma Conexiones",
+      address: "Calle 23",
+      phone: "",
+      taxId: "",
+      logoDataUrl: null,
+    },
+    contact: {
+      label: "Cliente",
+      name: "Ana Pérez",
+      company: null,
+      nationalId: "12345678901",
+      phone: "+5355552222",
+      email: null,
+    },
+    priceLabel: "Precio unitario",
+    lines: [
+      {
+        name: "Cable UTP",
+        quantity: "2",
+        unit: "m",
+        unitPriceCents: 1000,
+        subtotalCents: 2000,
+      },
+    ],
+    totalCents: 2000,
+    notesLabel: "Descripción",
+    notes: "Entrega en tienda",
+    associated: null,
+    reservedUntil: "15/02/2026",
+  };
+
+  afterEach(() => {
+    delete window.__TAURI__;
+    document.getElementById("print-area")?.remove();
+  });
+
+  it.each(DETAILS)(
+    "%s: 'Imprimir' abre la vista previa sin estado y desde ella el diálogo del sistema",
+    async (type, prefix, open) => {
+      invoices.getInvoice.mockResolvedValue({
+        ...PENDING_SALE,
+        invoiceType: type,
+      });
+      invoices.getInvoicePrintModel.mockResolvedValue(MODEL);
+      const print = vi.spyOn(window, "print").mockImplementation(() => {});
+      await open(1);
+      document.getElementById(`${prefix}-imprimir`).click();
+      await vi.waitFor(() =>
+        expect(document.getElementById("print-area")?.hidden).toBe(false),
+      );
+      expect(invoices.getInvoicePrintModel).toHaveBeenCalledWith(1);
+      const sheet = document.querySelector("#print-area .print-sheet");
+      expect(sheet.textContent).toContain("Factura de Venta");
+      expect(sheet.textContent).toContain("Cliente: Ana Pérez");
+      expect(sheet.textContent).toContain("Reservada hasta: 15/02/2026");
+      expect(sheet.textContent).toContain("Total: 20,00 USD");
+      expect(sheet.textContent).not.toMatch(/Por Cobrar|Cobrada|Pendiente/);
+
+      [...document.querySelectorAll("#print-area .print-toolbar button")]
+        .find((button) => button.textContent === "Imprimir")
+        .click();
+      expect(print).toHaveBeenCalledTimes(1);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(document.getElementById("print-area").hidden).toBe(true);
+      print.mockRestore();
+    },
+  );
+
+  it.each(DETAILS)(
+    "%s: 'Exportar a PDF' pide la ruta y llama al backend; cancelar no hace nada",
+    async (type, prefix, open) => {
+      invoices.getInvoice.mockResolvedValue({
+        ...PENDING_SALE,
+        invoiceType: type,
+      });
+      invoices.exportInvoicePdf.mockResolvedValue(null);
+      const save = vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce("C:/facturas/V-00001.pdf");
+      window.__TAURI__ = { dialog: { save } };
+      await open(1);
+
+      document.getElementById(`${prefix}-exportar`).click();
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultPath: "V-00001.pdf",
+          filters: [expect.objectContaining({ extensions: ["pdf"] })],
+        }),
+      );
+      await Promise.resolve();
+      expect(invoices.exportInvoicePdf).not.toHaveBeenCalled();
+
+      document.getElementById(`${prefix}-exportar`).click();
+      await vi.waitFor(() =>
+        expect(invoices.exportInvoicePdf).toHaveBeenCalledWith(
+          1,
+          "C:/facturas/V-00001.pdf",
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(toastText()).toContain("Factura exportada a PDF."),
+      );
+    },
+  );
+
+  it("un fallo al escribir el PDF sale como toast de error", async () => {
+    invoices.getInvoice.mockResolvedValue(PENDING_SALE);
+    invoices.exportInvoicePdf.mockRejectedValue({
+      code: "exportFailed",
+      message: "No se pudo guardar el archivo",
+    });
+    window.__TAURI__ = {
+      dialog: { save: vi.fn(() => Promise.resolve("C:/x/V-1.pdf")) },
+    };
+    await view.__testHooks.openSaleDetail(1);
+    document.getElementById("factura-venta-exportar").click();
+    await vi.waitFor(() =>
+      expect(toastText()).toContain("No se pudo guardar el archivo"),
+    );
+  });
+});
+
+const BOX_OPTIONS = [
+  { unitId: 3, name: "Metro", abbreviation: "m", factor: "1" },
+  { unitId: 9, name: "Caja", abbreviation: "cj", factor: "12" },
+];
+
+describe.each(TYPES)("unidad por línea en $name (spec-04 CV-01)", (t) => {
+  it("ofrece las unidades del producto, recalcula el total preliminar y envía unitId", async () => {
+    products.listUnitOptionsForProduct.mockResolvedValue(BOX_OPTIONS);
+    invoices[t.create].mockResolvedValue({
+      invoiceId: 50,
+      number: `${t.type}-00050`,
+      expiredCleanupWarning: null,
+    });
+    await chooseContact(t);
+    await chooseFromCombobox(t.productInput, "cable", "Cable UTP");
+    const select = () =>
+      document.querySelector(`#${linesBody(t)} select[data-line-field="unit"]`);
+    await vi.waitFor(() => expect(select()).not.toBeNull());
+    expect(products.listUnitOptionsForProduct).toHaveBeenCalledWith(7);
+    expect([...select().options].map((option) => option.textContent)).toEqual([
+      "m",
+      "cj",
+    ]);
+
+    select().value = "9";
+    select().dispatchEvent(new Event("change", { bubbles: true }));
+    const quantity = lineInputs(linesBody(t), "quantity")[0];
+    quantity.value = "2";
+    quantity.dispatchEvent(new Event("input", { bubbles: true }));
+    if (t.type === "E") {
+      const cost = lineInputs(linesBody(t), "unitPrice")[0];
+      cost.value = "30,00";
+      cost.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(document.getElementById(`${t.field}-total`).textContent).toBe(
+        "60,00 USD",
+      );
+    } else if (t.type === "V" || t.type === "S") {
+      // Precio vigente 2,50 la unidad × 12 = 30,00 la caja.
+      expect(
+        document.querySelector(`#${linesBody(t)} .li-costo`).textContent,
+      ).toBe("30,00 USD");
+      expect(document.getElementById(`${t.field}-total`).textContent).toBe(
+        "60,00 USD",
+      );
+    }
+
+    setValue(`${t.field}-fecha-emision`, "2026-02-10");
+    submitForm(`${t.view}-form`);
+    await vi.waitFor(() => expect(invoices[t.create]).toHaveBeenCalled());
+    expect(invoices[t.create].mock.calls[0][0].lines[0]).toMatchObject({
+      productId: 7,
+      quantity: "2",
+      unitId: 9,
+    });
+  });
+});
+
+describe("unidad por línea: detalle, edición y pérdida (spec-04 CV-01)", () => {
+  const ENTERED_SALE = {
+    ...PENDING_SALE,
+    lines: [
+      {
+        position: 1,
+        productIdOriginal: 7,
+        productName: "Cable UTP",
+        unitAbbreviation: "m",
+        quantity: "24",
+        unitPriceCents: 250,
+        subtotalCents: 6000,
+        productStatus: "active",
+        entered: {
+          unitId: 9,
+          name: "Caja",
+          abbreviation: "cj",
+          quantity: "2",
+          unitPriceCents: 3000,
+        },
+      },
+    ],
+    totalCents: 6000,
+  };
+
+  it("el detalle muestra lo escrito y editar lo carga y lo reenvía", async () => {
+    invoices.getInvoice.mockResolvedValue(ENTERED_SALE);
+    invoices.updateSaleInvoice.mockResolvedValue({
+      invoiceId: 1,
+      number: "V-00001",
+      expiredCleanupWarning: null,
+    });
+    products.listUnitOptionsForProduct.mockResolvedValue(BOX_OPTIONS);
+    await view.__testHooks.openSaleDetail(1);
+    const cells = [
+      ...document.querySelectorAll("#factura-venta-ver-productos .li-row div"),
+    ].map((cell) => cell.textContent);
+    expect(cells).toEqual([
+      "1",
+      "Cable UTP",
+      "2",
+      "cj",
+      "30,00 USD",
+      "60,00 USD",
+    ]);
+
+    document.getElementById("factura-venta-editar").click();
+    expect(lineInputs("factura-venta-lineas-body", "quantity")[0].value).toBe(
+      "2",
+    );
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector(
+          '#factura-venta-lineas-body select[data-line-field="unit"]',
+        )?.value,
+      ).toBe("9"),
+    );
+    submitForm("factura-venta-form");
+    await vi.waitFor(() =>
+      expect(invoices.updateSaleInvoice).toHaveBeenCalled(),
+    );
+    expect(invoices.updateSaleInvoice.mock.calls[0][0].lines[0]).toMatchObject({
+      productIdOriginal: 7,
+      productId: 7,
+      quantity: "2",
+      unitId: 9,
+    });
+  });
+
+  it("la pérdida ofrece la unidad junto a la cantidad y la envía", async () => {
+    products.listUnitOptionsForProduct.mockResolvedValue(BOX_OPTIONS);
+    invoices.createLossInvoice.mockResolvedValue({
+      invoiceId: 60,
+      number: "P-00060",
+      expiredCleanupWarning: null,
+    });
+    invoices.getInvoice.mockResolvedValue({
+      ...PENDING_SALE,
+      invoiceType: "P",
+    });
+    await chooseFromCombobox("factura-perdida-producto", "cable", "Cable UTP");
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("factura-perdida-unidad-field").hidden,
+      ).toBe(false),
+    );
+    setValue("factura-perdida-unidad", "9", "change");
+    setValue("factura-perdida-cantidad", "0,25");
+    setValue("factura-perdida-fecha", "2026-02-10");
+    submitForm("factura-perdidas-form");
+    await vi.waitFor(() =>
+      expect(invoices.createLossInvoice).toHaveBeenCalled(),
+    );
+    expect(invoices.createLossInvoice.mock.calls[0][0]).toMatchObject({
+      productId: 7,
+      quantity: "0,25",
+      unitId: 9,
+    });
   });
 });

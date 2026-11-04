@@ -38,3 +38,8 @@ export function activateProduct(productId) {
 export function deleteProduct(productId) {
   return invoke("delete_product", { productId });
 }
+
+// spec-04 CV-01: unidades para el selector de una línea de factura.
+export function listUnitOptionsForProduct(productId) {
+  return invoke("list_unit_options_for_product", { productId });
+}

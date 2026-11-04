@@ -108,36 +108,41 @@
 
 ### 3.1 Esquema (migraciones 4 y 5)
 
-- [ ] Test (Rust): claves cerradas y rangos de `settings`; `userPreferences` por usuario y en cascada al borrar el usuario; tasas > 0; historial inmutable; columnas de unidad por línea juntas o ninguna.
-- [ ] Implementación: migraciones 4 y 5 con los valores por defecto.
+- [x] Test (Rust): claves cerradas y rangos de `settings`; `userPreferences` por usuario y en cascada al borrar el usuario; tasas > 0; historial inmutable; columnas de unidad por línea juntas o ninguna.
+- [x] Implementación: migraciones 4 y 5 con los valores por defecto. Los rangos de `settings` se declaran con un `CHECK` por clave (entero canónico); las monedas de `userPreferences`, con un `CHECK` que solo admite EUR, CUP, MLC y SALDO; la regla "juntas o ninguna" de la unidad por línea va en el `CHECK` de la última columna añadida (un `ALTER TABLE` no admite restricciones de tabla).
 
 ### 3.2 Ajustes, monedas y tasas (CF-01, CF-02, CF-04)
 
-- [ ] Test (Rust): `getSettings`/`updateSettings` (rangos; cambiar el umbral reevalúa N-03 y cambia el filtro "Stock bajo" y DASH-01); `getUserPreferences`/`updateUserPreferences` (monedas válidas, tamaño 10/20/50/100, cada usuario los suyos); `updateExchangeRate` (6 decimales, > 0) con historial y actividad; `listExchangeRateHistory`. Matriz de autorización.
-- [ ] Test (Vitest): pestañas de Configuración con datos reales (tarjetas de tasas, historial con orden, monedas por usuario, tamaño de página desde la base); el detalle del producto muestra los equivalentes de las monedas elegidas con la tasa actual; una moneda sin tasa no se muestra y Configuración lo avisa.
-- [ ] Implementación: `commands/settings.rs`, `settingsService.js`, `configuracionView.js`; el paginador global lee el tamaño de la base; retirar `monedasData` y los datos simulados de tasas de `dashboard.js`.
+- [x] Test (Rust): `getSettings`/`updateSettings` (rangos; cambiar el umbral reevalúa N-03 y cambia el filtro "Stock bajo" y DASH-01); `getUserPreferences`/`updateUserPreferences` (monedas válidas, tamaño 10/20/50/100, cada usuario los suyos); `updateExchangeRate` (6 decimales, > 0) con historial y actividad; `listExchangeRateHistory`. Matriz de autorización.
+- [x] Test (Vitest): pestañas de Configuración con datos reales (tarjetas de tasas, historial con orden, monedas por usuario, tamaño de página desde la base); el detalle del producto muestra los equivalentes de las monedas elegidas con la tasa actual; una moneda sin tasa no se muestra y Configuración lo avisa.
+- [x] Implementación: `commands/settings.rs`, `settingsService.js`, `configuracionView.js`; el paginador global lee el tamaño de la base; retirar `monedasData` y los datos simulados de tasas de `dashboard.js`.
+  - Hecho: `thresholds()` lee `settings`; el filtro "Stock bajo", `isLowStock` y N-03 usan el umbral guardado. El tamaño de página deja `localStorage`: `configuracionView.js` lo lee de la base y lo aplica con `establecerTamPagina` de `dashboard.js`. Tarjeta "Equivalentes" en el detalle del producto (`utils/currency.js`, mismo formato que `formatMoney`). Retirados `monedasData`, `historialTasasData`, `rateCardsData`, sus renderizadores, las acciones `avisoDemo`/`activarMoneda`/`actualizarEquivalencia` y los listeners de campo que ya no usaba nadie.
+  - **Pendiente para la fase 5:** las entradas `config` del registro de actividad (tasas, umbrales, empresa, logo) llegan con la migración 7.
 
 ### 3.3 Empresa y logo (CF-03)
 
-- [ ] Test (Rust): `updateCompanyProfile` (longitudes); `saveCompanyLogo` acepta PNG/JPG reales de hasta 2 MB, rechaza otro contenido con extensión falsa, sustituye y borra el anterior, y con `null` lo quita; `getCompanyProfile` devuelve el logo como `data:` URL. Actividad `config`.
-- [ ] Test (Vitest): pestaña "Empresa" con los cuatro datos y el logo (elegido con el diálogo nativo; sin `onclick` ni la imagen de `placehold.co`); "Datos de Factura" según S-06.
-- [ ] Implementación en `settings.rs`, `configuracionView.js` y el HTML.
+- [x] Test (Rust): `updateCompanyProfile` (longitudes); `saveCompanyLogo` acepta PNG/JPG reales de hasta 2 MB, rechaza otro contenido con extensión falsa, sustituye y borra el anterior, y con `null` lo quita; `getCompanyProfile` devuelve el logo como `data:` URL. Actividad `config`.
+- [x] Test (Vitest): pestaña "Empresa" con los cuatro datos y el logo (elegido con el diálogo nativo; sin `onclick` ni la imagen de `placehold.co`); "Datos de Factura" según S-06.
+- [x] Implementación en `settings.rs`, `configuracionView.js` y el HTML.
+  - Hecho: S-06 aplicado (se elimina "Datos de Factura"); la pestaña "Facturación" pasa a "Empresa" y se añade "Umbrales". El logo se elige con `<input type="file">` (que abre el diálogo nativo del sistema), se convierte a JPEG en un `canvas` (D-17) y el backend lo valida por su contenido (firma y SOF). La `data:` URL se arma con un codificador base64 propio de 15 líneas para no añadir una dependencia directa.
 
 ### 3.4 Impresión y PDF (IM-01, IM-02)
 
-- [ ] Test (Rust): `build_invoice_document` para los seis tipos (título por tipo, contacto, líneas en la unidad escrita, total, asociada, "Reservada hasta", **sin estado**); `exportInvoicePdf` escribe un PDF válido con el logo y falla con `exportFailed` si no puede escribir. Matriz de autorización de `exportInvoicePdf` y `getInvoicePrintModel`.
-- [ ] Test (Vitest): "Imprimir" en los seis detalles abre la vista previa con el modelo y llama a `window.print()`; "Exportar a PDF" abre "Guardar como" y llama al comando; cancelar no hace nada; error como toast.
-- [ ] Implementación: `invoice_print.rs`, `printPreview.js`, `css/print.css`, botones en los seis detalles; retirar `exportarFactura*PDF` de `dashboard.js` y jsPDF.
+- [x] Test (Rust): `build_invoice_document` para los seis tipos (título por tipo, contacto, líneas en la unidad escrita, total, asociada, "Reservada hasta", **sin estado**); `exportInvoicePdf` escribe un PDF válido con el logo y falla con `exportFailed` si no puede escribir. Matriz de autorización de `exportInvoicePdf` y `getInvoicePrintModel`.
+- [x] Test (Vitest): "Imprimir" en los seis detalles abre la vista previa con el modelo y llama a `window.print()`; "Exportar a PDF" abre "Guardar como" y llama al comando; cancelar no hace nada; error como toast.
+- [x] Implementación: `invoice_print.rs`, `printPreview.js`, `css/print.css`, botones en los seis detalles; retirar `exportarFactura*PDF` de `dashboard.js` y jsPDF.
+  - Hecho: `invoice_print.rs` con un único `InvoicePrintModel` (D-05) para la vista previa y el PDF; el JPEG del logo se incrusta sin decodificar con `ImageFilter::DCT` (D-17) leyendo sus medidas del SOF (`jpeg_dimensions`, compartido con la validación del logo). Comandos `getInvoicePrintModel` y `exportInvoicePdf` (error `exportFailed`, que ya estaba en el catálogo). En la interfaz: "Imprimir" (vista previa A4 en `#print-area`, Escape la cierra, `window.print()` desde ella; `css/print.css` oculta lo demás al imprimir) y "Exportar a PDF" en los seis detalles. Retirados `jspdf.umd.min.js`, su `<script>`, el bloque `exportarFactura*PDF` y su test (`facturasPdf.test.js`); el entorno comprueba que no vuelva. Con §3.5 la impresión muestra la unidad escrita.
 
 ### 3.5 Conversiones en facturas (CV-01)
 
-- [ ] Test (Rust): `listUnitOptionsForProduct` (directa e inversa de un paso); compra de 2 Caja (×12) a 30,00 crea un lote de 24 u a 2,50; venta de 1 Caja descuenta 12 u al precio vigente × 12; redondeos de la cantidad convertida; sin conversión → `validationFailed`; el historial guarda la cantidad convertida; edición y anulación devuelven lo convertido.
-- [ ] Test (Vitest): selector de unidad por línea en los seis formularios (en la pérdida, junto a la cantidad); el total preliminar usa lo escrito; se envía `unitId`; el detalle y la impresión muestran "2 Caja".
-- [ ] Implementación en `inventory.rs`, `commands/invoices.rs`, `commands/products.rs`, `facturasView.js`.
+- [x] Test (Rust): `listUnitOptionsForProduct` (directa e inversa de un paso); compra de 2 Caja (×12) a 30,00 crea un lote de 24 u a 2,50; venta de 1 Caja descuenta 12 u al precio vigente × 12; redondeos de la cantidad convertida; sin conversión → `validationFailed`; el historial guarda la cantidad convertida; edición y anulación devuelven lo convertido.
+- [x] Test (Vitest): selector de unidad por línea en los seis formularios (en la pérdida, junto a la cantidad); el total preliminar usa lo escrito; se envía `unitId`; el detalle y la impresión muestran "2 Caja".
+- [x] Implementación en `inventory.rs`, `commands/invoices.rs`, `commands/products.rs`, `facturasView.js`.
+  - Hecho: `resolve_line_unit`/`LineUnit` en `inventory.rs` (fracción exacta, directa o inversa de un paso; S-08). `quantityMilli` y `unitPriceCents` de la línea siguen en la unidad del producto, así que FIFO, lotes, historial, ediciones y cancelaciones no cambian; la línea guarda además unidad, cantidad escrita y factor (`store_line_unit`), el subtotal sale de lo escrito y el precio que se muestra es subtotal ÷ cantidad escrita. Las siete rutas (crear compra, venta/servicio, garantía/insumos y pérdida; editar compra, salidas con precio y a costo) convierten al leer la cantidad. `InvoiceLineDetail.entered` lleva lo escrito; el detalle, la edición y la impresión lo muestran. Una línea de producto eliminado se edita en la unidad base. Selector en el editor de líneas (solo si el producto tiene conversiones) y en la pérdida, junto a la cantidad.
 
 ### 3.6 Cierre de la fase 3
 
-- [ ] Suites, lint, formato, `pendientes.md` (PEN-06, PEN-07, PEN-19, PEN-20) y commit.
+- [x] Suites, lint, formato, `pendientes.md` (PEN-06, PEN-07, PEN-19, PEN-20) y commit. `cargo test` 421/421, `npm test` 358/358 (39 archivos), `clippy --all-targets -D warnings`, `cargo fmt --check` y `prettier --check .` limpios. Pendiente para la verificación manual: el logo (conversión con `canvas` en el webview), el diálogo de impresión del sistema, el PDF con un logo real y el selector de unidad en `tauri:dev`.
 
 ## 4. Fase 4 — Dashboard
 

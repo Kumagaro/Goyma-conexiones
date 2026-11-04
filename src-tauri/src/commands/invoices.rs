@@ -10,8 +10,8 @@ use crate::db::connection::current_app_data_dir;
 use crate::errors::{append_error_log, log_error, map_db_error, AppError};
 use crate::inventory::{
     consume_fifo, line_total_cost_cents, line_unit_cost_cents, next_arrival_order,
-    recalculate_product_cost, recalculate_product_quantity, restore_consumption,
-    reverse_lots_of_invoice, validate_stock_limit,
+    recalculate_product_cost, recalculate_product_quantity, resolve_line_unit, restore_consumption,
+    reverse_lots_of_invoice, validate_stock_limit, LineUnit,
 };
 use crate::invoice_counter::next_invoice_number;
 use crate::models::invoice::{
@@ -21,7 +21,7 @@ use crate::models::invoice::{
     UpdateEntryInvoiceInput, UpdateGuaranteeInvoiceInput, UpdateInstallationInvoiceInput,
     UpdateOutgoingInvoiceLineInput, UpdateSaleInvoiceInput, UpdateServiceInvoiceInput,
 };
-use crate::models::invoice_line::InvoiceLineDetail;
+use crate::models::invoice_line::{EnteredUnit, InvoiceLineDetail};
 use crate::models::product::format_quantity_milli;
 use crate::pricing::selling_price_cents;
 use crate::state::{
@@ -136,6 +136,40 @@ struct ReversalMovementInput<'a> {
     product_name: &'a str,
     quantity_milli: i64,
     unit_price_cents: i64,
+}
+
+/// CV-01: guarda en la línea la unidad y la cantidad escritas y el factor, o
+/// las deja en NULL si la línea va en la unidad del producto.
+fn store_line_unit(
+    connection: &Connection,
+    line_id: i64,
+    unit: Option<&LineUnit>,
+    op: &str,
+) -> Result<(), AppError> {
+    connection
+        .execute(
+            "UPDATE invoiceLines SET enteredUnitId = ?1, enteredUnitName = ?2,
+                enteredUnitAbbreviation = ?3, enteredQuantityMilli = ?4, conversionFactorMicro = ?5
+             WHERE id = ?6",
+            params![
+                unit.map(|unit| unit.unit_id),
+                unit.map(|unit| unit.name.as_str()),
+                unit.map(|unit| unit.abbreviation.as_str()),
+                unit.map(|unit| unit.entered_milli),
+                unit.map(LineUnit::factor_micro),
+                line_id,
+            ],
+        )
+        .map_err(|error| map_db_error(error, op, &[]))?;
+    Ok(())
+}
+
+/// Subtotal de lo escrito: cantidad escrita × precio por la unidad escrita.
+fn entered_subtotal_cents(unit: &LineUnit, cents_per_entered_unit: i64) -> i64 {
+    crate::inventory::round_half_up(
+        i128::from(unit.entered_milli) * i128::from(cents_per_entered_unit),
+        1_000,
+    ) as i64
 }
 
 fn entry_invoice_invalid_state(message: &str, cause: &str) -> AppError {
@@ -646,7 +680,9 @@ pub fn get_invoice_inner(
                             JOIN invoiceLines cl ON cl.id = c.invoiceLineId
                             JOIN invoices ci ON ci.id = cl.invoiceId
                             WHERE c.lotId = l.id AND (ci.status IS NULL OR ci.status <> 'cancelled')
-                        ) END
+                        ) END AS consumedMilli,
+                        il.enteredUnitId, il.enteredUnitName, il.enteredUnitAbbreviation,
+                        il.enteredQuantityMilli
                  FROM invoiceLines il
                  LEFT JOIN products p ON p.id = il.productId
                  LEFT JOIN lots l ON l.invoiceLineId = il.id
@@ -655,7 +691,24 @@ pub fn get_invoice_inner(
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
         let rows = statement
             .query_map([invoice_id], |row| {
+                let subtotal_cents: i64 = row.get(7)?;
+                let entered_milli: Option<i64> = row.get(16)?;
+                let entered = match (row.get::<_, Option<String>>(14)?, entered_milli) {
+                    (Some(name), Some(milli)) if milli > 0 => Some(EnteredUnit {
+                        unit_id: row.get(13)?,
+                        name,
+                        abbreviation: row.get(15)?,
+                        quantity: format_quantity_milli(milli),
+                        // Precio por la unidad escrita = subtotal ÷ cantidad escrita.
+                        unit_price_cents: crate::inventory::round_half_up(
+                            i128::from(subtotal_cents) * 1_000,
+                            i128::from(milli),
+                        ) as i64,
+                    }),
+                    _ => None,
+                };
                 Ok(InvoiceLineDetail {
+                    entered,
                     position: row.get(0)?,
                     product_id_original: row.get(1)?,
                     product_name: row.get(2)?,
@@ -1071,7 +1124,6 @@ pub fn create_entry_invoice_inner(
                     "duplicate product in entry invoice",
                 ));
             }
-            validate_stock_limit(connection, product_id, quantity_milli)?;
             (product_id, product.0, product.1, product.2)
         } else {
             let new_product = line.new_product.as_ref().ok_or_else(|| {
@@ -1198,6 +1250,25 @@ pub fn create_entry_invoice_inner(
             )
         };
 
+        // CV-01: el lote va en la unidad del producto; el costo escrito por
+        // la unidad elegida se divide entre el factor.
+        let line_unit = resolve_line_unit(connection, product_id, line.unit_id, quantity_milli)?;
+        let (quantity_milli, unit_price_cents) = match &line_unit {
+            Some(unit) => (
+                unit.product_milli(),
+                unit.per_product_unit(unit_price_cents),
+            ),
+            None => (quantity_milli, unit_price_cents),
+        };
+        if unit_price_cents < 1 {
+            return Err(validation_failed(
+                "El costo por unidad del producto debe ser mayor que cero",
+                "converted entry unit cost rounds to zero",
+            ));
+        }
+        if line.product_id.is_some() {
+            validate_stock_limit(connection, product_id, quantity_milli)?;
+        }
         line_rows.push((
             position as i64 + 1,
             product_id,
@@ -1208,6 +1279,7 @@ pub fn create_entry_invoice_inner(
             quantity_milli,
             unit_price_cents,
             subtotal_cents,
+            line_unit,
         ));
     }
 
@@ -1283,6 +1355,7 @@ pub fn create_entry_invoice_inner(
         quantity_milli,
         unit_price_cents,
         subtotal_cents,
+        line_unit,
     ) in line_rows
     {
         let arrival_order = next_arrival_order(connection, product_id)?;
@@ -1307,6 +1380,12 @@ pub fn create_entry_invoice_inner(
         ).map_err(|error| map_db_error(error, "createEntryInvoice", &[]))?;
 
         let line_id = connection.last_insert_rowid();
+        store_line_unit(
+            connection,
+            line_id,
+            line_unit.as_ref(),
+            "createEntryInvoice",
+        )?;
         connection.execute(
             "INSERT INTO lots (productId, origin, invoiceLineId, arrivalOrder, initialMilli, remainingMilli, unitCostCents, createdAt, updatedAt)
              VALUES (?1, 'entry', ?2, ?3, ?4, ?4, ?5, ?6, ?6)",
@@ -1383,7 +1462,7 @@ fn create_client_outgoing_invoice_inner(
     status: Option<&str>,
     notes: Option<&str>,
     payment_method: Option<&str>,
-    lines: &[(i64, String)],
+    lines: &[(i64, String, Option<i64>)],
     reserved_until: Option<&str>,
 ) -> Result<InvoiceActionResult, AppError> {
     let _actor = require_session(connection, now)?;
@@ -1443,7 +1522,7 @@ fn create_client_outgoing_invoice_inner(
     let mut line_rows = Vec::new();
     let mut total_cents = 0_i64;
 
-    for (position, (product_id, quantity)) in lines.iter().enumerate() {
+    for (position, (product_id, quantity, line_unit_id)) in lines.iter().enumerate() {
         if !seen_products.insert(*product_id) {
             return Err(validation_failed(
                 "El producto ya está en la factura",
@@ -1526,12 +1605,23 @@ fn create_client_outgoing_invoice_inner(
             ));
         }
 
-        // Precio de venta vigente al crear (spec-02 P-11).
+        // Precio de venta vigente al crear (spec-02 P-11); con otra unidad,
+        // precio vigente × factor y subtotal de lo escrito (CV-01).
         let unit_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
-        let subtotal_cents = crate::inventory::round_half_up(
-            i128::from(quantity_milli) * i128::from(unit_price_cents),
-            1_000,
-        ) as i64;
+        let line_unit = resolve_line_unit(connection, *product_id, *line_unit_id, quantity_milli)?;
+        let (quantity_milli, subtotal_cents) = match &line_unit {
+            Some(unit) => (
+                unit.product_milli(),
+                entered_subtotal_cents(unit, unit.per_entered_unit(unit_price_cents)),
+            ),
+            None => (
+                quantity_milli,
+                crate::inventory::round_half_up(
+                    i128::from(quantity_milli) * i128::from(unit_price_cents),
+                    1_000,
+                ) as i64,
+            ),
+        };
         total_cents = total_cents.checked_add(subtotal_cents).ok_or_else(|| {
             AppError::new(
                 "validationFailed",
@@ -1561,6 +1651,7 @@ fn create_client_outgoing_invoice_inner(
             category_id,
             category_name,
             cost_cents,
+            line_unit,
         ));
     }
 
@@ -1634,6 +1725,7 @@ fn create_client_outgoing_invoice_inner(
         category_id,
         category_name,
         cost_at_sale_cents,
+        line_unit,
     ) in line_rows
     {
         connection.execute(
@@ -1661,6 +1753,7 @@ fn create_client_outgoing_invoice_inner(
         ).map_err(|error| map_db_error(error, op, &[]))?;
 
         let line_id = connection.last_insert_rowid();
+        store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
         // Descuenta por FIFO (LT-02); sin stock suficiente revierte todo.
         consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
 
@@ -1715,10 +1808,10 @@ pub fn create_sale_invoice_inner(
     now: DateTime<Utc>,
     input: CreateSaleInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
-    let lines: Vec<(i64, String)> = input
+    let lines: Vec<(i64, String, Option<i64>)> = input
         .lines
         .iter()
-        .map(|line| (line.product_id, line.quantity.clone()))
+        .map(|line| (line.product_id, line.quantity.clone(), line.unit_id))
         .collect();
     let result = create_client_outgoing_invoice_inner(
         connection,
@@ -1743,10 +1836,10 @@ pub fn create_service_invoice_inner(
     now: DateTime<Utc>,
     input: CreateServiceInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
-    let lines: Vec<(i64, String)> = input
+    let lines: Vec<(i64, String, Option<i64>)> = input
         .lines
         .iter()
-        .map(|line| (line.product_id, line.quantity.clone()))
+        .map(|line| (line.product_id, line.quantity.clone(), line.unit_id))
         .collect();
     let result = create_client_outgoing_invoice_inner(
         connection,
@@ -1784,7 +1877,7 @@ fn create_associated_outgoing_invoice_inner(
     invoice_date: &str,
     status: Option<&str>,
     notes: Option<&str>,
-    lines: &[(i64, String)],
+    lines: &[(i64, String, Option<i64>)],
 ) -> Result<InvoiceActionResult, AppError> {
     let _actor = require_session(connection, now)?;
     let transaction = connection
@@ -1870,7 +1963,7 @@ fn create_associated_outgoing_invoice_inner(
     let mut line_rows = Vec::new();
     let mut total_cents = 0_i64;
 
-    for (position, (product_id, quantity)) in lines.iter().enumerate() {
+    for (position, (product_id, quantity, line_unit_id)) in lines.iter().enumerate() {
         if !seen_products.insert(*product_id) {
             return Err(validation_failed(
                 "El producto ya está en la factura",
@@ -1935,6 +2028,10 @@ fn create_associated_outgoing_invoice_inner(
             ));
         }
 
+        let line_unit = resolve_line_unit(connection, *product_id, *line_unit_id, quantity_milli)?;
+        let quantity_milli = line_unit
+            .as_ref()
+            .map_or(quantity_milli, LineUnit::product_milli);
         let product_name_normalized = normalize_text(&product_name);
         line_rows.push((
             position as i64 + 1,
@@ -1945,6 +2042,7 @@ fn create_associated_outgoing_invoice_inner(
             unit_name,
             unit_abbreviation,
             quantity_milli,
+            line_unit,
         ));
     }
 
@@ -1985,6 +2083,7 @@ fn create_associated_outgoing_invoice_inner(
         unit_name,
         unit_abbreviation,
         quantity_milli,
+        line_unit,
     ) in line_rows
     {
         connection.execute(
@@ -2006,6 +2105,7 @@ fn create_associated_outgoing_invoice_inner(
         ).map_err(|error| map_db_error(error, op, &[]))?;
 
         let line_id = connection.last_insert_rowid();
+        store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
         // Costo real de los lotes consumidos (LT-02, FS-04/FS-05).
         let consumptions = consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
         let line_total_cents = line_total_cost_cents(&consumptions);
@@ -2079,10 +2179,10 @@ pub fn create_guarantee_invoice_inner(
     now: DateTime<Utc>,
     input: CreateGuaranteeInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
-    let lines: Vec<(i64, String)> = input
+    let lines: Vec<(i64, String, Option<i64>)> = input
         .lines
         .iter()
-        .map(|line| (line.product_id, line.quantity.clone()))
+        .map(|line| (line.product_id, line.quantity.clone(), line.unit_id))
         .collect();
     let result = create_associated_outgoing_invoice_inner(
         connection,
@@ -2107,10 +2207,10 @@ pub fn create_installation_invoice_inner(
     now: DateTime<Utc>,
     input: CreateInstallationInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
-    let lines: Vec<(i64, String)> = input
+    let lines: Vec<(i64, String, Option<i64>)> = input
         .lines
         .iter()
-        .map(|line| (line.product_id, line.quantity.clone()))
+        .map(|line| (line.product_id, line.quantity.clone(), line.unit_id))
         .collect();
     let result = create_associated_outgoing_invoice_inner(
         connection,
@@ -2448,7 +2548,22 @@ fn update_priced_outgoing_invoice_inner(
                 &format!("invalid updated {op} quantity: {}", error.message),
             )
         })?;
-        parsed_lines.push((line, quantity_milli));
+        // CV-01: la unidad se resuelve con el producto que quedará en la línea.
+        let unit_product = line.product_id.or_else(|| {
+            line.product_id_original
+                .and_then(|original_id| existing_by_original.get(&original_id))
+                .and_then(|row| row.product_id)
+        });
+        let line_unit = match unit_product {
+            Some(product_id) if quantity_milli > 0 => {
+                resolve_line_unit(connection, product_id, line.unit_id, quantity_milli)?
+            }
+            _ => None,
+        };
+        let quantity_milli = line_unit
+            .as_ref()
+            .map_or(quantity_milli, LineUnit::product_milli);
+        parsed_lines.push((line, quantity_milli, line_unit));
     }
 
     let mut occupied_positions: std::collections::BTreeSet<i64> =
@@ -2460,10 +2575,10 @@ fn update_priced_outgoing_invoice_inner(
     for row in &current_lines {
         let referencing = parsed_lines
             .iter()
-            .find(|(line, _)| line.product_id_original == Some(row.product_id_original));
+            .find(|(line, _, _)| line.product_id_original == Some(row.product_id_original));
         let remove = match referencing {
             None => true,
-            Some((line, quantity_milli)) => {
+            Some((line, quantity_milli, _)) => {
                 *quantity_milli == 0 || line.product_id.is_some_and(|id| Some(id) != row.product_id)
             }
         };
@@ -2491,7 +2606,7 @@ fn update_priced_outgoing_invoice_inner(
             .execute("DELETE FROM invoiceLines WHERE id = ?1", [row.id])
             .map_err(|error| map_db_error(error, op, &[]))?;
         occupied_positions.remove(&row.position);
-        if let Some((line, _)) = referencing {
+        if let Some((line, _, _)) = referencing {
             if let Some(new_product_id) = line.product_id {
                 if Some(new_product_id) != row.product_id {
                     position_overrides.insert(new_product_id, row.position);
@@ -2511,7 +2626,7 @@ fn update_priced_outgoing_invoice_inner(
         }
         let still_referenced = parsed_lines
             .iter()
-            .any(|(line, _)| line.product_id_original == Some(row.product_id_original));
+            .any(|(line, _, _)| line.product_id_original == Some(row.product_id_original));
         if !still_referenced {
             continue;
         }
@@ -2534,7 +2649,7 @@ fn update_priced_outgoing_invoice_inner(
 
     let mut invoice_total_cents = 0_i64;
     let timestamp = format_utc_timestamp(now);
-    for (line, quantity_milli) in parsed_lines {
+    for (line, quantity_milli, line_unit) in parsed_lines {
         let original = line
             .product_id_original
             .and_then(|original_id| existing_by_original.get(&original_id));
@@ -2618,10 +2733,15 @@ fn update_priced_outgoing_invoice_inner(
                     |db_row| db_row.get(0),
                 )
                 .map_err(|error| map_db_error(error, op, &[]))?;
-            let subtotal_cents = crate::inventory::round_half_up(
-                i128::from(quantity_milli) * i128::from(row.unit_price_cents),
-                1_000,
-            ) as i64;
+            let subtotal_cents = match &line_unit {
+                Some(unit) => {
+                    entered_subtotal_cents(unit, unit.per_entered_unit(row.unit_price_cents))
+                }
+                None => crate::inventory::round_half_up(
+                    i128::from(quantity_milli) * i128::from(row.unit_price_cents),
+                    1_000,
+                ) as i64,
+            };
             connection
                 .execute(
                     "UPDATE invoiceLines SET quantityMilli = ?1, subtotalCents = ?2,
@@ -2635,6 +2755,7 @@ fn update_priced_outgoing_invoice_inner(
                     ],
                 )
                 .map_err(|error| map_db_error(error, op, &[]))?;
+            store_line_unit(connection, row.id, line_unit.as_ref(), op)?;
             invoice_total_cents =
                 invoice_total_cents
                     .checked_add(subtotal_cents)
@@ -2751,10 +2872,13 @@ fn update_priced_outgoing_invoice_inner(
             ));
         }
         let unit_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
-        let subtotal_cents = crate::inventory::round_half_up(
-            i128::from(quantity_milli) * i128::from(unit_price_cents),
-            1_000,
-        ) as i64;
+        let subtotal_cents = match &line_unit {
+            Some(unit) => entered_subtotal_cents(unit, unit.per_entered_unit(unit_price_cents)),
+            None => crate::inventory::round_half_up(
+                i128::from(quantity_milli) * i128::from(unit_price_cents),
+                1_000,
+            ) as i64,
+        };
         invoice_total_cents = invoice_total_cents
             .checked_add(subtotal_cents)
             .ok_or_else(|| {
@@ -2808,6 +2932,7 @@ fn update_priced_outgoing_invoice_inner(
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
         let line_id = connection.last_insert_rowid();
+        store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
         consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
         recalculate_product_quantity(connection, product_id)?;
         recalculate_product_cost(connection, product_id)?;
@@ -3036,7 +3161,22 @@ fn update_costed_outgoing_invoice_inner(
                 &format!("invalid updated {op} quantity: {}", error.message),
             )
         })?;
-        parsed_lines.push((line, quantity_milli));
+        // CV-01: la unidad se resuelve con el producto que quedará en la línea.
+        let unit_product = line.product_id.or_else(|| {
+            line.product_id_original
+                .and_then(|original_id| existing_by_original.get(&original_id))
+                .and_then(|row| row.product_id)
+        });
+        let line_unit = match unit_product {
+            Some(product_id) if quantity_milli > 0 => {
+                resolve_line_unit(connection, product_id, line.unit_id, quantity_milli)?
+            }
+            _ => None,
+        };
+        let quantity_milli = line_unit
+            .as_ref()
+            .map_or(quantity_milli, LineUnit::product_milli);
+        parsed_lines.push((line, quantity_milli, line_unit));
     }
 
     let mut occupied_positions: std::collections::BTreeSet<i64> =
@@ -3046,10 +3186,10 @@ fn update_costed_outgoing_invoice_inner(
     for row in &current_lines {
         let referencing = parsed_lines
             .iter()
-            .find(|(line, _)| line.product_id_original == Some(row.product_id_original));
+            .find(|(line, _, _)| line.product_id_original == Some(row.product_id_original));
         let remove = match referencing {
             None => true,
-            Some((line, quantity_milli)) => {
+            Some((line, quantity_milli, _)) => {
                 *quantity_milli == 0 || line.product_id.is_some_and(|id| Some(id) != row.product_id)
             }
         };
@@ -3077,7 +3217,7 @@ fn update_costed_outgoing_invoice_inner(
             .execute("DELETE FROM invoiceLines WHERE id = ?1", [row.id])
             .map_err(|error| map_db_error(error, op, &[]))?;
         occupied_positions.remove(&row.position);
-        if let Some((line, _)) = referencing {
+        if let Some((line, _, _)) = referencing {
             if let Some(new_product_id) = line.product_id {
                 if Some(new_product_id) != row.product_id {
                     position_overrides.insert(new_product_id, row.position);
@@ -3095,7 +3235,7 @@ fn update_costed_outgoing_invoice_inner(
         }
         let still_referenced = parsed_lines
             .iter()
-            .any(|(line, _)| line.product_id_original == Some(row.product_id_original));
+            .any(|(line, _, _)| line.product_id_original == Some(row.product_id_original));
         if !still_referenced {
             continue;
         }
@@ -3118,7 +3258,7 @@ fn update_costed_outgoing_invoice_inner(
 
     let mut invoice_total_cents = 0_i64;
     let timestamp = format_utc_timestamp(now);
-    for (line, quantity_milli) in parsed_lines {
+    for (line, quantity_milli, line_unit) in parsed_lines {
         let original = line
             .product_id_original
             .and_then(|original_id| existing_by_original.get(&original_id));
@@ -3207,6 +3347,7 @@ fn update_costed_outgoing_invoice_inner(
                     ],
                 )
                 .map_err(|error| map_db_error(error, op, &[]))?;
+            store_line_unit(connection, row.id, line_unit.as_ref(), op)?;
             invoice_total_cents = invoice_total_cents
                 .checked_add(line_total_cents)
                 .ok_or_else(|| {
@@ -3338,6 +3479,7 @@ fn update_costed_outgoing_invoice_inner(
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
         let line_id = connection.last_insert_rowid();
+        store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
         let new_consumptions = consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
         let new_total_cents = line_total_cost_cents(&new_consumptions);
         let new_unit_cost_cents = line_unit_cost_cents(new_total_cents, quantity_milli);
@@ -3440,6 +3582,7 @@ pub fn update_sale_invoice_inner(
                 product_id_original: line.product_id_original,
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
+                unit_id: line.unit_id,
             })
             .collect::<Vec<_>>(),
         input.reserved_until.as_deref(),
@@ -3469,6 +3612,7 @@ pub fn update_service_invoice_inner(
                 product_id_original: line.product_id_original,
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
+                unit_id: line.unit_id,
             })
             .collect::<Vec<_>>(),
         input.reserved_until.as_deref(),
@@ -3501,6 +3645,7 @@ pub fn update_guarantee_invoice_inner(
                 product_id_original: line.product_id_original,
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
+                unit_id: line.unit_id,
             })
             .collect::<Vec<_>>(),
     );
@@ -3532,6 +3677,7 @@ pub fn update_installation_invoice_inner(
                 product_id_original: line.product_id_original,
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
+                unit_id: line.unit_id,
             })
             .collect::<Vec<_>>(),
     );
@@ -3618,6 +3764,10 @@ fn create_loss_invoice_tx(
             "out of stock product used in loss invoice",
         ));
     }
+    let line_unit = resolve_line_unit(connection, input.product_id, input.unit_id, quantity_milli)?;
+    let quantity_milli = line_unit
+        .as_ref()
+        .map_or(quantity_milli, LineUnit::product_milli);
     // Excepción de S-22 (FP-01): un descontinuado CON stock sí se puede
     // perder; sin stock ya se rechazó arriba.
     let notes = input
@@ -3668,6 +3818,7 @@ fn create_loss_invoice_tx(
     ).map_err(|error| map_db_error(error, "createLossInvoice", &[]))?;
 
     let line_id = connection.last_insert_rowid();
+    store_line_unit(connection, line_id, line_unit.as_ref(), "createLossInvoice")?;
     // El costo lo calcula el sistema con el consumo FIFO (LT-02, FP-01).
     let consumptions = consume_fifo(connection, input.product_id, quantity_milli, line_id, now)?;
     let line_total_cents = line_total_cost_cents(&consumptions);
@@ -3893,7 +4044,37 @@ pub fn update_entry_invoice_inner(
                 "updated entry invoice total exceeds legal bound",
             ));
         }
-        lines.push((line, quantity_milli, unit_price_cents, subtotal_cents));
+        let unit_product = line.product_id.or_else(|| {
+            line.product_id_original
+                .and_then(|original_id| existing_by_original.get(&original_id))
+                .and_then(|row| row.product_id)
+        });
+        let line_unit = match unit_product {
+            Some(product_id) if quantity_milli > 0 => {
+                resolve_line_unit(connection, product_id, line.unit_id, quantity_milli)?
+            }
+            _ => None,
+        };
+        let (quantity_milli, unit_price_cents) = match &line_unit {
+            Some(unit) => (
+                unit.product_milli(),
+                unit.per_product_unit(unit_price_cents),
+            ),
+            None => (quantity_milli, unit_price_cents),
+        };
+        if quantity_milli > 0 && unit_price_cents < 1 {
+            return Err(validation_failed(
+                "El costo por unidad del producto debe ser mayor que cero",
+                "converted entry unit cost rounds to zero",
+            ));
+        }
+        lines.push((
+            line,
+            quantity_milli,
+            unit_price_cents,
+            subtotal_cents,
+            line_unit,
+        ));
     }
 
     let mut occupied_positions: std::collections::BTreeSet<i64> =
@@ -3922,7 +4103,7 @@ pub fn update_entry_invoice_inner(
         }
     }
 
-    for (line, quantity_milli, unit_price_cents, subtotal_cents) in lines {
+    for (line, quantity_milli, unit_price_cents, subtotal_cents, line_unit) in lines {
         let original = line
             .product_id_original
             .and_then(|original_id| existing_by_original.get(&original_id));
@@ -4117,6 +4298,7 @@ pub fn update_entry_invoice_inner(
                     ],
                 )
                 .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
+            store_line_unit(connection, row.id, line_unit.as_ref(), "updateEntryInvoice")?;
             recalculate_product_quantity(connection, product_id)?;
             recalculate_product_cost(connection, product_id)?;
             if delta_milli != 0 {
@@ -4219,6 +4401,12 @@ pub fn update_entry_invoice_inner(
                 )
                 .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
             let line_id = connection.last_insert_rowid();
+            store_line_unit(
+                connection,
+                line_id,
+                line_unit.as_ref(),
+                "updateEntryInvoice",
+            )?;
             connection
                 .execute(
                     "INSERT INTO lots (productId, origin, invoiceLineId, arrivalOrder, initialMilli,
@@ -5187,6 +5375,87 @@ pub fn delete_invoice(
     result
 }
 
+// ---------- Impresión y PDF (spec-04 IM-01, IM-02) ----------
+
+/// Documento de impresión con los datos guardados y los de la empresa.
+pub fn get_invoice_print_model_inner(
+    connection: &mut Connection,
+    now: DateTime<Utc>,
+    app_data_dir: &Path,
+    invoice_id: i64,
+) -> Result<crate::invoice_print::InvoicePrintModel, AppError> {
+    let detail = get_invoice_inner(connection, now, invoice_id)?;
+    let company = crate::commands::settings::read_company_profile(connection, app_data_dir)?;
+    Ok(crate::invoice_print::build_invoice_document(
+        &detail, &company,
+    ))
+}
+
+/// IM-02: el mismo documento en PDF, donde el usuario eligió guardarlo.
+pub fn export_invoice_pdf_inner(
+    connection: &mut Connection,
+    now: DateTime<Utc>,
+    app_data_dir: &Path,
+    invoice_id: i64,
+    destination_path: &str,
+) -> Result<(), AppError> {
+    let destination = destination_path.trim();
+    if destination.is_empty() {
+        return Err(validation_failed(
+            "Elige dónde guardar el archivo",
+            "invoice pdf export without destination",
+        ));
+    }
+    let model = get_invoice_print_model_inner(connection, now, app_data_dir, invoice_id)?;
+    let logo = model.company.logo_data_url.as_ref().and_then(|_| {
+        fs::read(crate::commands::settings::company_dir(app_data_dir).join("logo.jpg")).ok()
+    });
+    crate::invoice_print::export_invoice_pdf(&model, logo.as_deref(), Path::new(destination))
+}
+
+#[tauri::command]
+pub fn get_invoice_print_model(
+    state: tauri::State<'_, std::sync::Mutex<Connection>>,
+    invoice_id: i64,
+) -> Result<crate::invoice_print::InvoicePrintModel, AppError> {
+    let mut connection = crate::db::connection::lock_conn(&state);
+    let now = Utc::now();
+    let result = crate::commands::settings::require_app_data_dir()
+        .and_then(|dir| get_invoice_print_model_inner(&mut connection, now, dir, invoice_id));
+    log_print_error(&connection, "getInvoicePrintModel", &result, now);
+    result
+}
+
+#[tauri::command]
+pub fn export_invoice_pdf(
+    state: tauri::State<'_, std::sync::Mutex<Connection>>,
+    invoice_id: i64,
+    destination_path: String,
+) -> Result<(), AppError> {
+    let mut connection = crate::db::connection::lock_conn(&state);
+    let now = Utc::now();
+    let result = crate::commands::settings::require_app_data_dir().and_then(|dir| {
+        export_invoice_pdf_inner(&mut connection, now, dir, invoice_id, &destination_path)
+    });
+    log_print_error(&connection, "exportInvoicePdf", &result, now);
+    result
+}
+
+fn log_print_error<T>(
+    connection: &Connection,
+    operation: &str,
+    result: &Result<T, AppError>,
+    now: DateTime<Utc>,
+) {
+    if let Err(error) = result {
+        if error.should_log() {
+            if let Some(app_data_dir) = current_app_data_dir() {
+                log_error(connection, "invoices", operation, error, now, app_data_dir);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{TimeZone, Utc};
@@ -5297,6 +5566,7 @@ mod tests {
         unit_price: &str,
     ) -> crate::models::invoice::EntryInvoiceLineInput {
         crate::models::invoice::EntryInvoiceLineInput {
+            unit_id: None,
             product_id,
             new_product,
             quantity: quantity.to_owned(),
@@ -5342,6 +5612,7 @@ mod tests {
         unit_price: &str,
     ) -> crate::models::invoice::UpdateEntryInvoiceLineInput {
         crate::models::invoice::UpdateEntryInvoiceLineInput {
+            unit_id: None,
             product_id_original,
             product_id: Some(product_id),
             quantity: quantity.to_owned(),
@@ -5355,6 +5626,7 @@ mod tests {
         unit_price: &str,
     ) -> crate::models::invoice::UpdateEntryInvoiceLineInput {
         crate::models::invoice::UpdateEntryInvoiceLineInput {
+            unit_id: None,
             product_id_original: Some(product_id_original),
             product_id: None,
             quantity: quantity.to_owned(),
@@ -5943,6 +6215,7 @@ mod tests {
             attachment_size_bytes: None,
             attachment_uploaded_at: None,
             lines: vec![crate::models::invoice::EntryInvoiceLineInput {
+                unit_id: None,
                 product_id: Some(product_id),
                 new_product: None,
                 quantity: "3,000".to_owned(),
@@ -6005,6 +6278,7 @@ mod tests {
             attachment_size_bytes: Some(123),
             attachment_uploaded_at: Some(format_utc_timestamp(now)),
             lines: vec![crate::models::invoice::EntryInvoiceLineInput {
+                unit_id: None,
                 product_id: None,
                 new_product: Some(crate::models::invoice::NewProductInput {
                     name: "Producto nuevo".to_owned(),
@@ -6582,6 +6856,7 @@ mod tests {
 
     fn sale_line(product_id: i64, quantity: &str) -> crate::models::invoice::SaleInvoiceLineInput {
         crate::models::invoice::SaleInvoiceLineInput {
+            unit_id: None,
             product_id,
             quantity: quantity.to_owned(),
         }
@@ -7351,6 +7626,7 @@ mod tests {
         quantity: &str,
     ) -> crate::models::invoice::ServiceInvoiceLineInput {
         crate::models::invoice::ServiceInvoiceLineInput {
+            unit_id: None,
             product_id,
             quantity: quantity.to_owned(),
         }
@@ -7524,6 +7800,7 @@ mod tests {
         quantity: &str,
     ) -> crate::models::invoice::GuaranteeInvoiceLineInput {
         crate::models::invoice::GuaranteeInvoiceLineInput {
+            unit_id: None,
             product_id,
             quantity: quantity.to_owned(),
         }
@@ -7919,6 +8196,7 @@ mod tests {
         quantity: &str,
     ) -> crate::models::invoice::InstallationInvoiceLineInput {
         crate::models::invoice::InstallationInvoiceLineInput {
+            unit_id: None,
             product_id,
             quantity: quantity.to_owned(),
         }
@@ -8216,6 +8494,7 @@ mod tests {
         quantity: &str,
     ) -> crate::models::invoice::CreateLossInvoiceInput {
         crate::models::invoice::CreateLossInvoiceInput {
+            unit_id: None,
             product_id,
             quantity: quantity.to_owned(),
             invoice_date: "2026-10-04".to_owned(),
@@ -8426,6 +8705,7 @@ mod tests {
         quantity: &str,
     ) -> crate::models::invoice::UpdateOutgoingInvoiceLineInput {
         crate::models::invoice::UpdateOutgoingInvoiceLineInput {
+            unit_id: None,
             product_id_original: original,
             product_id: product,
             quantity: quantity.to_owned(),
@@ -13515,5 +13795,296 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "cancelled");
+    }
+
+    // ---------- spec-04 IM-01/IM-02: impresión y PDF ----------
+
+    #[test]
+    fn print_commands_require_a_session_and_allow_both_roles() {
+        let dir = std::env::temp_dir();
+        assert_requires_session(|c, n| super::get_invoice_print_model_inner(c, n, &dir, 1));
+        assert_allows_both_roles(|c, n| super::get_invoice_print_model_inner(c, n, &dir, 1));
+        assert_requires_session(|c, n| super::export_invoice_pdf_inner(c, n, &dir, 1, "x.pdf"));
+        assert_allows_both_roles(|c, n| super::export_invoice_pdf_inner(c, n, &dir, 1, "x.pdf"));
+    }
+
+    #[test]
+    fn the_print_model_comes_from_the_saved_invoice_and_the_pdf_export_needs_a_destination() {
+        let (mut connection, now, client_id, product_id) = reservation_fixture("impresion", 69);
+        let invoice = reserved_sale(
+            &mut connection,
+            now,
+            client_id,
+            product_id,
+            "2",
+            "2026-10-10",
+        );
+        let dir = std::env::temp_dir().join(format!("goyma-print-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let model =
+            super::get_invoice_print_model_inner(&mut connection, now, &dir, invoice).unwrap();
+        assert_eq!(model.title, "Factura de Venta");
+        assert_eq!(model.contact.as_ref().unwrap().name, "Luis García");
+        assert_eq!(model.lines[0].name, "Leche");
+        assert_eq!(model.reserved_until.as_deref(), Some("10/10/2026"));
+
+        let error =
+            super::export_invoice_pdf_inner(&mut connection, now, &dir, invoice, "  ").unwrap_err();
+        assert_eq!(error.message, "Elige dónde guardar el archivo");
+        let destination = dir.join("venta.pdf");
+        super::export_invoice_pdf_inner(
+            &mut connection,
+            now,
+            &dir,
+            invoice,
+            destination.to_str().unwrap(),
+        )
+        .unwrap();
+        assert!(std::fs::read(&destination).unwrap().starts_with(b"%PDF"));
+    }
+
+    // ---------- spec-04 CV-01: unidad por línea ----------
+
+    struct UnitFixture {
+        connection: rusqlite::Connection,
+        now: chrono::DateTime<Utc>,
+        client_id: i64,
+        supplier_id: i64,
+        product_id: i64,
+        box_id: i64,
+        pallet_id: i64,
+    }
+
+    /// Producto en "u" (sin stock), 1 Caja = 12 u y un Palé sin conversión
+    /// directa con "u" (1 Palé = 40 Cajas).
+    fn unit_fixture(username: &str, seed: u32) -> UnitFixture {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 16, 0, 0).unwrap();
+        let (connection, _, client_id, supplier_id) = setup_sale_fixture(
+            username,
+            &format!("123456787{seed:02}"),
+            &format!("+53555593{seed:02}"),
+            &format!("123456786{seed:02}"),
+            &format!("+53555594{seed:02}"),
+            now,
+        );
+        let unit = crate::test_utils::insert_unit_fixture(&connection, "Unidad", "u");
+        let box_id = crate::test_utils::insert_unit_fixture(&connection, "Caja", "cj");
+        let pallet_id = crate::test_utils::insert_unit_fixture(&connection, "Palé", "pl");
+        crate::test_utils::insert_conversion_fixture(&connection, box_id, unit, 12_000_000);
+        crate::test_utils::insert_conversion_fixture(&connection, pallet_id, box_id, 40_000_000);
+        // Costo 2,50 y 20 % de ganancia: precio de venta 3,00 la unidad.
+        let product_id = insert_product_fixture(
+            &connection,
+            "Agua",
+            None,
+            Some(unit),
+            250,
+            2_000,
+            0,
+            "active",
+            None,
+            None,
+        );
+        UnitFixture {
+            connection,
+            now,
+            client_id,
+            supplier_id,
+            product_id,
+            box_id,
+            pallet_id,
+        }
+    }
+
+    fn buy_boxes(fixture: &mut UnitFixture, boxes: &str, price: &str) -> i64 {
+        let mut line = entry_line(Some(fixture.product_id), None, boxes, price);
+        line.unit_id = Some(fixture.box_id);
+        super::create_entry_invoice_inner(
+            &mut fixture.connection,
+            fixture.now,
+            entry_input(fixture.supplier_id, vec![line], None),
+        )
+        .unwrap()
+        .invoice_id
+    }
+
+    fn stock(connection: &rusqlite::Connection, product_id: i64) -> i64 {
+        connection
+            .query_row(
+                "SELECT quantityMilli FROM products WHERE id = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn cv01_buying_2_boxes_of_12_at_30_creates_a_lot_of_24_units_at_2_50() {
+        let mut fixture = unit_fixture("cvcompra", 71);
+        let invoice_id = buy_boxes(&mut fixture, "2", "30,00");
+
+        let lot: (i64, i64) = fixture
+            .connection
+            .query_row(
+                "SELECT initialMilli, unitCostCents FROM lots WHERE productId = ?1",
+                [fixture.product_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(lot, (24_000, 250));
+        assert_eq!(stock(&fixture.connection, fixture.product_id), 24_000);
+
+        let detail = get_invoice_inner(&mut fixture.connection, fixture.now, invoice_id).unwrap();
+        assert_eq!(detail.total_cents, 6_000);
+        let line = &detail.lines[0];
+        assert_eq!((line.quantity.as_str(), line.unit_price_cents), ("24", 250));
+        let entered = line.entered.as_ref().unwrap();
+        assert_eq!(
+            (
+                entered.unit_id,
+                entered.abbreviation.as_str(),
+                entered.quantity.as_str(),
+                entered.unit_price_cents
+            ),
+            (Some(fixture.box_id), "cj", "2", 3_000)
+        );
+        // El historial guarda lo que se movió.
+        let movement: i64 = fixture
+            .connection
+            .query_row(
+                "SELECT quantityMilli FROM productMovements WHERE type = 'entry'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(movement, 24_000);
+    }
+
+    #[test]
+    fn cv01_selling_1_box_takes_12_units_at_the_current_price_times_12() {
+        let mut fixture = unit_fixture("cvventa", 72);
+        buy_boxes(&mut fixture, "2", "30,00");
+        let mut line = sale_line(fixture.product_id, "1");
+        line.unit_id = Some(fixture.box_id);
+        let sale = super::create_sale_invoice_inner(
+            &mut fixture.connection,
+            fixture.now,
+            sale_input(fixture.client_id, vec![line], None),
+        )
+        .unwrap()
+        .invoice_id;
+        assert_eq!(stock(&fixture.connection, fixture.product_id), 12_000);
+        let detail = get_invoice_inner(&mut fixture.connection, fixture.now, sale).unwrap();
+        let selling: i64 = fixture
+            .connection
+            .query_row(
+                "SELECT unitPriceCents FROM invoiceLines WHERE invoiceId = ?1",
+                [sale],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(detail.total_cents, selling * 12);
+        let entered = detail.lines[0].entered.as_ref().unwrap();
+        assert_eq!(
+            (entered.quantity.as_str(), entered.unit_price_cents),
+            ("1", selling * 12)
+        );
+        assert_eq!(detail.lines[0].quantity, "12");
+
+        // Editar a 0,5 cajas deja 6 u vendidas; cancelar devuelve lo convertido.
+        let mut update = update_sale_input(
+            sale,
+            fixture.client_id,
+            vec![update_outgoing_line(
+                Some(fixture.product_id),
+                Some(fixture.product_id),
+                "0,5",
+            )],
+        );
+        update.lines[0].unit_id = Some(fixture.box_id);
+        super::update_sale_invoice_inner(&mut fixture.connection, fixture.now, update).unwrap();
+        assert_eq!(stock(&fixture.connection, fixture.product_id), 18_000);
+        let edited = get_invoice_inner(&mut fixture.connection, fixture.now, sale).unwrap();
+        assert_eq!(edited.lines[0].entered.as_ref().unwrap().quantity, "0,5");
+        assert_eq!(edited.lines[0].quantity, "6");
+        change_invoice_status_inner(
+            &mut fixture.connection,
+            fixture.now,
+            sale,
+            "cancelled",
+            None,
+        )
+        .unwrap();
+        assert_eq!(stock(&fixture.connection, fixture.product_id), 24_000);
+    }
+
+    #[test]
+    fn cv01_losses_convert_and_a_missing_conversion_is_rejected() {
+        let mut fixture = unit_fixture("cvperdida", 73);
+        buy_boxes(&mut fixture, "2", "30,00");
+
+        let loss = super::create_loss_invoice_inner(
+            &mut fixture.connection,
+            fixture.now,
+            crate::models::invoice::CreateLossInvoiceInput {
+                product_id: fixture.product_id,
+                quantity: "0,25".to_owned(),
+                unit_id: Some(fixture.box_id),
+                invoice_date: "2026-10-04".to_owned(),
+                notes: None,
+            },
+        )
+        .unwrap()
+        .invoice_id;
+        assert_eq!(stock(&fixture.connection, fixture.product_id), 21_000);
+        let detail = get_invoice_inner(&mut fixture.connection, fixture.now, loss).unwrap();
+        // 3 u a 2,50 = 7,50; por caja, 7,50 ÷ 0,25 = 30,00.
+        assert_eq!(detail.total_cents, 750);
+        assert_eq!(
+            detail.lines[0].entered.as_ref().unwrap().unit_price_cents,
+            3_000
+        );
+
+        // Sin conversión de un paso (Palé → Caja → u) no se guarda nada.
+        let mut line = sale_line(fixture.product_id, "1");
+        line.unit_id = Some(fixture.pallet_id);
+        let error = super::create_sale_invoice_inner(
+            &mut fixture.connection,
+            fixture.now,
+            sale_input(fixture.client_id, vec![line], None),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "validationFailed");
+        assert_eq!(error.message, "No hay una conversión entre esas unidades");
+        assert_eq!(stock(&fixture.connection, fixture.product_id), 21_000);
+    }
+
+    #[test]
+    fn cv01_unit_options_list_the_product_unit_first_and_one_step_conversions() {
+        let fixture = unit_fixture("cvopciones", 74);
+        let options = crate::commands::products::list_unit_options_for_product_inner(
+            &fixture.connection,
+            fixture.now,
+            fixture.product_id,
+        )
+        .unwrap();
+        assert_eq!(
+            options
+                .iter()
+                .map(|option| (option.abbreviation.as_str(), option.factor.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("u", "1"), ("cj", "12")]
+        );
+    }
+
+    #[test]
+    fn cv01_unit_options_require_a_session_and_allow_both_roles() {
+        assert_requires_session(|c, n| {
+            crate::commands::products::list_unit_options_for_product_inner(c, n, 1)
+        });
+        assert_allows_both_roles(|c, n| {
+            crate::commands::products::list_unit_options_for_product_inner(c, n, 1)
+        });
     }
 }

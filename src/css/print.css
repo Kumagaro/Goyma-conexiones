@@ -1,0 +1,130 @@
+/* Vista previa e impresión de facturas (spec-04 IM-01, D-06). En pantalla,
+   una hoja A4 sobre la aplicación; al imprimir, solo la hoja. */
+
+#print-area {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  overflow: auto;
+  padding: 24px 16px;
+  background-color: #020f1e8c;
+}
+
+#print-area[hidden] {
+  display: none;
+}
+
+.print-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 210mm;
+  max-width: 100%;
+  margin: 0 auto 12px;
+}
+
+.print-sheet {
+  box-sizing: border-box;
+  width: 210mm;
+  max-width: 100%;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 15mm;
+  background-color: #ffffff;
+  color: #020f1e;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 6px 24px #020f1e40;
+}
+
+.print-company {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.print-logo {
+  max-width: 40mm;
+  max-height: 25mm;
+  object-fit: contain;
+}
+
+.print-company-name {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.print-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.print-meta {
+  margin-bottom: 2px;
+  white-space: pre;
+}
+
+.print-contact {
+  margin: 14px 0;
+}
+
+.print-strong {
+  font-weight: 700;
+}
+
+.print-lines {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.print-lines th,
+.print-lines td {
+  padding: 6px 4px;
+  border-bottom: 1px solid #020f1e26;
+  text-align: left;
+}
+
+.print-lines th {
+  font-weight: 700;
+}
+
+.print-total {
+  margin-top: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.print-notes {
+  margin-top: 18px;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+
+  body > *:not(#print-area) {
+    display: none !important;
+  }
+
+  #print-area {
+    position: static;
+    padding: 0;
+    background: none;
+  }
+
+  .print-toolbar {
+    display: none;
+  }
+
+  .print-sheet {
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+}

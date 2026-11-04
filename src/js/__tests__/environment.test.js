@@ -131,7 +131,16 @@ describe("Vitest con jsdom", () => {
         .map((node) => node.getAttribute("src") ?? node.getAttribute("href"))
         .filter((url) => /^(?:https?:)?\/\//i.test(url));
       expect(external, page).toEqual([]);
+      // IM-02: el PDF lo genera el backend; jsPDF se retiró.
+      expect(
+        [...doc.querySelectorAll("script[src]")].some((script) =>
+          /jspdf/i.test(script.getAttribute("src")),
+        ),
+        page,
+      ).toBe(false);
     }
+    const libs = await readdir(path.join(sourceRoot, "js", "libs"));
+    expect(libs.some((name) => /jspdf/i.test(name))).toBe(false);
   });
 
   it("SG-01: ningún innerHTML del JS de producción recibe una plantilla o concatenación", async () => {
@@ -139,10 +148,6 @@ describe("Vitest con jsdom", () => {
     // conectar datos reales; cada fase quita aquí sus líneas.
     const pendingByPhase = {
       "dashboard.js": [
-        // Fase 3 (CF-02): monedas, historial de tasas y tarjetas de tasas.
-        "grid.innerHTML = monedasData",
-        "body.innerHTML = filas",
-        "wrap.innerHTML = rateCardsData",
         // Fase 4 (DB-01): KPIs, listas y gastos del dashboard.
         "valor.innerHTML = valorHtml(def, k);",
         "$('[data-role=\"delta\"]', fila).innerHTML = variacion(",
@@ -256,10 +261,11 @@ describe("Vitest con jsdom", () => {
       (script) => script.getAttribute("src") === "./js/dashboard.js",
     );
 
-    // spec-04: la pestaña de notificaciones va tras los módulos de spec-03.
-    expect(moduleSources.slice(-5)).toEqual([
+    // spec-04: notificaciones y configuración van tras los módulos de spec-03.
+    expect(moduleSources.slice(-6)).toEqual([
       ...featureModules,
       "./js/views/notificacionesView.js",
+      "./js/views/configuracionView.js",
     ]);
     expect(dashboardIndex).toBeGreaterThan(
       Array.from(parsed.scripts).findIndex(

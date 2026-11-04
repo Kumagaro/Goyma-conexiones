@@ -128,7 +128,6 @@ describe("facturasView submódulo sale", () => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
     document.body.innerHTML = "";
-    delete window.exportarFacturaVentaPDF;
     delete window.__facturasSalePageChangeBound;
   });
 
@@ -319,28 +318,6 @@ describe("facturasView submódulo sale", () => {
     });
     await __testHooks.openSaleDetail(2);
     expect(document.getElementById("factura-venta-editar").hidden).toBe(true);
-  });
-
-  it('el botón "Exportar Factura" llama a exportarFacturaVentaPDF con el DTO de getInvoice', async () => {
-    listInvoices.mockResolvedValue([]);
-    const detail = {
-      id: 4,
-      number: "V-00004",
-      invoiceType: "V",
-      status: "pending",
-      contactFullName: "Cliente Cuatro",
-      date: "2026-02-10",
-      totalCents: 800,
-      lines: [],
-    };
-    getInvoice.mockResolvedValue(detail);
-    window.exportarFacturaVentaPDF = vi.fn();
-    await initFacturasView();
-
-    const { __testHooks } = await import("../views/facturasView.js");
-    await __testHooks.openSaleDetail(4);
-    document.getElementById("factura-venta-exportar").click();
-    expect(window.exportarFacturaVentaPDF).toHaveBeenCalledWith(detail);
   });
 
   it("muestra un nombre de cliente con HTML como texto (salida segura)", async () => {

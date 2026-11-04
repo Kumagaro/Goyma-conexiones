@@ -4,6 +4,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const settingsMocks = vi.hoisted(() => ({
+  getUserPreferences: vi.fn(),
+  listExchangeRates: vi.fn(),
+}));
 const productServiceMocks = vi.hoisted(() => ({
   listProducts: vi.fn(),
   listOutOfStockAndDiscontinued: vi.fn(),
@@ -574,6 +578,12 @@ describe("listados y detalle de productos", () => {
     vi.doMock("../components/confirmDialog.js", () => ({
       confirmDialog: confirmDialogMock,
     }));
+    vi.doMock("../services/settingsService.js", () => settingsMocks);
+    settingsMocks.getUserPreferences.mockResolvedValue({
+      visibleCurrencies: [],
+      pageSize: 20,
+    });
+    settingsMocks.listExchangeRates.mockResolvedValue([]);
     categoryMocks.listCategories.mockResolvedValue({
       items: [],
       expiredCleanupWarning: null,
@@ -597,6 +607,7 @@ describe("listados y detalle de productos", () => {
     vi.doUnmock("../services/unitsService.js");
     vi.doUnmock("../views/unidadesView.js");
     vi.doUnmock("../components/confirmDialog.js");
+    vi.doUnmock("../services/settingsService.js");
   });
 
   async function openProductsView() {
@@ -756,6 +767,58 @@ describe("listados y detalle de productos", () => {
         productServiceMocks.listOutOfStockAndDiscontinued,
       ).toHaveBeenLastCalledWith("", "discontinued");
     });
+  });
+
+  it("CF-01: el detalle muestra los equivalentes de las monedas elegidas con tasa", async () => {
+    const html = await readFile(
+      path.resolve(process.cwd(), "src", "dashboard-unificado.html"),
+      "utf8",
+    );
+    const card = new DOMParser()
+      .parseFromString(html, "text/html")
+      .getElementById("producto-ver-equivalentes-card");
+    document.getElementById("producto-ver-stock").after(card);
+    settingsMocks.getUserPreferences.mockResolvedValue({
+      visibleCurrencies: ["CUP", "MLC"],
+      pageSize: 20,
+    });
+    // MLC no tiene tasa: no se muestra.
+    settingsMocks.listExchangeRates.mockResolvedValue([
+      { currency: "CUP", rate: "670", updatedAt: "", updatedByName: "ana" },
+    ]);
+    productServiceMocks.listProducts.mockResolvedValue([activeProducts[1]]);
+    productServiceMocks.getProduct.mockResolvedValue({
+      ...activeProducts[1],
+      costCents: 1_000,
+      sellingPriceCents: 1_250,
+      valorTotalCents: 9_998,
+      description: null,
+      isDiscontinued: false,
+      discontinuedAt: null,
+      remainingDays: null,
+      expiredCleanupWarning: null,
+      reservedQuantity: "0",
+      reservedInvoices: [],
+    });
+    const view = await openProductsView();
+    await view.showProductoTab("list");
+    document
+      .querySelector('#productos-body [data-product-action="view"]')
+      .click();
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("producto-ver-equivalentes-card").hidden,
+      ).toBe(false),
+    );
+    expect(
+      [...document.querySelectorAll("#producto-ver-equivalentes > div")].map(
+        (row) => row.textContent,
+      ),
+    ).toEqual([
+      "Costo: 6700,00 CUP",
+      "Precio de venta: 8375,00 CUP",
+      "Valor total: 66.986,60 CUP",
+    ]);
   });
 
   it("RS-03: el detalle muestra la cantidad reservada con un enlace a cada reserva", async () => {

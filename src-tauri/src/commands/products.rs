@@ -7,11 +7,11 @@ use crate::db::connection::current_app_data_dir;
 use crate::db::connection::lock_conn;
 use crate::errors::{log_error, map_db_error, AppError};
 use crate::models::product::{
-    format_profit_percent_hundredths, format_quantity_milli, CreateProductInput, ExpiryFilter,
-    PreviewSellingPriceInput, PriceQuote, ProductActionResult, ProductAssociatedInvoice,
-    ProductConditionFilter, ProductConditionItem, ProductConditionList, ProductDetail,
-    ProductFilters, ProductListItem, ProductMatch, ReservedInvoice, StockFilter,
-    UpdateProductInput, UpdateProductResult,
+    format_factor_micro, format_profit_percent_hundredths, format_quantity_milli,
+    CreateProductInput, ExpiryFilter, PreviewSellingPriceInput, PriceQuote, ProductActionResult,
+    ProductAssociatedInvoice, ProductConditionFilter, ProductConditionItem, ProductConditionList,
+    ProductDetail, ProductFilters, ProductListItem, ProductMatch, ReservedInvoice, StockFilter,
+    UnitOption, UpdateProductInput, UpdateProductResult,
 };
 use crate::pricing::selling_price_cents;
 use crate::text::{clean_name, normalize_text, sort_spanish, spanish_sort_key};
@@ -269,7 +269,7 @@ pub fn create_product_inner(
         profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
         expires_on,
         is_out_of_stock: false,
-        is_low_stock: quantity_milli < 5_000,
+        is_low_stock: quantity_milli < crate::automation::low_stock_milli(&transaction),
     };
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
@@ -331,6 +331,7 @@ pub fn list_products_inner(
     let today_text = today.format("%Y-%m-%d").to_string();
     let expiring_through = (today + Duration::days(29)).format("%Y-%m-%d").to_string();
 
+    let low_stock_milli = crate::automation::low_stock_milli(connection);
     let mut statement = connection
         .prepare(
             "SELECT p.id, p.name, p.categoryId, c.name, p.unitId, u.name, u.abbreviation,
@@ -346,7 +347,8 @@ pub fn list_products_inner(
                     ?4 = 'all'
                     OR (?4 = 'available' AND p.quantityMilli > 0)
                     OR (?4 = 'outOfStock' AND p.quantityMilli = 0)
-                    OR (?4 = 'low' AND p.quantityMilli > 0 AND p.quantityMilli < 5000)
+                    OR (?4 = 'low' AND p.quantityMilli > 0 AND p.quantityMilli <
+                        COALESCE((SELECT CAST(value AS INTEGER) * 1000 FROM settings WHERE key = 'lowStockThreshold'), 5000))
                )
                AND (
                     ?5 = 'all'
@@ -418,7 +420,7 @@ pub fn list_products_inner(
                 .get(10)
                 .map_err(|error| map_db_error(error, "listProducts", &[]))?,
             is_out_of_stock: quantity_milli == 0,
-            is_low_stock: quantity_milli > 0 && quantity_milli < 5_000,
+            is_low_stock: quantity_milli > 0 && quantity_milli < low_stock_milli,
         });
     }
 
@@ -554,6 +556,85 @@ pub fn get_product_associated_invoices(
     let now = Utc::now();
     let result = get_product_associated_invoices_inner(&connection, now, product_id, limit);
     log_product_command_error(&connection, "getProductAssociatedInvoices", &result, now);
+    result
+}
+
+/// CV-01: unidades que ofrece el selector de una línea para este producto,
+/// la suya primero; un producto sin unidad no ofrece conversiones.
+pub fn list_unit_options_for_product_inner(
+    connection: &Connection,
+    now: DateTime<Utc>,
+    product_id: i64,
+) -> Result<Vec<UnitOption>, AppError> {
+    crate::commands::auth::require_session(connection, now)?;
+    let product_unit: Option<(i64, String, String)> = connection
+        .query_row(
+            "SELECT u.id, u.name, u.abbreviation FROM products p
+             LEFT JOIN units u ON u.id = p.unitId WHERE p.id = ?1",
+            [product_id],
+            |row| {
+                Ok(row.get::<_, Option<i64>>(0)?.map(|id| {
+                    (
+                        id,
+                        row.get(1).unwrap_or_default(),
+                        row.get(2).unwrap_or_default(),
+                    )
+                }))
+            },
+        )
+        .optional()
+        .map_err(|error| map_db_error(error, "listUnitOptionsForProduct", &[]))?
+        .ok_or_else(|| {
+            AppError::new(
+                "notFound",
+                PRODUCT_NOT_FOUND_MESSAGE,
+                "product missing while listing unit options",
+            )
+        })?;
+    let Some((unit_id, name, abbreviation)) = product_unit else {
+        return Ok(vec![]);
+    };
+    let mut options = vec![UnitOption {
+        unit_id,
+        name,
+        abbreviation,
+        factor: "1".to_owned(),
+    }];
+    let neighbours: Vec<i64> = connection
+        .prepare(
+            "SELECT CASE WHEN fromUnitId = ?1 THEN toUnitId ELSE fromUnitId END
+             FROM unitConversions WHERE fromUnitId = ?1 OR toUnitId = ?1",
+        )
+        .and_then(|mut statement| statement.query_map([unit_id], |row| row.get(0))?.collect())
+        .map_err(|error| map_db_error(error, "listUnitOptionsForProduct", &[]))?;
+    for neighbour in neighbours {
+        // El mismo cálculo que se aplicará al guardar la línea.
+        if let Some(line_unit) =
+            crate::inventory::resolve_line_unit(connection, product_id, Some(neighbour), 1_000)?
+        {
+            options.push(UnitOption {
+                unit_id: neighbour,
+                name: line_unit.name.clone(),
+                abbreviation: line_unit.abbreviation.clone(),
+                factor: format_factor_micro(line_unit.factor_micro()),
+            });
+        }
+    }
+    sort_spanish(&mut options[1..], |option| {
+        (spanish_sort_key(&option.name), option.unit_id)
+    });
+    Ok(options)
+}
+
+#[tauri::command]
+pub fn list_unit_options_for_product(
+    state: tauri::State<'_, std::sync::Mutex<Connection>>,
+    product_id: i64,
+) -> Result<Vec<UnitOption>, AppError> {
+    let connection = lock_conn(&state);
+    let now = Utc::now();
+    let result = list_unit_options_for_product_inner(&connection, now, product_id);
+    log_product_command_error(&connection, "listUnitOptionsForProduct", &result, now);
     result
 }
 
@@ -785,7 +866,8 @@ pub fn get_product_inner(
             profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
             expires_on,
             is_out_of_stock: quantity_milli == 0,
-            is_low_stock: quantity_milli > 0 && quantity_milli < 5_000,
+            is_low_stock: quantity_milli > 0
+                && quantity_milli < crate::automation::low_stock_milli(&transaction),
         },
         description,
         is_discontinued,
@@ -1007,7 +1089,8 @@ pub fn update_product_inner(
         profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
         expires_on,
         is_out_of_stock: quantity_milli == 0,
-        is_low_stock: quantity_milli > 0 && quantity_milli < 5_000,
+        is_low_stock: quantity_milli > 0
+            && quantity_milli < crate::automation::low_stock_milli(&transaction),
     };
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).

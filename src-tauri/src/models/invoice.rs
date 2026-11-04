@@ -119,6 +119,9 @@ pub struct EntryInvoiceLineInput {
     pub new_product: Option<NewProductInput>,
     pub quantity: String,
     pub unit_price: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -148,6 +151,9 @@ pub struct CreateEntryInvoiceInput {
 pub struct SaleInvoiceLineInput {
     pub product_id: i64,
     pub quantity: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -172,6 +178,9 @@ pub struct CreateSaleInvoiceInput {
 pub struct ServiceInvoiceLineInput {
     pub product_id: i64,
     pub quantity: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -196,6 +205,9 @@ pub struct CreateServiceInvoiceInput {
 pub struct GuaranteeInvoiceLineInput {
     pub product_id: i64,
     pub quantity: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -216,6 +228,9 @@ pub struct CreateGuaranteeInvoiceInput {
 pub struct InstallationInvoiceLineInput {
     pub product_id: i64,
     pub quantity: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -236,6 +251,9 @@ pub struct CreateInstallationInvoiceInput {
 pub struct CreateLossInvoiceInput {
     pub product_id: i64,
     pub quantity: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
     pub invoice_date: String,
     #[serde(default)]
     pub notes: Option<String>,
@@ -249,6 +267,9 @@ pub struct UpdateOutgoingInvoiceLineInput {
     #[serde(default)]
     pub product_id: Option<i64>,
     pub quantity: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -312,6 +333,9 @@ pub struct UpdateEntryInvoiceLineInput {
     pub product_id: Option<i64>,
     pub quantity: String,
     pub unit_price: String,
+    /// CV-01: unidad elegida en la línea; sin ella, la del producto.
+    #[serde(default)]
+    pub unit_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

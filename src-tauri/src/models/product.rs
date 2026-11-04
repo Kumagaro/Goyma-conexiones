@@ -35,6 +35,18 @@ pub struct ProductMatch {
     pub is_discontinued: bool,
 }
 
+/// Unidad que se puede elegir en una línea de factura (CV-01): la del
+/// producto (factor 1) o una con conversión de un paso hacia ella.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitOption {
+    pub unit_id: i64,
+    pub name: String,
+    pub abbreviation: String,
+    /// Unidades del producto que equivalen a 1 de esta unidad.
+    pub factor: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductAssociatedInvoice {

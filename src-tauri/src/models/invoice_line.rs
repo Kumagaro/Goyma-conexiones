@@ -24,6 +24,22 @@ pub struct InvoiceLineDetail {
     pub remaining_quantity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consumed_quantity: Option<String>,
+    /// CV-01: lo que se escribió ("2 Caja"); `quantity` y `unitPriceCents`
+    /// siguen en la unidad del producto.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entered: Option<EnteredUnit>,
+}
+
+/// Unidad y cantidad escritas en la línea, y el precio por esa unidad.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnteredUnit {
+    /// `None` si la unidad se eliminó después (la línea conserva su copia).
+    pub unit_id: Option<i64>,
+    pub name: String,
+    pub abbreviation: String,
+    pub quantity: String,
+    pub unit_price_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

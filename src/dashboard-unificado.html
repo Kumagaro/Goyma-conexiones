@@ -5,6 +5,7 @@
     <meta charset="utf-8" />
     <link rel="stylesheet" href="./css/dashboard.css" />
     <link rel="stylesheet" href="./css/toast.css" />
+    <link rel="stylesheet" href="./css/print.css" />
   </head>
   <body>
     <!-- ===== Sprite de íconos SVG (uso: <svg class="icon"><use href="#icon-x"></use></svg>) ===== -->
@@ -2140,6 +2141,21 @@
                 <div class="kpi-sec-value" id="producto-ver-reservado"></div>
                 <div class="col-acciones" id="producto-ver-reservas"></div>
               </div>
+              <div
+                class="kpi-secondary"
+                id="producto-ver-equivalentes-card"
+                hidden
+              >
+                <div class="kpi-sec-top">
+                  <div class="kpi-sec-label">
+                    <span class="kpi-icon"
+                      ><svg class="icon"><use href="#icon-coins"></use></svg
+                    ></span>
+                    <span class="txt">Equivalentes</span>
+                  </div>
+                </div>
+                <div id="producto-ver-equivalentes"></div>
+              </div>
               <div class="kpi-secondary">
                 <div class="kpi-sec-top">
                   <div class="kpi-sec-label">
@@ -3792,12 +3808,22 @@
               <button
                 type="button"
                 class="btn-secondary"
+                id="factura-entrada-imprimir"
+              >
+                <svg class="icon" style="width: 16px; height: 16px">
+                  <use href="#icon-receipt"></use>
+                </svg>
+                Imprimir
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
                 id="factura-entrada-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
                 </svg>
-                Exportar Factura
+                Exportar a PDF
               </button>
               <button
                 type="button"
@@ -4244,12 +4270,22 @@
               <button
                 type="button"
                 class="btn-secondary"
+                id="factura-venta-imprimir"
+              >
+                <svg class="icon" style="width: 16px; height: 16px">
+                  <use href="#icon-receipt"></use>
+                </svg>
+                Imprimir
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
                 id="factura-venta-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
                 </svg>
-                Exportar Factura
+                Exportar a PDF
               </button>
               <button
                 type="button"
@@ -4697,12 +4733,22 @@
               <button
                 type="button"
                 class="btn-secondary"
+                id="factura-servicio-imprimir"
+              >
+                <svg class="icon" style="width: 16px; height: 16px">
+                  <use href="#icon-receipt"></use>
+                </svg>
+                Imprimir
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
                 id="factura-servicio-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
                 </svg>
-                Exportar Factura
+                Exportar a PDF
               </button>
               <button
                 type="button"
@@ -5114,12 +5160,22 @@
               <button
                 type="button"
                 class="btn-secondary"
+                id="factura-insumo-imprimir"
+              >
+                <svg class="icon" style="width: 16px; height: 16px">
+                  <use href="#icon-receipt"></use>
+                </svg>
+                Imprimir
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
                 id="factura-insumo-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
                 </svg>
-                Exportar Factura
+                Exportar a PDF
               </button>
               <button
                 type="button"
@@ -5540,12 +5596,22 @@
               <button
                 type="button"
                 class="btn-secondary"
+                id="factura-garantia-imprimir"
+              >
+                <svg class="icon" style="width: 16px; height: 16px">
+                  <use href="#icon-receipt"></use>
+                </svg>
+                Imprimir
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
                 id="factura-garantia-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
                 </svg>
-                Exportar Factura
+                Exportar a PDF
               </button>
               <button
                 type="button"
@@ -5656,6 +5722,10 @@
                     value="1"
                     required
                   />
+                </div>
+                <div class="field" id="factura-perdida-unidad-field" hidden>
+                  <label for="factura-perdida-unidad">Unidad</label>
+                  <select id="factura-perdida-unidad"></select>
                 </div>
                 <div class="field">
                   <label for="factura-perdida-costo">Costo Asociado</label>
@@ -5826,12 +5896,22 @@
               <button
                 type="button"
                 class="btn-secondary"
+                id="factura-perdida-imprimir"
+              >
+                <svg class="icon" style="width: 16px; height: 16px">
+                  <use href="#icon-receipt"></use>
+                </svg>
+                Imprimir
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
                 id="factura-perdida-exportar"
               >
                 <svg class="icon" style="width: 16px; height: 16px">
                   <use href="#icon-export"></use>
                 </svg>
-                Exportar Factura
+                Exportar a PDF
               </button>
               <button
                 type="button"
@@ -6130,14 +6210,16 @@
         <div id="page-configuracion" class="page">
           <div class="config-tabs" aria-label="Secciones de configuración">
             <button
+              type="button"
               class="tab active"
-              id="cfgtab-facturacion"
+              id="cfgtab-empresa"
               data-action="showConfigTab"
-              data-tab="facturacion"
+              data-tab="empresa"
             >
-              Facturación
+              Empresa
             </button>
             <button
+              type="button"
               class="tab"
               id="cfgtab-moneda"
               data-action="showConfigTab"
@@ -6146,6 +6228,7 @@
               Moneda
             </button>
             <button
+              type="button"
               class="tab"
               id="cfgtab-tasas"
               data-action="showConfigTab"
@@ -6154,6 +6237,16 @@
               Tasas
             </button>
             <button
+              type="button"
+              class="tab"
+              id="cfgtab-umbrales"
+              data-action="showConfigTab"
+              data-tab="umbrales"
+            >
+              Umbrales
+            </button>
+            <button
+              type="button"
               class="tab"
               id="cfgtab-general"
               data-action="showConfigTab"
@@ -6162,7 +6255,6 @@
               General
             </button>
           </div>
-
           <!-- ===== GENERAL (preferencias de visualización) ===== -->
           <div id="config-general" class="config-subview">
             <h3 class="config-block-title">Visualización de Tablas</h3>
@@ -6170,16 +6262,12 @@
               Define cuántos elementos se muestran por página en todos los
               listados del sistema.
             </p>
-
             <div class="form-card" style="max-width: 640px">
               <div class="field">
                 <label for="config-elementos-pagina"
                   >Elementos por Página</label
                 >
-                <select
-                  id="config-elementos-pagina"
-                  data-change-action="cambiarTamPagina"
-                >
+                <select id="config-elementos-pagina">
                   <option value="10">10 elementos</option>
                   <option value="20" selected>20 elementos</option>
                   <option value="50">50 elementos</option>
@@ -6189,186 +6277,119 @@
               <p class="config-hint">
                 Se aplica de inmediato a productos, categorías, clientes,
                 proveedores, usuarios, facturas, históricos, unidades y líneas
-                de factura. La preferencia se recuerda en este navegador.
+                de factura. La preferencia se guarda para tu usuario.
               </p>
             </div>
           </div>
-
-          <!-- ===== FACTURACIÓN ===== -->
-          <div id="config-facturacion" class="config-subview active">
+          <!-- ===== EMPRESA (CF-03) ===== -->
+          <div id="config-empresa" class="config-subview active">
             <div class="config-columns">
               <div class="identity-card">
                 <div class="section-toolbar" style="margin-bottom: 0">
                   <h3 style="font-size: 20px; font-weight: 600; color: #020f1e">
-                    Insertar Identidad de la Empresa
+                    Logo de la Empresa
                   </h3>
                   <svg class="icon" style="color: #020f1e">
                     <use href="#icon-image"></use>
                   </svg>
                 </div>
                 <div class="logo-upload-row">
-                  <div
+                  <button
+                    type="button"
                     class="logo-drop"
-                    data-action="avisoDemo"
-                    data-mensaje="Selecciona un archivo de logo para subir."
+                    id="config-logo-elegir"
+                    aria-label="Elegir logo"
+                    title="Elegir logo"
                   >
                     <svg class="icon"><use href="#icon-upload"></use></svg>
-                  </div>
+                  </button>
+                  <input
+                    type="file"
+                    id="config-logo-input"
+                    accept="image/png,image/jpeg"
+                    hidden
+                  />
                   <div class="logo-current">
-                    <img
-                      src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='117' height='89'%3E%3Crect width='117' height='89' fill='%23020f1e'/%3E%3Ctext x='58.5' y='50' fill='%23fff' font-family='sans-serif' font-size='16' text-anchor='middle'%3ELOGO%3C/text%3E%3C/svg%3E"
-                      alt="Logo actual"
-                    />
+                    <img id="config-logo-preview" alt="Logo actual" hidden />
+                    <span id="config-logo-empty">Sin logo</span>
                   </div>
-                </div>
-                <div class="version-chips">
-                  <div class="version-chip">Versión<br />Anterior</div>
-                  <div class="version-chip">Versión<br />Anterior</div>
-                  <div class="version-chip">Versión<br />Anterior</div>
                 </div>
                 <div class="identity-note">
                   <span
-                    >Este logo se mostrará en las facturas impresas y
-                    reportes</span
+                    >PNG o JPG de hasta 2 MB. Se muestra en las facturas
+                    impresas y exportadas.</span
                   >
-                  <button type="button" class="btn-secondary">
-                    <svg class="icon" style="width: 14px; height: 14px">
-                      <use href="#icon-upload"></use>
-                    </svg>
-                    Cambiar Logo
-                  </button>
-                </div>
-              </div>
-
-              <div class="invoice-panel">
-                <h3>Datos de Factura</h3>
-                <div class="invoice-columns">
-                  <div class="invoice-col">
-                    <h4>Factura de Venta</h4>
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Cliente</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Fecha</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Estado de Cobro</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Productos</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Cantidad</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Precio Unitario</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Subtotal</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" />Descripción General</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Total de la
-                      Factura</label
-                    >
-                  </div>
-                  <div class="invoice-col">
-                    <h4>Factura de Servicio</h4>
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Cliente</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Fecha</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Insumos
-                      Utilizados</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Costo Unitario
-                      Promedio</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Costo Total de
-                      Insumos</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" />Factura de Insumos (PDF)</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />PDF Factura de
-                      Servicio</label
-                    >
-                  </div>
-                  <div class="invoice-col">
-                    <h4>Factura de Entrada</h4>
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Proveedor</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Fecha</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Estado de Pago</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Productos</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Cantidad</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Costo Unitario</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" checked />Total General</label
-                    >
-                    <label class="field-toggle"
-                      ><input type="checkbox" />PDF Factura Original</label
-                    >
-                  </div>
-                </div>
-                <div class="invoice-note">
-                  Estos cambios se aplicarán a todas las facturas nuevas que se
-                  generen.
-                </div>
-                <div class="form-actions">
                   <button
                     type="button"
-                    class="btn-primary"
-                    data-action="avisoDemo"
-                    data-mensaje="Cambios de facturación guardados (demo)."
+                    class="btn-secondary"
+                    id="config-logo-quitar"
+                    hidden
                   >
-                    Guardar Cambios
+                    <svg class="icon" style="width: 14px; height: 14px">
+                      <use href="#icon-trash"></use>
+                    </svg>
+                    Quitar Logo
                   </button>
                 </div>
               </div>
+              <form class="form-card" id="config-empresa-form" novalidate>
+                <h3 class="config-block-title">Datos de la Empresa</h3>
+                <div class="field">
+                  <label for="config-empresa-nombre">Nombre</label>
+                  <input
+                    type="text"
+                    id="config-empresa-nombre"
+                    maxlength="100"
+                  />
+                </div>
+                <div class="field">
+                  <label for="config-empresa-direccion">Dirección</label>
+                  <input
+                    type="text"
+                    id="config-empresa-direccion"
+                    maxlength="200"
+                  />
+                </div>
+                <div class="field">
+                  <label for="config-empresa-telefono">Teléfono</label>
+                  <input
+                    type="text"
+                    id="config-empresa-telefono"
+                    maxlength="30"
+                  />
+                </div>
+                <div class="field">
+                  <label for="config-empresa-nit">NIT o código fiscal</label>
+                  <input type="text" id="config-empresa-nit" maxlength="30" />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn-primary">
+                    Guardar Datos
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
-
-          <!-- ===== MONEDA ===== -->
+          <!-- ===== MONEDA (CF-01, por usuario) ===== -->
           <div id="config-moneda" class="config-subview">
-            <h3 class="config-block-title">Tipo de Moneda</h3>
+            <h3 class="config-block-title">Monedas Visibles</h3>
             <p class="config-block-subtitle">
-              Activa las monedas que tu negocio acepta y utiliza en las
-              facturas.
+              Elige qué equivalentes al USD ves en el detalle de los productos y
+              en el dashboard. Todo se sigue guardando en USD.
             </p>
             <div class="currency-grid" id="currency-grid"></div>
+            <p class="config-hint" id="config-moneda-aviso" hidden></p>
             <div class="form-actions" style="margin-top: 20px">
               <button
                 type="button"
                 class="btn-primary"
-                data-action="avisoDemo"
-                data-mensaje="Cambios de moneda aplicados (demo)."
+                id="config-moneda-guardar"
               >
                 Aplicar Cambios
               </button>
             </div>
           </div>
-
-          <!-- ===== TASAS ===== -->
+          <!-- ===== TASAS (CF-02) ===== -->
           <div id="config-tasas" class="config-subview">
             <div class="rates-history" style="margin-bottom: 30px">
               <h3>Historial de Cambios de Tasas</h3>
@@ -6378,11 +6399,7 @@
               <table class="rates-table">
                 <thead>
                   <tr>
-                    <th
-                      id="th-fecha-historial-tasas"
-                      class="th-sortable"
-                      data-action="ordenarHistorialTasas"
-                    >
+                    <th id="th-fecha-historial-tasas" class="th-sortable">
                       Fecha y Hora
                     </th>
                     <th>Moneda</th>
@@ -6395,25 +6412,81 @@
                 <tbody id="historial-tasas-body"></tbody>
               </table>
             </div>
-
             <h3 class="config-block-title">Tasa de Cambio</h3>
             <p class="config-block-subtitle">
-              Actualiza las tasas de cambio respecto a la moneda de referencia.
+              Cuántas unidades de cada moneda equivalen a 1 USD (hasta 6
+              decimales).
             </p>
             <div class="rate-cards" id="rate-cards"></div>
             <div class="form-actions" style="margin-top: 20px">
               <button
                 type="button"
                 class="btn-primary"
-                data-action="avisoDemo"
-                data-mensaje="Tasas de cambio guardadas (demo)."
+                id="config-tasas-guardar"
               >
                 Guardar Tasas de Cambio
               </button>
             </div>
           </div>
+          <!-- ===== UMBRALES (CF-04, globales) ===== -->
+          <div id="config-umbrales" class="config-subview">
+            <h3 class="config-block-title">Umbrales de Avisos</h3>
+            <p class="config-block-subtitle">
+              Valores comunes a todos los usuarios para las notificaciones
+              automáticas.
+            </p>
+            <form
+              class="form-card"
+              id="config-umbrales-form"
+              style="max-width: 640px"
+              novalidate
+            >
+              <div class="field">
+                <label for="config-umbral-stock">Stock bajo (unidades)</label>
+                <input
+                  type="number"
+                  id="config-umbral-stock"
+                  min="1"
+                  max="9999"
+                  step="1"
+                />
+              </div>
+              <div class="field">
+                <label for="config-umbral-facturas"
+                  >Días para una factura pendiente antigua</label
+                >
+                <input
+                  type="number"
+                  id="config-umbral-facturas"
+                  min="1"
+                  max="365"
+                  step="1"
+                />
+              </div>
+              <div class="field">
+                <label for="config-umbral-respaldo"
+                  >Días sin copia de seguridad para avisar</label
+                >
+                <input
+                  type="number"
+                  id="config-umbral-respaldo"
+                  min="1"
+                  max="90"
+                  step="1"
+                />
+              </div>
+              <p class="config-hint">
+                El umbral de stock bajo también cambia el filtro "Stock bajo"
+                del listado de productos.
+              </p>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">
+                  Guardar Umbrales
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-
         <!-- ===================== NOTIFICACIONES ===================== -->
         <div id="page-notificaciones" class="page">
           <div class="section-toolbar">
@@ -6857,9 +6930,9 @@
     <script type="module" src="./js/views/facturasView.js"></script>
     <script type="module" src="./js/views/historialView.js"></script>
     <script type="module" src="./js/views/notificacionesView.js"></script>
+    <script type="module" src="./js/views/configuracionView.js"></script>
     <!-- Dashboard principal -->
     <script src="./js/libs/chart.umd.min.js"></script>
     <script src="./js/dashboard.js"></script>
-    <script src="./js/libs/jspdf.umd.min.js"></script>
   </body>
 </html>

@@ -6,6 +6,7 @@ pub mod errors;
 pub mod export;
 pub mod inventory;
 pub mod invoice_counter;
+pub mod invoice_print;
 pub mod invoice_snapshot;
 pub mod models;
 pub mod pricing;
@@ -90,6 +91,7 @@ pub fn run() {
             commands::products::discontinue_product,
             commands::products::activate_product,
             commands::products::delete_product,
+            commands::products::list_unit_options_for_product,
             commands::history::get_product_history,
             commands::history::list_history_products,
             commands::history::export_history_excel,
@@ -112,6 +114,8 @@ pub fn run() {
             commands::invoices::download_invoice_attachment,
             commands::invoices::change_invoice_status,
             commands::invoices::delete_invoice,
+            commands::invoices::get_invoice_print_model,
+            commands::invoices::export_invoice_pdf,
             commands::notifications::list_notifications,
             commands::notifications::count_unread_notifications,
             commands::notifications::list_notifications_since,
@@ -119,6 +123,16 @@ pub fn run() {
             commands::notifications::mark_all_notifications_read,
             commands::notifications::delete_notification,
             commands::notifications::delete_notifications,
+            commands::settings::get_settings,
+            commands::settings::update_settings,
+            commands::settings::get_user_preferences,
+            commands::settings::update_user_preferences,
+            commands::settings::list_exchange_rates,
+            commands::settings::update_exchange_rate,
+            commands::settings::list_exchange_rate_history,
+            commands::settings::get_company_profile,
+            commands::settings::update_company_profile,
+            commands::settings::save_company_logo,
             commands::users::create_user,
             commands::users::list_users,
             commands::users::get_user_profile,

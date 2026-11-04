@@ -10,7 +10,12 @@ pub const BASE_VERSION: i64 = 1;
 pub type Migration = fn(&Transaction) -> rusqlite::Result<()>;
 
 /// Migraciones en orden estricto: cada una sube la versión en uno.
-pub const MIGRATIONS: &[(i64, Migration)] = &[(2, notifications_v2), (3, reservations_v3)];
+pub const MIGRATIONS: &[(i64, Migration)] = &[
+    (2, notifications_v2),
+    (3, reservations_v3),
+    (4, settings_v4),
+    (5, line_units_v5),
+];
 
 const CREATED_AT_CHECK: &str = "createdAt GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z' AND strftime('%Y-%m-%dT%H:%M:%SZ', createdAt) IS createdAt";
 
@@ -127,6 +132,97 @@ fn migration_failed(cause: &str) -> AppError {
         "migrationFailed",
         "No se pudo actualizar la base de datos. La aplicación no puede continuar",
         cause,
+    )
+}
+
+/// Entero canónico (sin ceros a la izquierda ni signos) entre dos límites.
+fn integer_between(min: i64, max: i64) -> String {
+    format!(
+        "CAST(CAST(value AS INTEGER) AS TEXT) = value AND CAST(value AS INTEGER) BETWEEN {min} AND {max}"
+    )
+}
+
+/// Migración 4 (`plan-04` §2.4, D-16): ajustes globales con claves cerradas,
+/// preferencias por usuario, tasas de cambio y su historial inmutable.
+fn settings_v4(tx: &Transaction) -> rusqlite::Result<()> {
+    let updated_at = CREATED_AT_CHECK.replace("createdAt", "updatedAt");
+    tx.execute_batch(&format!(
+        "CREATE TABLE settings (
+            key TEXT PRIMARY KEY CHECK (key IN ('lowStockThreshold','staleInvoiceDays','backupReminderDays',
+                'companyName','companyAddress','companyPhone','companyTaxId','companyLogoFile','lastBackupAt')),
+            value TEXT NOT NULL,
+            updatedAt TEXT NOT NULL CHECK ({updated_at}),
+            CHECK (CASE key
+                WHEN 'lowStockThreshold' THEN {low}
+                WHEN 'staleInvoiceDays' THEN {stale}
+                WHEN 'backupReminderDays' THEN {backup}
+                WHEN 'companyName' THEN length(value) <= 100
+                WHEN 'companyAddress' THEN length(value) <= 200
+                WHEN 'companyPhone' THEN length(value) <= 30
+                WHEN 'companyTaxId' THEN length(value) <= 30
+                ELSE 1 END)
+        );
+        INSERT INTO settings (key, value, updatedAt) VALUES
+            ('lowStockThreshold', '5', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            ('staleInvoiceDays', '30', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            ('backupReminderDays', '7', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
+
+        CREATE TABLE userPreferences (
+            userId INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            key TEXT NOT NULL CHECK (key IN ('visibleCurrencies','pageSize')),
+            value TEXT NOT NULL,
+            updatedAt TEXT NOT NULL CHECK ({updated_at}),
+            PRIMARY KEY (userId, key),
+            CHECK (CASE key
+                WHEN 'pageSize' THEN value IN ('10','20','50','100')
+                -- Lista separada por comas de EUR, CUP, MLC y SALDO (o vacía).
+                ELSE replace(replace(replace(replace(replace(value, 'EUR', ''), 'CUP', ''), 'MLC', ''), 'SALDO', ''), ',', '') = ''
+                END)
+        );
+
+        CREATE TABLE exchangeRates (
+            currency TEXT PRIMARY KEY CHECK (currency IN ('EUR','CUP','MLC','SALDO')),
+            rateMicro INTEGER NOT NULL CHECK (rateMicro BETWEEN 1 AND 999999999999999),
+            updatedAt TEXT NOT NULL CHECK ({updated_at}),
+            updatedByName TEXT NOT NULL CHECK (length(updatedByName) BETWEEN 1 AND 50)
+        );
+
+        CREATE TABLE exchangeRateHistory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            createdAt TEXT NOT NULL CHECK ({CREATED_AT_CHECK}),
+            currency TEXT NOT NULL CHECK (currency IN ('EUR','CUP','MLC','SALDO')),
+            previousRateMicro INTEGER CHECK (previousRateMicro IS NULL OR previousRateMicro BETWEEN 1 AND 999999999999999),
+            newRateMicro INTEGER NOT NULL CHECK (newRateMicro BETWEEN 1 AND 999999999999999),
+            userId INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            userName TEXT NOT NULL CHECK (length(userName) BETWEEN 1 AND 50)
+        );
+        CREATE INDEX exchangeRateHistoryCreated ON exchangeRateHistory (createdAt);
+        -- userId puede pasar a NULL al borrar el usuario; el resto no cambia.
+        CREATE TRIGGER exchangeRateHistoryImmutable
+            BEFORE UPDATE OF createdAt, currency, previousRateMicro, newRateMicro, userName ON exchangeRateHistory
+            BEGIN SELECT RAISE(ABORT, 'exchangeRateHistory: el historial es inmutable'); END;
+        CREATE TRIGGER exchangeRateHistoryNoDelete BEFORE DELETE ON exchangeRateHistory
+            BEGIN SELECT RAISE(ABORT, 'exchangeRateHistory: el historial es inmutable'); END;",
+        low = integer_between(1, 9999),
+        stale = integer_between(1, 365),
+        backup = integer_between(1, 90),
+    ))
+}
+
+/// Migración 5 (`plan-04` §2.5): unidad y cantidad escritas en cada línea.
+/// Las líneas existentes quedan en NULL (= en la unidad del producto).
+fn line_units_v5(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE invoiceLines ADD COLUMN enteredUnitId INTEGER REFERENCES units(id) ON DELETE SET NULL;
+        ALTER TABLE invoiceLines ADD COLUMN enteredUnitName TEXT;
+        ALTER TABLE invoiceLines ADD COLUMN enteredUnitAbbreviation TEXT;
+        ALTER TABLE invoiceLines ADD COLUMN enteredQuantityMilli INTEGER
+            CHECK (enteredQuantityMilli IS NULL OR enteredQuantityMilli > 0);
+        -- Cantidad escrita, factor y nombre de la unidad: juntos o ninguno.
+        ALTER TABLE invoiceLines ADD COLUMN conversionFactorMicro INTEGER CHECK (
+            (enteredQuantityMilli IS NULL) = (conversionFactorMicro IS NULL)
+            AND (conversionFactorMicro IS NULL OR (conversionFactorMicro > 0 AND enteredUnitName IS NOT NULL))
+        );",
     )
 }
 
@@ -330,6 +426,134 @@ mod tests {
         assert!(insert("V", "V-00005", Some("2026-02-30")).is_err());
         assert!(insert("E", "E-00001", Some("2026-11-05")).is_err());
         assert!(insert("P", "P-00001", Some("2026-11-05")).is_err());
+    }
+
+    #[test]
+    fn migration_4_closes_setting_keys_and_ranges_and_seeds_the_defaults() {
+        let connection = migrated_v1_database();
+        let seeded: Vec<(String, String)> = connection
+            .prepare("SELECT key, value FROM settings ORDER BY key")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            seeded,
+            vec![
+                ("backupReminderDays".into(), "7".into()),
+                ("lowStockThreshold".into(), "5".into()),
+                ("staleInvoiceDays".into(), "30".into()),
+            ]
+        );
+        let set = |key: &str, value: &str| {
+            connection.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updatedAt) VALUES (?1, ?2, '2026-11-04T12:00:00Z')",
+                [key, value],
+            )
+        };
+        assert!(set("lowStockThreshold", "9999").is_ok());
+        assert!(set("lowStockThreshold", "10000").is_err());
+        assert!(set("lowStockThreshold", "0").is_err());
+        assert!(set("lowStockThreshold", "05").is_err());
+        assert!(set("lowStockThreshold", "5,5").is_err());
+        assert!(set("staleInvoiceDays", "366").is_err());
+        assert!(set("backupReminderDays", "90").is_ok());
+        assert!(set("backupReminderDays", "91").is_err());
+        assert!(set("companyName", "Goyma Conexiones").is_ok());
+        assert!(set("companyName", &"x".repeat(101)).is_err());
+        assert!(set("theme", "dark").is_err());
+    }
+
+    #[test]
+    fn migration_4_preferences_per_user_cascade_and_rates_with_immutable_history() {
+        let connection = migrated_v1_database();
+        connection
+            .execute(
+                "INSERT INTO users (username, passwordHash, role, phone, nationalId, createdAt) VALUES ('ana', 'x', 'contador', '+5350000001', '12345678901', '2026-11-04T12:00:00Z')",
+                [],
+            )
+            .unwrap();
+        let user = connection.last_insert_rowid();
+        let prefer = |key: &str, value: &str| {
+            connection.execute(
+                "INSERT OR REPLACE INTO userPreferences (userId, key, value, updatedAt) VALUES (?1, ?2, ?3, '2026-11-04T12:00:00Z')",
+                rusqlite::params![user, key, value],
+            )
+        };
+        assert!(prefer("pageSize", "50").is_ok());
+        assert!(prefer("pageSize", "25").is_err());
+        assert!(prefer("visibleCurrencies", "EUR,CUP").is_ok());
+        assert!(prefer("visibleCurrencies", "").is_ok());
+        assert!(prefer("visibleCurrencies", "EUR,GBP").is_err());
+        assert!(prefer("theme", "dark").is_err());
+
+        let rate = |currency: &str, micro: i64| {
+            connection.execute(
+                "INSERT OR REPLACE INTO exchangeRates (currency, rateMicro, updatedAt, updatedByName) VALUES (?1, ?2, '2026-11-04T12:00:00Z', 'ana')",
+                rusqlite::params![currency, micro],
+            )
+        };
+        assert!(rate("CUP", 670_000_000).is_ok());
+        assert!(rate("CUP", 0).is_err());
+        assert!(rate("GBP", 1_000_000).is_err());
+
+        connection
+            .execute(
+                "INSERT INTO exchangeRateHistory (createdAt, currency, previousRateMicro, newRateMicro, userId, userName) VALUES ('2026-11-04T12:00:00Z', 'CUP', NULL, 670000000, ?1, 'ana')",
+                [user],
+            )
+            .unwrap();
+        assert!(connection
+            .execute("UPDATE exchangeRateHistory SET newRateMicro = 1", [])
+            .is_err());
+        assert!(connection
+            .execute("DELETE FROM exchangeRateHistory", [])
+            .is_err());
+
+        // Borrar al usuario: sus preferencias se van; el historial queda sin id.
+        connection
+            .execute("DELETE FROM users WHERE id = ?1", [user])
+            .unwrap();
+        let preferences: i64 = connection
+            .query_row("SELECT COUNT(*) FROM userPreferences", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(preferences, 0);
+        let history: (Option<i64>, String) = connection
+            .query_row(
+                "SELECT userId, userName FROM exchangeRateHistory",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(history, (None, "ana".to_owned()));
+    }
+
+    #[test]
+    fn migration_5_line_unit_columns_go_together_or_not_at_all() {
+        let connection = migrated_v1_database();
+        connection
+            .execute_batch(
+                "INSERT INTO invoices (type, number, invoiceDate, createdByName, createdAt, updatedAt)
+                 VALUES ('P', 'P-00001', '2026-11-04', 'ana', '2026-11-04T12:00:00Z', '2026-11-04T12:00:00Z');",
+            )
+            .unwrap();
+        let line = |position: i64,
+                    entered: Option<i64>,
+                    factor: Option<i64>,
+                    unit: Option<&str>| {
+            connection.execute(
+                "INSERT INTO invoiceLines (invoiceId, position, productIdOriginal, productName, productNameNormalized, quantityMilli, unitPriceCents, subtotalCents, enteredQuantityMilli, conversionFactorMicro, enteredUnitName, createdAt, updatedAt)
+                 VALUES (1, ?1, ?1, 'Cable', 'cable', 24000, 250, 6000, ?2, ?3, ?4, '2026-11-04T12:00:00Z', '2026-11-04T12:00:00Z')",
+                rusqlite::params![position, entered, factor, unit],
+            )
+        };
+        assert!(line(1, None, None, None).is_ok());
+        assert!(line(2, Some(2_000), Some(12_000_000), Some("Caja")).is_ok());
+        assert!(line(3, Some(2_000), None, Some("Caja")).is_err());
+        assert!(line(4, None, Some(12_000_000), Some("Caja")).is_err());
+        assert!(line(5, Some(2_000), Some(12_000_000), None).is_err());
+        assert!(line(6, Some(2_000), Some(0), Some("Caja")).is_err());
     }
 
     #[test]
