@@ -1120,6 +1120,18 @@
           </a>
         </li>
         <li>
+          <a href="#" data-page="borradores">
+            <svg class="icon"><use href="#icon-receipt-edit"></use></svg>
+            <span class="text">Borradores</span>
+          </a>
+        </li>
+        <li hidden>
+          <a href="#" data-page="actividad">
+            <svg class="icon"><use href="#icon-receipt"></use></svg>
+            <span class="text">Registro de Actividad</span>
+          </a>
+        </li>
+        <li>
           <a href="#" data-page="usuarios">
             <svg class="icon"><use href="#icon-people"></use></svg>
             <span class="text">Usuarios</span>
@@ -1742,6 +1754,15 @@
 
           <!-- Vista: listado -->
           <div id="producto-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="products"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -2349,6 +2370,15 @@
 
           <!-- Vista: listado -->
           <div id="categoria-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="categories"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -2517,6 +2547,15 @@
           </div>
 
           <div id="cliente-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="clients"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -2906,6 +2945,15 @@
           </div>
 
           <div id="proveedor-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="suppliers"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -3316,6 +3364,12 @@
             </div>
           </div>
 
+          <div class="list-actions">
+            <button type="button" class="btn-secondary" data-csv-export="units">
+              Exportar CSV
+            </button>
+          </div>
+
           <!-- Conversor rápido: demuestra que las conversiones son funcionales -->
           <div class="conversor-card">
             <div class="conversor-titulo">
@@ -3445,6 +3499,17 @@
 
           <!-- Vista: listado -->
           <div id="factura-entrada-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="invoices"
+                data-csv-prefix="factura-entrada"
+                data-csv-type="E"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <div class="historial-toolbar">
               <div class="field field-select-item">
                 <label for="factura-entrada-filtro-estado">Estado</label>
@@ -3932,6 +3997,17 @@
 
           <!-- Vista: listado -->
           <div id="factura-venta-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="invoices"
+                data-csv-prefix="factura-venta"
+                data-csv-type="V"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <div class="historial-toolbar">
               <div class="field field-select-item">
                 <label for="factura-venta-filtro-estado">Estado</label>
@@ -4384,6 +4460,17 @@
 
           <!-- Vista: listado -->
           <div id="factura-servicios-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="invoices"
+                data-csv-prefix="factura-servicios"
+                data-csv-type="S"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <div class="historial-toolbar">
               <div class="field field-select-item">
                 <label for="factura-servicios-filtro-estado">Estado</label>
@@ -4847,6 +4934,17 @@
 
           <!-- Vista: listado -->
           <div id="factura-insumos-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="invoices"
+                data-csv-prefix="factura-insumos"
+                data-csv-type="GI"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <div class="historial-toolbar">
               <div class="field field-select-item">
                 <label for="factura-insumos-filtro-estado">Estado</label>
@@ -5274,6 +5372,17 @@
 
           <!-- Vista: listado -->
           <div id="factura-garantia-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="invoices"
+                data-csv-prefix="factura-garantia"
+                data-csv-type="GG"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <div class="historial-toolbar">
               <div class="field field-select-item">
                 <label for="factura-garantia-filtro-estado">Estado</label>
@@ -5710,6 +5819,17 @@
 
           <!-- Vista: listado -->
           <div id="factura-perdidas-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="invoices"
+                data-csv-prefix="factura-perdidas"
+                data-csv-type="P"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <div class="historial-toolbar">
               <div class="field">
                 <label for="factura-perdidas-desde">Fecha inicial</label>
@@ -6042,6 +6162,16 @@
           </div>
 
           <div id="factura-general-list" class="config-subview active">
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-secondary"
+                data-csv-export="invoices"
+                data-csv-prefix="factura-general"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <table class="list-table">
               <thead>
                 <tr>
@@ -6300,6 +6430,15 @@
             >
               General
             </button>
+            <button
+              type="button"
+              class="tab"
+              id="cfgtab-respaldo"
+              data-action="showConfigTab"
+              data-tab="respaldo"
+            >
+              Respaldo
+            </button>
           </div>
           <!-- ===== GENERAL (preferencias de visualización) ===== -->
           <div id="config-general" class="config-subview">
@@ -6474,6 +6613,66 @@
               </button>
             </div>
           </div>
+          <!-- ===== RESPALDO E IMPORTACIÓN (RP-01 a RP-03, CSV-02) ===== -->
+          <div id="config-respaldo" class="config-subview">
+            <h3 class="config-block-title">Copia de Seguridad</h3>
+            <p class="config-block-subtitle">
+              La copia guarda todos los datos del negocio y no está cifrada:
+              guárdala en un lugar seguro. No incluye los PDF adjuntos ni el
+              logo.
+            </p>
+            <div class="list-actions">
+              <button
+                type="button"
+                class="btn-primary"
+                id="config-respaldo-crear"
+              >
+                Crear copia de seguridad
+              </button>
+              <button
+                type="button"
+                class="btn-secondary"
+                id="config-respaldo-restaurar"
+              >
+                Restaurar desde un archivo
+              </button>
+            </div>
+            <h3 class="config-block-title">Copias Automáticas</h3>
+            <table class="list-table">
+              <thead>
+                <tr>
+                  <th>Archivo</th>
+                  <th>Fecha</th>
+                  <th>Tamaño</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="config-respaldos-body"></tbody>
+            </table>
+            <h3 class="config-block-title">Importar desde CSV</h3>
+            <p class="config-block-subtitle">
+              Las filas repetidas o con errores se omiten; las demás se guardan.
+              El archivo debe estar guardado como CSV UTF-8.
+            </p>
+            <div class="list-actions">
+              <label for="config-csv-tipo">Importar</label>
+              <select id="config-csv-tipo">
+                <option value="products">Productos</option>
+                <option value="categories">Categorías</option>
+                <option value="units">Unidades</option>
+                <option value="clients">Clientes</option>
+                <option value="suppliers">Proveedores</option>
+              </select>
+              <button
+                type="button"
+                class="btn-secondary"
+                id="config-csv-importar"
+              >
+                Elegir archivo
+              </button>
+            </div>
+            <ul id="config-csv-omitidas" hidden></ul>
+          </div>
           <!-- ===== UMBRALES (CF-04, globales) ===== -->
           <div id="config-umbrales" class="config-subview">
             <h3 class="config-block-title">Umbrales de Avisos</h3>
@@ -6534,6 +6733,73 @@
           </div>
         </div>
         <!-- ===================== NOTIFICACIONES ===================== -->
+        <div id="page-actividad" class="page">
+          <div class="section-toolbar">
+            <h2 class="card-title">Registro de Actividad</h2>
+            <div class="search-bar">
+              <input
+                type="text"
+                id="actividad-buscar"
+                aria-label="Buscar en el registro"
+                placeholder="Buscar en el registro..."
+              />
+            </div>
+          </div>
+          <div class="historial-toolbar" style="align-items: center">
+            <label class="date-filter">
+              Desde
+              <input type="date" id="actividad-desde" />
+            </label>
+            <label class="date-filter">
+              Hasta
+              <input type="date" id="actividad-hasta" />
+            </label>
+            <select id="actividad-usuario" aria-label="Filtrar por usuario">
+              <option value="">Todos los usuarios</option>
+            </select>
+            <select
+              id="actividad-accion"
+              aria-label="Filtrar por acción"
+            ></select>
+          </div>
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th id="actividad-orden" aria-sort="descending">
+                  <button
+                    type="button"
+                    class="action-link"
+                    id="actividad-orden-boton"
+                  >
+                    Fecha
+                  </button>
+                </th>
+                <th>Usuario</th>
+                <th>Acción</th>
+                <th>Tipo</th>
+                <th>Registro</th>
+                <th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody id="actividad-body"></tbody>
+          </table>
+        </div>
+        <div id="page-borradores" class="page">
+          <div class="section-toolbar">
+            <h2 class="card-title">Borradores</h2>
+          </div>
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th>Formulario</th>
+                <th>Registro</th>
+                <th>Último cambio</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="borradores-body"></tbody>
+          </table>
+        </div>
         <div id="page-notificaciones" class="page">
           <div class="section-toolbar">
             <div class="view-tabs">
@@ -6977,6 +7243,9 @@
     <script type="module" src="./js/views/historialView.js"></script>
     <script type="module" src="./js/views/notificacionesView.js"></script>
     <script type="module" src="./js/views/configuracionView.js"></script>
+    <script type="module" src="./js/views/borradoresView.js"></script>
+    <script type="module" src="./js/views/actividadView.js"></script>
+    <script type="module" src="./js/views/datosView.js"></script>
     <!-- Dashboard principal -->
     <script src="./js/libs/chart.umd.min.js"></script>
     <script src="./js/dashboard.js"></script>

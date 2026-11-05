@@ -304,7 +304,11 @@ describe("facturasView submódulo service", () => {
     expect(clienteInput.getAttribute("role")).toBe("combobox");
 
     document.getElementById("factura-servicio-cliente-add").click();
-    const dialog = document.querySelector('[role="dialog"]');
+    const dialog = await vi.waitFor(() => {
+      const opened = document.querySelector('[role="dialog"]');
+      expect(opened).not.toBeNull();
+      return opened;
+    });
     expect(dialog.textContent).toContain("Nuevo cliente");
     [...dialog.querySelectorAll("button")]
       .find((button) => button.textContent === "Cancelar")

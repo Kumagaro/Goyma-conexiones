@@ -1,3 +1,4 @@
+import { attachDraft, registerDraftOpener } from "../utils/drafts.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import { renderInvoiceHistory } from "../components/invoiceHistory.js";
 import {
@@ -21,6 +22,7 @@ import { ENTRY_STATUS_LABELS } from "../utils/invoiceLabels.js";
 import { el, messageRow, setOptions } from "../utils/dom.js";
 import { debounce } from "../utils/requestGuard.js";
 
+let supplierDraft = null;
 let suppliers = [];
 let editingSupplierId = null;
 let currentSupplierId = null;
@@ -108,9 +110,14 @@ function bindForm() {
     event.preventDefault();
     void handleSupplierSubmit();
   });
+  supplierDraft = attachDraft(form, {
+    formKey: "supplier",
+    recordId: () => editingSupplierId,
+  });
   document
     .getElementById("proveedor-cancelar")
     ?.addEventListener("click", () => {
+      supplierDraft?.clear();
       resetSupplierForm();
       showProveedorTab("list", document.getElementById("tab-proveedor-list"));
     });
@@ -233,6 +240,7 @@ function showProveedorTab(tab, button = null) {
   if (tab === "create" && editingSupplierId === null) {
     resetSupplierForm();
   }
+  if (tab === "create") void supplierDraft?.offer();
 }
 
 async function loadSuppliers(query = "") {
@@ -467,6 +475,7 @@ async function handleSupplierSubmit() {
       notifySuccess("Proveedor creado correctamente.");
     }
 
+    supplierDraft?.clear();
     resetSupplierForm();
     await loadSuppliers();
     showProveedorTab("list", document.getElementById("tab-proveedor-list"));
@@ -637,7 +646,19 @@ window.renderProveedores = () => {
 };
 
 window.showProveedorTab = showProveedorTab;
+
+registerDraftOpener("supplier", async (supplierId) => {
+  window.showPage?.(
+    "proveedores",
+    document.querySelector('#sidebar [data-page="proveedores"]'),
+  );
+  await loadSuppliers();
+  if (supplierId == null) {
+    showProveedorTab("create", document.getElementById("tab-proveedor-create"));
+  } else openSupplierForm(supplierId);
+});
 window.cancelarProveedorForm = () => {
+  supplierDraft?.clear();
   resetSupplierForm();
   showProveedorTab("list", document.getElementById("tab-proveedor-list"));
 };

@@ -235,10 +235,13 @@ describe("Vitest con jsdom", () => {
     );
 
     // spec-04: notificaciones y configuración van tras los módulos de spec-03.
-    expect(moduleSources.slice(-6)).toEqual([
+    expect(moduleSources.slice(-9)).toEqual([
       ...featureModules,
       "./js/views/notificacionesView.js",
       "./js/views/configuracionView.js",
+      "./js/views/borradoresView.js",
+      "./js/views/actividadView.js",
+      "./js/views/datosView.js",
     ]);
     expect(dashboardIndex).toBeGreaterThan(
       Array.from(parsed.scripts).findIndex(
@@ -349,9 +352,7 @@ describe("Vitest con jsdom", () => {
     );
     // Sin lista fija de módulos ni recuento literal: todo se deriva de
     // los archivos (tarea 3.9 de la Fase 2).
-    const handlerCommands = [
-      ...handler[1].matchAll(/commands::[a-z_]+::([a-z_]+)/g),
-    ]
+    const handlerCommands = [...handler[1].matchAll(/(?:[a-z_]+::)+([a-z_]+)/g)]
       .map(([, command]) => command)
       .sort();
     const serviceCommands = serviceSources

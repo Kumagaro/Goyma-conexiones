@@ -2979,6 +2979,19 @@ fn update_priced_outgoing_invoice_inner(
         )
         .map_err(|error| map_db_error(error, op, &[]))?;
 
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "edit",
+            entity_type: "invoice",
+            label: &invoice_number,
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, op, &[]))?;
+
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
     crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
@@ -3548,6 +3561,19 @@ fn update_costed_outgoing_invoice_inner(
             ],
         )
         .map_err(|error| map_db_error(error, op, &[]))?;
+
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "edit",
+            entity_type: "invoice",
+            label: &invoice_number,
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, op, &[]))?;
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
     crate::automation::evaluate_watches_best_effort(&transaction, now);
@@ -4464,6 +4490,19 @@ pub fn update_entry_invoice_inner(
         )
         .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
 
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "edit",
+            entity_type: "invoice",
+            label: &invoice_number,
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
+
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
     crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
@@ -4513,6 +4552,18 @@ pub fn expire_reservations(connection: &Connection, now: DateTime<Utc>) -> Resul
             invoice_type,
             now,
         )?;
+        crate::activity::record_activity(
+            connection,
+            &Author::System,
+            now,
+            crate::activity::Entry {
+                action: "expire",
+                entity_type: "invoice",
+                label: number,
+                details: Some("Tiempo límite excedido"),
+            },
+        )
+        .map_err(|error| map_db_error(error, "expireReservations", &[]))?;
         crate::db::notifications::notify(
             connection,
             "N-06",
@@ -4660,6 +4711,21 @@ pub fn change_invoice_status_inner(
                 )?;
             }
         }
+    }
+
+    if next_status == InvoiceStatus::Cancelled {
+        crate::activity::record_activity(
+            &transaction,
+            &Author::User(&actor),
+            now,
+            crate::activity::Entry {
+                action: "cancel",
+                entity_type: "invoice",
+                label: &number,
+                details: None,
+            },
+        )
+        .map_err(|error| map_db_error(error, "changeInvoiceStatus", &[]))?;
     }
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
@@ -5324,6 +5390,19 @@ fn delete_invoice_inner_with_app_data_dir(
             "invoice missing during deletion commit",
         ));
     }
+
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "delete",
+            entity_type: "invoice",
+            label: &number,
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, "deleteInvoice", &[]))?;
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
     crate::automation::evaluate_watches_best_effort(&transaction, now);
@@ -10300,6 +10379,16 @@ mod tests {
             assert_eq!(created_at, "2026-10-04T12:00:00Z");
             assert_eq!(updated_at, "2026-10-04T13:00:00Z");
         }
+        // RA-01: cada edición deja su entrada con el número de la factura.
+        let edits: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM activityLog
+                 WHERE action = 'edit' AND entityType = 'invoice'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(edits, 4);
     }
 
     #[test]
@@ -10711,6 +10800,14 @@ mod tests {
         );
         assert_eq!(updated.4, "Luis Gómez");
         assert_eq!(updated.5, "12345678929");
+        let edited: String = connection
+            .query_row(
+                "SELECT entityLabel FROM activityLog WHERE action = 'edit'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(edited.starts_with("E-"), "{edited}");
     }
 
     #[test]

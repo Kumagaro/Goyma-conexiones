@@ -1161,7 +1161,7 @@ pub fn delete_product_inner(
     now: DateTime<Utc>,
     product_id: i64,
 ) -> Result<ProductActionResult, AppError> {
-    crate::commands::auth::require_session(connection, now)?;
+    let actor = crate::commands::auth::require_session(connection, now)?;
 
     let transaction = connection
         .transaction()
@@ -1189,6 +1189,15 @@ pub fn delete_product_inner(
         ));
     };
 
+    crate::activity::record_deletion(
+        &transaction,
+        &crate::commands::auth::Author::User(&actor),
+        now,
+        "product",
+        "SELECT name FROM products WHERE id = ?1",
+        product_id,
+    )
+    .map_err(|error| map_db_error(error, "deleteProduct", &[]))?;
     let deleted_rows = transaction
         .execute("DELETE FROM products WHERE id = ?1", [product_id])
         .map_err(|error| map_db_error(error, "deleteProduct", &[]))?;
@@ -1488,6 +1497,20 @@ pub fn purge_expired_products(
     // N-12 (NT-02): en el mismo SAVEPOINT de la purga.
     crate::db::notifications::insert_purged_products_notification(connection, &purged, now)
         .map_err(|error| map_db_error(error, "purge_expired_products", &[]))?;
+    for (_, name) in &purged {
+        crate::activity::record_activity(
+            connection,
+            &crate::commands::auth::Author::System,
+            now,
+            crate::activity::Entry {
+                action: "purge",
+                entity_type: "product",
+                label: name,
+                details: None,
+            },
+        )
+        .map_err(|error| map_db_error(error, "purge_expired_products", &[]))?;
+    }
     Ok(deleted)
 }
 

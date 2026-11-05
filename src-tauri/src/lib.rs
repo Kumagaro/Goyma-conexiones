@@ -1,6 +1,9 @@
+pub mod activity;
 pub mod attachments;
 pub mod automation;
+pub mod backup;
 pub mod commands;
+pub mod csv_io;
 pub mod db;
 pub mod errors;
 pub mod export;
@@ -96,6 +99,16 @@ pub fn run() {
             commands::history::list_history_products,
             commands::history::export_history_excel,
             commands::history::export_history_pdf,
+            activity::list_activity_log,
+            backup::create_backup,
+            backup::list_automatic_backups,
+            backup::restore_backup,
+            csv_io::export_csv,
+            csv_io::import_csv,
+            commands::drafts::save_draft,
+            commands::drafts::get_draft,
+            commands::drafts::list_drafts,
+            commands::drafts::delete_draft,
             commands::dashboard::get_dashboard_kpis,
             commands::dashboard::get_dashboard_summary,
             commands::invoices::list_invoices,

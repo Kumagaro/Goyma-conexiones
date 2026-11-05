@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::commands::auth::require_session;
+use crate::commands::auth::{require_session, Author};
 use crate::db::connection::lock_conn;
 use crate::errors::{log_error, map_db_error, AppError};
 use crate::models::conversion::{ConversionItem, ConversionResult, UnitReference};
@@ -455,7 +455,7 @@ pub fn delete_conversion_inner(
     now: DateTime<Utc>,
     conversion_id: i64,
 ) -> Result<(), AppError> {
-    require_session(connection, now)?;
+    let actor = require_session(connection, now)?;
 
     let exists: Option<i64> = connection
         .query_row(
@@ -473,8 +473,23 @@ pub fn delete_conversion_inner(
         ));
     }
 
-    connection
-        .execute("DELETE FROM unitConversions WHERE id = ?1", [conversion_id])
+    let tx = connection
+        .transaction()
+        .map_err(|error| map_db_error(error, "deleteConversion", &[]))?;
+    crate::activity::record_deletion(
+        &tx,
+        &Author::User(&actor),
+        now,
+        "conversion",
+        "SELECT f.name || ' → ' || t.name FROM unitConversions c
+         JOIN units f ON f.id = c.fromUnitId JOIN units t ON t.id = c.toUnitId
+         WHERE c.id = ?1",
+        conversion_id,
+    )
+    .map_err(|error| map_db_error(error, "deleteConversion", &[]))?;
+    tx.execute("DELETE FROM unitConversions WHERE id = ?1", [conversion_id])
+        .map_err(|error| map_db_error(error, "deleteConversion", &[]))?;
+    tx.commit()
         .map_err(|error| map_db_error(error, "deleteConversion", &[]))?;
     Ok(())
 }

@@ -1,3 +1,9 @@
+import {
+  attachDraft,
+  registerDraftOpener,
+  restoreForm,
+  serializeForm,
+} from "../utils/drafts.js";
 import { createCombobox } from "../components/combobox.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import {
@@ -45,6 +51,7 @@ import {
 } from "../utils/feedback.js";
 import { openUnitModalForProduct } from "./unidadesView.js";
 
+let productDraft = null;
 let initPromise = null;
 let editingProductId = null;
 let categoryCombobox = null;
@@ -104,6 +111,20 @@ async function initializeProductosView() {
   });
 
   form.addEventListener("submit", handleProductSubmit);
+  productDraft = attachDraft(form, {
+    formKey: "product",
+    recordId: () => editingProductId,
+    serialize: () => ({
+      ...serializeForm(form),
+      category: categoryCombobox.getSelected(),
+      unit: unitCombobox.getSelected(),
+    }),
+    restore: (values) => {
+      restoreForm(form, values);
+      categoryCombobox.setSelected(values.category ?? null);
+      unitCombobox.setSelected(values.unit ?? null);
+    },
+  });
   document
     .getElementById("producto-cancelar")
     ?.addEventListener("click", cancelProductForm);
@@ -207,7 +228,20 @@ export async function showProductoTab(tab, button = null) {
   if (tab === "list") await loadActiveProducts();
   if (tab === "agotados") await loadConditionProducts();
   if (tab === "create" && editingProductId === null) openProductForm();
+  if (tab === "create") void productDraft?.offer();
 }
+
+registerDraftOpener("product", async (productId) => {
+  window.showPage?.(
+    "productos",
+    document.querySelector('#sidebar [data-page="productos"]'),
+  );
+  if (productId != null) openProductForm(await getProduct(productId));
+  await showProductoTab(
+    "create",
+    document.getElementById("tab-producto-create"),
+  );
+});
 
 export async function openProductConditionTab(condition = "all") {
   const productsLink = document.querySelector(
@@ -984,6 +1018,7 @@ export function openProductForm(product = null) {
 }
 
 export function cancelProductForm() {
+  productDraft?.clear();
   const form = document.getElementById("producto-form");
   if (form) form.reset();
   editingProductId = null;
@@ -1050,6 +1085,7 @@ async function handleProductSubmit(event) {
   try {
     if (editingProductId === null) {
       await createProduct({ ...input, cost, quantity });
+      productDraft?.clear();
       openProductForm();
       notifySuccess("Producto creado correctamente.");
     } else {
@@ -1057,6 +1093,7 @@ async function handleProductSubmit(event) {
         productId: editingProductId,
         ...input,
       });
+      productDraft?.clear();
       openProductForm();
       notifySuccess("Producto actualizado correctamente.");
       notifyWarning(result?.expiredCleanupWarning);

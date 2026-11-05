@@ -244,7 +244,11 @@ describe("facturasView submódulo entry", () => {
     expect(proveedorInput.getAttribute("aria-autocomplete")).toBe("list");
 
     document.getElementById("factura-proveedor-add").click();
-    const dialog = document.querySelector('[role="dialog"]');
+    const dialog = await vi.waitFor(() => {
+      const opened = document.querySelector('[role="dialog"]');
+      expect(opened).not.toBeNull();
+      return opened;
+    });
     expect(dialog.textContent).toContain("Nuevo proveedor");
     [...dialog.querySelectorAll("button")]
       .find((button) => button.textContent === "Cancelar")

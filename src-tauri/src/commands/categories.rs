@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::commands::auth::require_session;
+use crate::commands::auth::{require_session, Author};
 use crate::commands::products::purge_best_effort;
 use crate::db::connection::lock_conn;
 use crate::db::notifications::{insert_affected_products_notification, AffectedProductsKind};
@@ -417,7 +417,7 @@ pub fn delete_category_inner(
     now: DateTime<Utc>,
     category_id: i64,
 ) -> Result<DeleteCategoryResult, AppError> {
-    require_session(connection, now)?;
+    let actor = require_session(connection, now)?;
 
     let tx = connection
         .transaction()
@@ -483,6 +483,16 @@ pub fn delete_category_inner(
         )
         .map_err(|error| map_db_error(error, "deleteCategory", &[]))?;
     }
+
+    crate::activity::record_deletion(
+        &tx,
+        &Author::User(&actor),
+        now,
+        "category",
+        "SELECT name FROM categories WHERE id = ?1",
+        category_id,
+    )
+    .map_err(|error| map_db_error(error, "deleteCategory", &[]))?;
 
     tx.execute("DELETE FROM categories WHERE id = ?1", [category_id])
         .map_err(|error| map_db_error(error, "deleteCategory", &[]))?;

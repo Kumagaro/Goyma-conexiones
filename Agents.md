@@ -13,7 +13,7 @@ Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en 
   - Frontend: **HTML + CSS + JavaScript vanilla** (sin React, Vue ni similares).
   - Base de datos: **SQLite local** (única BD para todo el proyecto).
   - Tests: Rust nativo (`#[cfg(test)]`) en el backend + **Vitest/jsdom** en el frontend (dependencia de desarrollo, justificada en `plan.md` de cada feature).
-- **Estado actual:** Autenticación y Usuarios (`spec-01`) e Inventario-Productos (`spec-02`) están implementados en Rust/SQLite y frontend. Contactos-Facturación-Historial (`spec-03`) está implementado en backend (35 comandos con tests) e interfaz (`task-03.md` §7 y §8). `spec-01` y `spec-03` están **pendientes de la verificación manual en la app real** (`tauri:dev`/`tauri:build`); `spec-02` ya la tiene. El resto de módulos (notificaciones, configuración, respaldo; ver `specs/pendientes.md`) siguen pendientes.
+- **Estado actual:** las cuatro specs están implementadas en Rust/SQLite y frontend: Autenticación y Usuarios (`spec-01`), Inventario-Productos (`spec-02`), Contactos-Facturación-Historial (`spec-03`) y Cierre del MVP (`spec-04`: notificaciones, reservas, configuración, impresión, conversiones, dashboard, borradores, registro de actividad, CSV y respaldo). `spec-01`, `spec-03` y `spec-04` están **pendientes de la verificación manual en la app real** (`tauri:dev`/`tauri:build`, `task-04.md` §5.6); `spec-02` ya la tiene. Fuera del MVP queda lo indicado en `specs/pendientes.md`.
 - **Usuarios:** exclusivos de Cuba (validaciones como teléfono `+53XXXXXXXX` son intencionales, no placeholders). Una sola sesión activa a la vez. Roles: `Administrador` y `Contador`.
 - **Desarrollador:** una sola persona, apoyada por agentes de IA. No hay equipo que coordinar.
 

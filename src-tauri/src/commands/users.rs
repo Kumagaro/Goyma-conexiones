@@ -547,6 +547,18 @@ pub fn delete_user_inner(
         .execute("DELETE FROM users WHERE id = ?1", [user_id])
         .map_err(|_| internal_error("delete_user database deletion failed"))?;
     notify_user_change(&transaction, "eliminado", &deleted_username, now)?;
+    crate::activity::record_activity(
+        &transaction,
+        &crate::commands::auth::Author::Admin(&admin),
+        now,
+        crate::activity::Entry {
+            action: "delete",
+            entity_type: "user",
+            label: &deleted_username,
+            details: None,
+        },
+    )
+    .map_err(|_| internal_error("delete_user activity entry failed"))?;
 
     transaction
         .commit()

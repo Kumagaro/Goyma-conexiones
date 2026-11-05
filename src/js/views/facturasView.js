@@ -24,7 +24,10 @@ import {
   updateServiceInvoice,
 } from "../services/invoicesService.js";
 import { getClientDetail, searchClients } from "../services/clientsService.js";
-import { searchSuppliers } from "../services/suppliersService.js";
+import {
+  getSupplierDetail,
+  searchSuppliers,
+} from "../services/suppliersService.js";
 import { searchProductsForInvoice } from "../services/historyService.js";
 import {
   formatDate,
@@ -49,7 +52,16 @@ import {
 import { bindDateSort, sortByDate } from "../utils/dateSort.js";
 import { debounce } from "../utils/requestGuard.js";
 import { openPrintPreview } from "./printPreview.js";
-import { listUnitOptionsForProduct } from "../services/productsService.js";
+import {
+  getProduct,
+  listUnitOptionsForProduct,
+} from "../services/productsService.js";
+import {
+  attachDraft,
+  registerDraftOpener,
+  restoreForm,
+  serializeForm,
+} from "../utils/drafts.js";
 
 const PAYMENT_LABELS = {
   cash: "Efectivo",
@@ -266,6 +278,26 @@ function entryDeleteMessage(detail) {
 // Comparten listado, formulario (crear y editar), detalle y cambio de estado;
 // las diferencias de cada tipo viven en su configuración.
 
+// BR-02: el contacto de un borrador se vuelve a comprobar al recuperarlo.
+async function existingContact(kind, contact) {
+  if (contact?.id == null) return null;
+  const read = kind === "client" ? getClientDetail : getSupplierDetail;
+  try {
+    return (await read(Number(contact.id))) ? contact : null;
+  } catch {
+    return null;
+  }
+}
+
+async function productExists(productId, mustBeActive) {
+  try {
+    const product = await getProduct(Number(productId));
+    return Boolean(product) && (!mustBeActive || product.status === "active");
+  } catch {
+    return false;
+  }
+}
+
 function createInvoiceSubmodule(cfg) {
   const isEntry = cfg.invoiceType === "E";
   const hasPayment = ["E", "V", "S"].includes(cfg.invoiceType);
@@ -288,6 +320,7 @@ function createInvoiceSubmodule(cfg) {
   let pendingAttachmentPath = null;
   let removeAttachment = false;
   let lastItems = [];
+  let draft = null;
 
   const field = (suffix) => document.getElementById(`${cfg.field}-${suffix}`);
   const button = (suffix) =>
@@ -342,17 +375,11 @@ function createInvoiceSubmodule(cfg) {
     const toList = () => showTab("list", listTab());
     for (const [el, handler] of [
       [listTab(), toList],
-      [
-        createTab(),
-        () => {
-          // Desde la pestaña siempre se crea: se abandona una edición a medias.
-          if (editing) resetForm();
-          showTab("create", createTab());
-        },
-      ],
+      [createTab(), startNew],
       [
         button("cancelar"),
         () => {
+          draft?.clear();
           resetForm();
           toList();
         },
@@ -362,6 +389,13 @@ function createInvoiceSubmodule(cfg) {
     ]) {
       if (claim(el)) el.addEventListener("click", handler);
     }
+  }
+
+  function startNew() {
+    // Desde la pestaña siempre se crea: se abandona una edición a medias.
+    if (editing) resetForm();
+    showTab("create", createTab());
+    return draft?.offer();
   }
 
   function showTab(tab, tabButton = null) {
@@ -415,6 +449,7 @@ function createInvoiceSubmodule(cfg) {
       onSelect: (item) => {
         selectedContact = item;
         if (associated) void loadAssociatedOptions(item);
+        draft?.schedule();
       },
     });
     const addButton = field(`${cfg.contactField}-add`);
@@ -536,6 +571,7 @@ function createInvoiceSubmodule(cfg) {
       factor: 1,
     });
     renderLines();
+    draft?.schedule();
     field("lineas-body")
       ?.querySelector(`[data-line-index="${lines.length - 1}"] input`)
       ?.focus();
@@ -694,6 +730,7 @@ function createInvoiceSubmodule(cfg) {
       remove.addEventListener("click", () => {
         lines.splice(index, 1);
         renderLines();
+        draft?.schedule();
       });
       actions.append(remove);
 
@@ -900,6 +937,48 @@ function createInvoiceSubmodule(cfg) {
       event.preventDefault();
       void submit();
     });
+    draft = attachDraft(formEl, {
+      formKey: cfg.draftKey,
+      recordId: () => editing?.id ?? null,
+      serialize: () => ({
+        ...serializeForm(formEl),
+        contact: selectedContact,
+        lines,
+      }),
+      restore: restoreDraft,
+    });
+  }
+
+  // BR-02: lo que ya no existe se avisa y se quita.
+  async function restoreDraft(values) {
+    restoreForm(form(), values);
+    const contact = await existingContact(cfg.contact, values.contact);
+    contactCombobox?.setSelected(contact);
+    selectedContact = contact;
+    if (values.contact && !contact) {
+      notifyWarning(`El ${contactNoun} del borrador ya no existe y se quitó.`);
+    }
+    const kept = [];
+    for (const line of values.lines ?? []) {
+      if (await lineStillValid(line)) kept.push(line);
+      else {
+        notifyWarning(
+          `«${line.productName}» ya no existe y se quitó de la factura.`,
+        );
+      }
+    }
+    lines = kept;
+    renderLines();
+    if (associated) {
+      const id = Number(values[associated.selectId]);
+      await loadAssociatedOptions(contact, id || null);
+    }
+  }
+
+  function lineStillValid(line) {
+    // Sin id: un producto nuevo de la compra, o uno ya eliminado al editar.
+    if (line.productId == null) return true;
+    return productExists(line.productId, !isEntry);
   }
 
   function setFormMode(detail) {
@@ -931,6 +1010,11 @@ function createInvoiceSubmodule(cfg) {
     if (isEntry) setAttachmentLabel("");
     setFormMode(null);
     renderLines();
+  }
+
+  async function openForEdit(invoiceId) {
+    await openDetail(invoiceId);
+    await startEdit();
   }
 
   async function startEdit() {
@@ -981,6 +1065,7 @@ function createInvoiceSubmodule(cfg) {
     showTab("create", createTab());
     if (associated)
       await loadAssociatedOptions(contact, detail.associatedInvoiceId);
+    await draft?.offer();
   }
 
   function setSubmitting(isSubmitting) {
@@ -1104,6 +1189,7 @@ function createInvoiceSubmodule(cfg) {
           : "Factura registrada correctamente.",
       );
       notifyWarning(result?.expiredCleanupWarning);
+      draft?.clear();
       resetForm();
       await loadInvoices();
       if (wasEditing) await openDetail(invoiceId);
@@ -1465,6 +1551,8 @@ function createInvoiceSubmodule(cfg) {
 
   return {
     init,
+    startNew,
+    startEdit: openForEdit,
     reload: () => loadInvoices(),
     showTab,
     openDetail,
@@ -1524,6 +1612,7 @@ const OUTGOING_CANCEL_MESSAGE =
 
 const entrySubmodule = createInvoiceSubmodule({
   invoiceType: "E",
+  draftKey: "entryInvoice",
   pageId: "page-facturas-entrada",
   pageKey: "facturas-entrada",
   sortKey: "facturasEntrada",
@@ -1550,6 +1639,7 @@ const entrySubmodule = createInvoiceSubmodule({
 
 const saleSubmodule = createInvoiceSubmodule({
   invoiceType: "V",
+  draftKey: "saleInvoice",
   pageId: "page-facturas-venta",
   pageKey: "facturas-venta",
   sortKey: "facturasVenta",
@@ -1574,6 +1664,7 @@ const saleSubmodule = createInvoiceSubmodule({
 
 const serviceSubmodule = createInvoiceSubmodule({
   invoiceType: "S",
+  draftKey: "serviceInvoice",
   pageId: "page-facturas-servicios",
   pageKey: "facturas-servicios",
   sortKey: "facturasServicios",
@@ -1600,6 +1691,7 @@ const serviceSubmodule = createInvoiceSubmodule({
 // <select>, sin método de pago y a costo real.
 const guaranteeSubmodule = createInvoiceSubmodule({
   invoiceType: "GG",
+  draftKey: "guaranteeInvoice",
   pageId: "page-facturas-garantia",
   pageKey: "facturas-garantia",
   sortKey: "facturasGarantia",
@@ -1632,6 +1724,7 @@ const guaranteeSubmodule = createInvoiceSubmodule({
 
 const installationSubmodule = createInvoiceSubmodule({
   invoiceType: "GI",
+  draftKey: "installationInvoice",
   pageId: "page-facturas-insumos",
   pageKey: "facturas-insumos",
   sortKey: "facturasInsumos",
@@ -1662,6 +1755,32 @@ const installationSubmodule = createInvoiceSubmodule({
   update: (input) => updateInstallationInvoice(input),
 });
 
+for (const [formKey, page, submodule] of [
+  ["entryInvoice", "facturas-entrada", entrySubmodule],
+  ["saleInvoice", "facturas-venta", saleSubmodule],
+  ["serviceInvoice", "facturas-servicios", serviceSubmodule],
+  ["guaranteeInvoice", "facturas-garantia", guaranteeSubmodule],
+  ["installationInvoice", "facturas-insumos", installationSubmodule],
+]) {
+  registerDraftOpener(formKey, async (invoiceId) => {
+    window.showPage?.(
+      page,
+      document.querySelector(`#sidebar [data-page="${page}"]`),
+    );
+    await submodule.init();
+    if (invoiceId == null) await submodule.startNew();
+    else await submodule.startEdit(invoiceId);
+  });
+}
+// La línea nueva se añade desde la compra: su diálogo pregunta por el borrador.
+registerDraftOpener("quickProduct", () => {
+  window.showPage?.(
+    "facturas-entrada",
+    document.querySelector('#sidebar [data-page="facturas-entrada"]'),
+  );
+  return entrySubmodule.startNew();
+});
+
 export const initEntryInvoicesView = entrySubmodule.init;
 export const showEntryTab = entrySubmodule.showTab;
 export const openEntryDetail = entrySubmodule.openDetail;
@@ -1686,8 +1805,18 @@ let lossProductCombobox = null;
 let currentLossId = null;
 let currentLossDetail = null;
 let savingLoss = false;
+let lossDraft = null;
 let lossItems = [];
 let generalItems = [];
+
+registerDraftOpener("lossInvoice", async () => {
+  window.showPage?.(
+    "facturas-perdidas",
+    document.querySelector('#sidebar [data-page="facturas-perdidas"]'),
+  );
+  await initLossInvoicesView();
+  showLossTab("create", document.getElementById("tab-factura-perdidas-create"));
+});
 
 export function initLossInvoicesView() {
   const root = document.getElementById("page-facturas-perdidas");
@@ -1735,7 +1864,13 @@ function bindLossTabs() {
           document.getElementById("tab-factura-perdidas-create"),
         ),
     ],
-    ["factura-perdida-cancelar", toList],
+    [
+      "factura-perdida-cancelar",
+      () => {
+        lossDraft?.clear();
+        toList();
+      },
+    ],
     ["factura-perdida-volver", toList],
   ]) {
     const el = document.getElementById(id);
@@ -1758,6 +1893,7 @@ export function showLossTab(tab, button = null) {
     });
   const searchBar = document.getElementById("factura-perdidas-search-bar");
   if (searchBar) searchBar.style.display = tab === "list" ? "" : "none";
+  if (tab === "create") void lossDraft?.offer();
 }
 
 // Combobox sin "Agregar nueva": no se pasa onAddNew (FE-FP-03). Ofrece
@@ -1823,6 +1959,25 @@ function bindLossForm() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void handleLossSubmit();
+  });
+  lossDraft = attachDraft(form, {
+    formKey: "lossInvoice",
+    serialize: () => ({
+      ...serializeForm(form),
+      product: lossProductCombobox?.getSelected() ?? null,
+    }),
+    restore: async (values) => {
+      const product = values.product;
+      const exists = product && (await productExists(product.id, false));
+      if (product && !exists) {
+        notifyWarning(
+          `«${product.name}» ya no existe y se quitó del borrador.`,
+        );
+      }
+      lossProductCombobox?.setSelected(exists ? product : null);
+      await loadLossUnits(exists ? product : null);
+      restoreForm(form, values);
+    },
   });
 }
 
@@ -1965,6 +2120,7 @@ async function handleLossSubmit() {
   if (submitButton) submitButton.disabled = true;
   try {
     const result = await createLossInvoice(input);
+    lossDraft?.clear();
     notifySuccess("Pérdida registrada correctamente.");
     notifyWarning(result?.expiredCleanupWarning);
     lossProductCombobox?.setSelected(null);

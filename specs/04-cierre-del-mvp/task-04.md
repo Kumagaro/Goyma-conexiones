@@ -156,42 +156,47 @@
 
 ### 5.1 Esquema (migraciones 6 a 8)
 
-- [ ] Test (Rust): `drafts` único por (usuario, formulario, registro) y en cascada; `activityLog` inmutable y sin borrado; `application_id` fijado.
-- [ ] Implementación: migraciones 6, 7 y 8.
+- [x] Test (Rust): `drafts` único por (usuario, formulario, registro) y en cascada; `activityLog` inmutable y sin borrado; `application_id` fijado.
+- [x] Implementación: migraciones 6, 7 y 8.
 
 ### 5.2 Borradores (BR-01 a BR-03)
 
-- [ ] Test (Rust): `saveDraft` hace `UPSERT`; cada usuario ve solo los suyos; `formKey` fuera de la lista se rechaza; un payload con claves de contraseña se rechaza; caducidad a los 30 días al arrancar. Matriz de autorización de los 4 comandos.
-- [ ] Test (Vitest): `attachDraft` guarda con *debounce* de 1 s, nunca incluye campos `password` ni `file`, se borra al guardar o cancelar; al abrir un formulario con borrador pregunta y "Continuar" lo carga / "Descartar" lo borra; una factura recuperada revalida contacto y productos; toast al iniciar sesión; sección "Borradores" lista, abre y elimina.
-- [ ] Implementación: `commands/drafts.rs`, `draftsService.js`, `utils/drafts.js`, `borradoresView.js`, y `attachDraft` en cada formulario (una casilla por vista, como en §1.2).
+- [x] Test (Rust): `saveDraft` hace `UPSERT`; cada usuario ve solo los suyos; `formKey` fuera de la lista se rechaza; un payload con claves de contraseña se rechaza; caducidad a los 30 días al arrancar. Matriz de autorización de los 4 comandos.
+- [x] Test (Vitest): `attachDraft` guarda con *debounce* de 1 s, nunca incluye campos `password` ni `file`, se borra al guardar o cancelar; al abrir un formulario con borrador pregunta y "Continuar" lo carga / "Descartar" lo borra; una factura recuperada revalida contacto y productos; toast al iniciar sesión; sección "Borradores" lista, abre y elimina.
+- [x] Implementación: `commands/drafts.rs`, `draftsService.js`, `utils/drafts.js`, `borradoresView.js`, y `attachDraft` en cada formulario (una casilla por vista, como en §1.2).
 
 ### 5.3 Registro de actividad (RA-01, RA-02)
 
-- [ ] Test (Rust), una casilla por grupo: eliminaciones de cada entidad; cancelaciones (manual y por vencimiento, con "Sistema"); ediciones de facturas; cambios de configuración; respaldos, restauraciones e importaciones; purga. Cada entrada se escribe en la misma transacción (si la acción falla, no hay entrada) y sin datos personales.
-- [ ] Test (Rust): `listActivityLog` con filtros y orden; Contador → rechazado.
-- [ ] Test (Vitest): la sección solo aparece al Administrador; filtros, búsqueda y orden; texto seguro.
-- [ ] Implementación: `activity.rs`, llamadas desde todos los comandos de RA-01, `activityService.js`, `actividadView.js`.
+- [x] Test (Rust), una casilla por grupo: eliminaciones de cada entidad; cancelaciones (manual y por vencimiento, con "Sistema"); ediciones de facturas; cambios de configuración; respaldos, restauraciones e importaciones; purga. Cada entrada se escribe en la misma transacción (si la acción falla, no hay entrada) y sin datos personales.
+- [x] Test (Rust): `listActivityLog` con filtros y orden; Contador → rechazado.
+- [x] Test (Vitest): la sección solo aparece al Administrador; filtros, búsqueda y orden; texto seguro.
+- [x] Implementación: `activity.rs`, llamadas desde todos los comandos de RA-01, `activityService.js`, `actividadView.js`.
 
 ### 5.4 CSV (CSV-01, CSV-02)
 
-- [ ] Test (Rust): `exportCsv` por cada tipo respeta los filtros, escribe BOM, `;`, decimales con coma, fechas `dd/mm/aaaa` y neutraliza fórmulas.
-- [ ] Test (Rust): `importCsv` de productos (crea categoría y unidad que falten, lote inicial y movimiento Inicial), categorías, unidades, clientes y proveedores; filas duplicadas o inválidas se omiten con número y motivo y las válidas se guardan; archivo vacío, encabezados desconocidos o más de 5 000 filas se rechazan; actividad `import`. Matriz de autorización.
-- [ ] Test (Vitest): botones de exportar en los listados (con "Guardar como") y de importar en Configuración (con "Abrir"); resumen del resultado como toast con detalle de las filas omitidas.
-- [ ] Implementación: `csv_io.rs`, `csvService.js`, botones en las vistas.
+- **Desviación de D-14 (justificada):** no hay `SAVEPOINT` por fila ni confirmación conjunta. Cada `create_*_inner` abre su propia transacción y SQLite no admite un `BEGIN` dentro de un `SAVEPOINT`; cada fila es atómica por sí sola y una omitida no deja la categoría o unidad que creó. Si la aplicación se cierra a mitad de una importación, las filas ya procesadas quedan guardadas.
+- **Decisión:** el CSV de productos no trae abreviatura; la unidad nueva toma los 10 primeros caracteres de su nombre. Los archivos solo se aceptan en UTF-8 ("CSV UTF-8" en Excel).
+
+- [x] Test (Rust): `exportCsv` por cada tipo respeta los filtros, escribe BOM, `;`, decimales con coma, fechas `dd/mm/aaaa` y neutraliza fórmulas.
+- [x] Test (Rust): `importCsv` de productos (crea categoría y unidad que falten, lote inicial y movimiento Inicial), categorías, unidades, clientes y proveedores; filas duplicadas o inválidas se omiten con número y motivo y las válidas se guardan; archivo vacío, encabezados desconocidos o más de 5 000 filas se rechazan; actividad `import`. Matriz de autorización.
+- [x] Test (Vitest): botones de exportar en los listados (con "Guardar como") y de importar en Configuración (con "Abrir"); resumen del resultado como toast con detalle de las filas omitidas.
+- [x] Implementación: `csv_io.rs`, `csvService.js`, botones en las vistas.
 
 ### 5.5 Respaldo y restauración (RP-01 a RP-03)
 
-- [ ] Test (Rust): `createBackup` produce una base válida con todos los datos, actualiza `lastBackupAt` y registra actividad; la copia diaria crea una al día y conserva 7; `listAutomaticBackups`.
-- [ ] Test (Rust): `restoreBackup` con contraseña incorrecta no toca nada; con un archivo ajeno, corrupto o de versión mayor → `invalidBackup` sin tocar nada; con una copia de versión menor la migra; hace copia previa de lo actual, sustituye la base, borra las sesiones y registra la restauración. Matriz de autorización.
-- [ ] Test (Vitest): pestaña "Respaldo": crear copia (aviso de que no está cifrada), lista de automáticas, restaurar con confirmación y contraseña y vuelta al login.
-- [ ] Implementación: `backup.rs` y su llamada en `run_startup_processes`, `backupService.js`, `configuracionView.js`.
+- **Decisiones:** la restauración prepara la copia en un archivo aparte (migración, sesiones y entrada del registro) y solo entonces sustituye la base, así un fallo no toca los datos actuales. La copia previa (`goyma-previa-*`) aparece en la lista para poder volver atrás y no cuenta entre las 7 automáticas. La copia diaria también actualiza `lastBackupAt`; N-11 se evalúa al arrancar y tras cada copia.
+
+- [x] Test (Rust): `createBackup` produce una base válida con todos los datos, actualiza `lastBackupAt` y registra actividad; la copia diaria crea una al día y conserva 7; `listAutomaticBackups`.
+- [x] Test (Rust): `restoreBackup` con contraseña incorrecta no toca nada; con un archivo ajeno, corrupto o de versión mayor → `invalidBackup` sin tocar nada; con una copia de versión menor la migra; hace copia previa de lo actual, sustituye la base, borra las sesiones y registra la restauración. Matriz de autorización.
+- [x] Test (Vitest): pestaña "Respaldo": crear copia (aviso de que no está cifrada), lista de automáticas, restaurar con confirmación y contraseña y vuelta al login.
+- [x] Implementación: `backup.rs` y su llamada en `run_startup_processes`, `backupService.js`, `configuracionView.js`.
 
 ### 5.6 Cierre del módulo y del MVP
 
 - [ ] Revisión contra `spec-04` requisito por requisito (MG, TO, SG, NT, RS, CF, IM, CV, DB, BR, RA, CSV, RP) y contra la trazabilidad de la §12.
-- [ ] Matriz de autorización: los 31 comandos nuevos con su fila; `listActivityLog` con la de Contador rechazado.
-- [ ] Contrato `invoke ↔ generate_handler!`: **107 comandos**, sin `pendingWrapper`.
-- [ ] `environment.test.js`: sin manejadores inline, sin `innerHTML` con datos, sin jsPDF, sin datos simulados en `dashboard.js`, CSP presente.
-- [ ] Documentación: `Agents.md` §1 (las cuatro specs implementadas) y §7; `pendientes.md` (PEN-01, 02, 06, 07, 12 a 16, 18 a 22 resueltos o con su estado); Constitution v1.3.0 en vigor.
+- [x] Matriz de autorización: los 31 comandos nuevos con su fila; `listActivityLog` con la de Contador rechazado.
+- [x] Contrato `invoke ↔ generate_handler!`: **107 comandos**, sin `pendingWrapper`.
+- [x] `environment.test.js`: sin manejadores inline, sin `innerHTML` con datos, sin jsPDF, sin datos simulados en `dashboard.js`, CSP presente.
+- [x] Documentación: `Agents.md` §1 (las cuatro specs implementadas) y §7; `pendientes.md` (PEN-01, 02, 06, 07, 12 a 16, 18 a 22 resueltos o con su estado); Constitution v1.3.0 en vigor.
 - [ ] **Verificación manual de extremo a extremo** de `spec-01`, `spec-03` y `spec-04` en `tauri:dev` y `tauri:build`, como Administrador y como Contador: toasts en cada flujo; notificaciones y reservas (incluido un vencimiento cambiando la fecha del equipo o la fecha límite); imprimir en papel y exportar a PDF; adjuntar un PDF de compra con el diálogo y arrastrándolo; compra con producto nuevo y con conversión; dashboard con datos; borrador recuperado tras cerrar la app a la fuerza; CSV abierto y guardado en Excel en español e importado; crear una copia y restaurarla en otra carpeta de datos.
 - [ ] Suites finales con recuentos, lint, formato y commit.

@@ -27,6 +27,7 @@ export async function openQuickProductDialog({ initialName = "" }) {
   );
   return openFormDialog({
     title: "Nuevo producto",
+    draftKey: "quickProduct",
     submitText: "Agregar a la factura",
     missingMessage: "Completa el nombre y el porcentaje de ganancia.",
     fields: [

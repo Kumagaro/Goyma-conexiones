@@ -15,7 +15,14 @@ pub const MIGRATIONS: &[(i64, Migration)] = &[
     (3, reservations_v3),
     (4, settings_v4),
     (5, line_units_v5),
+    (6, drafts_v6),
+    (7, activity_log_v7),
+    (8, application_id_v8),
 ];
+
+/// Identifica una base de Goyma Conexiones ("GOYM" en ASCII) al restaurar
+/// una copia (RP-03).
+pub const APPLICATION_ID: i64 = 0x474F_594D;
 
 const CREATED_AT_CHECK: &str = "createdAt GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z' AND strftime('%Y-%m-%dT%H:%M:%SZ', createdAt) IS createdAt";
 
@@ -224,6 +231,59 @@ fn line_units_v5(tx: &Transaction) -> rusqlite::Result<()> {
             AND (conversionFactorMicro IS NULL OR (conversionFactorMicro > 0 AND enteredUnitName IS NOT NULL))
         );",
     )
+}
+
+/// Migración 6 (`plan-04` §2.6): un borrador por usuario, formulario y
+/// registro; "nuevo" (sin registro) cuenta como uno solo.
+fn drafts_v6(tx: &Transaction) -> rusqlite::Result<()> {
+    let updated_at_check = CREATED_AT_CHECK.replace("createdAt", "updatedAt");
+    tx.execute_batch(&format!(
+        "CREATE TABLE drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            userId INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            formKey TEXT NOT NULL CHECK (length(formKey) BETWEEN 1 AND 60),
+            recordId INTEGER,
+            payload TEXT NOT NULL CHECK (length(payload) <= 200000),
+            createdAt TEXT NOT NULL CHECK ({CREATED_AT_CHECK}),
+            updatedAt TEXT NOT NULL CHECK ({updated_at_check})
+        );
+        CREATE UNIQUE INDEX draftsOnePerForm ON drafts (userId, formKey, COALESCE(recordId, 0));"
+    ))
+}
+
+/// Migración 7 (`plan-04` §2.7): registro inmutable y sin borrado (RA-02).
+/// La única escritura admitida es la del `ON DELETE SET NULL` al eliminar un
+/// usuario: `userName` conserva la copia de su nombre.
+fn activity_log_v7(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(&format!(
+        "CREATE TABLE activityLog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            createdAt TEXT NOT NULL CHECK ({CREATED_AT_CHECK}),
+            userId INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            userName TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('delete','cancel','edit','config','backup','restore','import','purge','expire')),
+            entityType TEXT NOT NULL CHECK (entityType IN ('product','category','unit','conversion','client','supplier','user','invoice','settings','exchangeRate','backup','csv')),
+            entityLabel TEXT NOT NULL,
+            details TEXT
+        );
+        CREATE INDEX activityLogCreated ON activityLog (createdAt);
+        CREATE TRIGGER activityLogImmutable BEFORE UPDATE ON activityLog
+        WHEN NOT (
+            OLD.userId IS NOT NULL AND NEW.userId IS NULL
+            AND NEW.id = OLD.id AND NEW.createdAt = OLD.createdAt
+            AND NEW.userName = OLD.userName AND NEW.action = OLD.action
+            AND NEW.entityType = OLD.entityType AND NEW.entityLabel = OLD.entityLabel
+            AND NEW.details IS OLD.details
+        )
+        BEGIN SELECT RAISE(ABORT, 'activityLog is immutable'); END;
+        CREATE TRIGGER activityLogNoDelete BEFORE DELETE ON activityLog
+        BEGIN SELECT RAISE(ABORT, 'activityLog is immutable'); END;"
+    ))
+}
+
+/// Migración 8 (`plan-04` §2.8): la marca que valida una copia (RP-03).
+fn application_id_v8(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(&format!("PRAGMA application_id = {APPLICATION_ID};"))
 }
 
 #[cfg(test)]
@@ -571,5 +631,88 @@ mod tests {
             "Esta base de datos es de una versión más nueva de la aplicación"
         );
         assert_eq!(schema_version(&connection).unwrap(), latest_version() + 1);
+    }
+
+    fn insert_user(connection: &Connection, name: &str, national_id: &str) -> i64 {
+        connection
+            .execute(
+                "INSERT INTO users (username, passwordHash, role, phone, nationalId, createdAt)
+                 VALUES (?1, 'hash', 'contador', '+5350000030', ?2, '2026-10-28T12:00:00Z')",
+                (name, national_id),
+            )
+            .unwrap();
+        connection.last_insert_rowid()
+    }
+
+    fn insert_draft(
+        connection: &Connection,
+        user_id: i64,
+        record_id: Option<i64>,
+    ) -> rusqlite::Result<usize> {
+        connection.execute(
+            "INSERT INTO drafts (userId, formKey, recordId, payload, createdAt, updatedAt)
+             VALUES (?1, 'product', ?2, '{}', '2026-10-28T12:00:00Z', '2026-10-28T12:00:00Z')",
+            (user_id, record_id),
+        )
+    }
+
+    fn insert_activity(connection: &Connection, user_id: i64) {
+        connection
+            .execute(
+                "INSERT INTO activityLog (createdAt, userId, userName, action, entityType, entityLabel)
+                 VALUES ('2026-10-28T12:00:00Z', ?1, 'Ana', 'delete', 'product', 'Cable')",
+                [user_id],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn migration_6_keeps_one_draft_per_user_form_and_record_and_cascades() {
+        let connection = migrated_v1_database();
+        let user_id = insert_user(&connection, "draftuser", "12345678930");
+
+        insert_draft(&connection, user_id, None).unwrap();
+        insert_draft(&connection, user_id, Some(4)).unwrap();
+        assert!(insert_draft(&connection, user_id, None).is_err());
+        assert!(insert_draft(&connection, user_id, Some(4)).is_err());
+        connection
+            .execute("DELETE FROM users WHERE id = ?1", [user_id])
+            .unwrap();
+        let drafts: i64 = connection
+            .query_row("SELECT COUNT(*) FROM drafts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(drafts, 0);
+    }
+
+    #[test]
+    fn migration_7_makes_the_activity_log_immutable_but_lets_users_be_deleted() {
+        let connection = migrated_v1_database();
+        let user_id = insert_user(&connection, "activityuser", "12345678931");
+        insert_activity(&connection, user_id);
+
+        assert!(connection
+            .execute("UPDATE activityLog SET entityLabel = 'Otro'", [])
+            .is_err());
+        assert!(connection.execute("DELETE FROM activityLog", []).is_err());
+
+        connection
+            .execute("DELETE FROM users WHERE id = ?1", [user_id])
+            .unwrap();
+        let (user, name): (Option<i64>, String) = connection
+            .query_row("SELECT userId, userName FROM activityLog", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(user, None);
+        assert_eq!(name, "Ana");
+    }
+
+    #[test]
+    fn migration_8_marks_the_database_as_goyma() {
+        let connection = migrated_v1_database();
+        let id: i64 = connection
+            .query_row("PRAGMA application_id", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(id, super::APPLICATION_ID);
     }
 }

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::commands::auth::require_session;
+use crate::commands::auth::{require_session, Author};
 use crate::commands::products::purge_best_effort;
 use crate::db::connection::{current_app_data_dir, lock_conn};
 use crate::errors::{log_error, map_db_error, AppError};
@@ -334,7 +334,7 @@ pub fn delete_client_inner(
     now: DateTime<Utc>,
     client_id: i64,
 ) -> Result<(), AppError> {
-    require_session(connection, now)?;
+    let actor = require_session(connection, now)?;
 
     let tx = connection
         .transaction()
@@ -357,6 +357,16 @@ pub fn delete_client_inner(
     tx.execute(
         "UPDATE invoices SET clientId = NULL WHERE clientId = ?1",
         [client_id],
+    )
+    .map_err(|error| map_db_error(error, "deleteClient", &[]))?;
+
+    crate::activity::record_deletion(
+        &tx,
+        &Author::User(&actor),
+        now,
+        "client",
+        "SELECT firstName || ' ' || lastName FROM clients WHERE id = ?1",
+        client_id,
     )
     .map_err(|error| map_db_error(error, "deleteClient", &[]))?;
 

@@ -1,3 +1,4 @@
+import { attachDraft, registerDraftOpener } from "../utils/drafts.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import {
   createCategory,
@@ -17,6 +18,7 @@ import {
 import { el, messageRow } from "../utils/dom.js";
 import { formatMoney } from "../utils/formatters.js";
 
+let categoryDraft = null;
 let categories = [];
 let editingCategoryId = null;
 let initPromise = null;
@@ -46,7 +48,13 @@ async function initializeCategoriasView() {
     "#categoria-ver [data-categoria-detail-action='delete']",
   );
 
-  if (form) form.addEventListener("submit", handleCategorySubmit);
+  if (form) {
+    form.addEventListener("submit", handleCategorySubmit);
+    categoryDraft = attachDraft(form, {
+      formKey: "category",
+      recordId: () => editingCategoryId,
+    });
+  }
   if (searchInput) searchInput.addEventListener("input", handleCategorySearch);
   if (nameInput) nameInput.addEventListener("input", handleCategoryNameInput);
   if (listBody) listBody.addEventListener("click", handleCategoryTableClick);
@@ -73,6 +81,7 @@ async function initializeCategoriasView() {
   }
   if (cancelButton) {
     cancelButton.addEventListener("click", () => {
+      categoryDraft?.clear();
       resetCategoryForm();
       showCategoryTab("list");
     });
@@ -177,6 +186,7 @@ async function handleCategorySubmit(event) {
     if (editingCategoryId !== null) {
       await updateCategory(editingCategoryId, name, description ?? "");
       const successMessage = "Categoría actualizada correctamente.";
+      categoryDraft?.clear();
       resetCategoryForm();
       await loadCategories();
       notifySuccess(successMessage);
@@ -185,6 +195,7 @@ async function handleCategorySubmit(event) {
     } else {
       await createCategory(name, description ?? "");
       const successMessage = "Categoría creada correctamente.";
+      categoryDraft?.clear();
       resetCategoryForm();
       await loadCategories();
       notifySuccess(successMessage);
@@ -286,6 +297,7 @@ const CATEGORY_ACTIONS = [
 ];
 
 function showCategoryTab(tab) {
+  if (tab === "create") void categoryDraft?.offer();
   document
     .querySelectorAll("#page-categorias .config-subview")
     .forEach((view) =>
@@ -307,6 +319,16 @@ function showCategoryTab(tab) {
 }
 
 window.showCategoriaTab = showCategoryTab;
+
+registerDraftOpener("category", async (categoryId) => {
+  window.showPage?.(
+    "categorias",
+    document.querySelector('#sidebar [data-page="categorias"]'),
+  );
+  await loadCategories();
+  if (categoryId == null) showCategoryTab("create");
+  else openCategoryForm(categoryId);
+});
 
 function resetCategoryForm() {
   editingCategoryId = null;

@@ -301,3 +301,17 @@
   flex: 1;
   min-width: 0;
 }
+
+/* Acciones de un listado o de la pestaña Respaldo (spec-04) */
+.list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+#config-respaldo .list-actions {
+  justify-content: flex-start;
+}

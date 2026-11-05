@@ -1,3 +1,4 @@
+import { askForDraft, attachDraft, restoreForm } from "../utils/drafts.js";
 // Formulario modal pequeño (alta rápida desde una factura): campos con
 // etiqueta visible, foco atrapado y Escape para cancelar; los errores salen
 // junto al campo y como toast (spec-04 TO-01). Devuelve lo que resuelva
@@ -37,14 +38,18 @@ function buildControl(dialogId, field) {
   return control;
 }
 
-export function openFormDialog({
+export async function openFormDialog({
   title,
   fields,
   submitText,
   missingMessage,
   onSubmit,
+  draftKey = null,
 }) {
+  // Se pregunta antes de abrir: el diálogo de recuperar no se apila sobre este.
+  const savedValues = draftKey ? await askForDraft(draftKey) : null;
   const dialogId = `form-dialog-${++nextDialogId}`;
+  let draft = null;
   const opener = document.activeElement;
 
   const overlay = document.createElement("div");
@@ -106,6 +111,7 @@ export function openFormDialog({
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      draft?.clear();
       document.removeEventListener("keydown", handleKeydown);
       overlay.remove();
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
@@ -169,6 +175,8 @@ export function openFormDialog({
     });
     document.addEventListener("keydown", handleKeydown);
     document.body.append(overlay);
+    if (savedValues) restoreForm(form, savedValues);
+    if (draftKey) draft = attachDraft(form, { formKey: draftKey });
     (
       Object.values(controls).find(
         (control) => control.required && !control.value,

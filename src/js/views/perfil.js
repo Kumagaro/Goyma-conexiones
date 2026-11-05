@@ -1,3 +1,4 @@
+import { attachDraft, registerDraftOpener } from "../utils/drafts.js";
 import {
   getSession,
   loadSession,
@@ -12,6 +13,7 @@ import {
 import { notifyError, notifySuccess, reportError } from "../utils/feedback.js";
 import { installFormValidation } from "../utils/formValidation.js";
 
+let profileDraft = null;
 let profile = null;
 
 function roleLabel(role) {
@@ -83,6 +85,8 @@ function openProfilePage() {
   if (profileLink) window.showPage?.("perfil", profileLink);
 }
 
+registerDraftOpener("profile", openProfilePage);
+
 async function handleUpdateOwnProfile(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -99,6 +103,7 @@ async function handleUpdateOwnProfile(event) {
     );
     renderProfileData(updatedProfile);
     await refreshSession();
+    profileDraft?.clear();
     notifySuccess("Tus datos se actualizaron correctamente.");
   } catch (error) {
     reportError(error, "No se pudo actualizar tu perfil.", PROFILE_FIELDS);
@@ -167,6 +172,10 @@ async function initializeProfileView() {
   if (profileForm) {
     installFormValidation(profileForm);
     profileForm.addEventListener("submit", handleUpdateOwnProfile);
+    profileDraft = attachDraft(profileForm, { formKey: "profile" });
+    window.addEventListener("page:change", (event) => {
+      if (event.detail?.pageId === "perfil") void profileDraft.offer();
+    });
   }
   const passwordForm = document.getElementById("profile-password-form");
   if (passwordForm) {

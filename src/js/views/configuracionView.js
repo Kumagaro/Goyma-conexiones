@@ -1,3 +1,4 @@
+import { attachDraft, registerDraftOpener } from "../utils/drafts.js";
 // Configuración con datos reales (spec-04 CF-01 a CF-04). Sustituye a
 // monedasData, historialTasasData y rateCardsData del mockup.
 import {
@@ -32,6 +33,8 @@ const PAGE_ID = "configuracion";
 const CURRENCIES = Object.keys(CURRENCY_LABELS);
 const HISTORY_HEADER = "th-fecha-historial-tasas";
 
+let companyDraft = null;
+let thresholdsDraft = null;
 let preferences = { visibleCurrencies: [], pageSize: 20 };
 let rates = [];
 let history = [];
@@ -261,6 +264,7 @@ async function saveThresholds(event) {
       staleInvoiceDays: Number(byId("config-umbral-facturas").value),
       backupReminderDays: Number(byId("config-umbral-respaldo").value),
     });
+    thresholdsDraft?.clear();
     notifySuccess("Umbrales guardados.");
   } catch (error) {
     reportError(
@@ -314,6 +318,7 @@ async function saveCompany(event) {
         taxId: byId("config-empresa-nit").value,
       }),
     );
+    companyDraft?.clear();
     notifySuccess("Datos de la empresa guardados.");
   } catch (error) {
     reportError(
@@ -402,6 +407,9 @@ export async function loadConfiguration() {
     renderCompany(company);
     renderCurrencies();
     applyPageSize(preferences.pageSize);
+    // Uno tras otro: los dos preguntan con un diálogo.
+    await companyDraft?.offer();
+    await thresholdsDraft?.offer();
   } catch (error) {
     notifyError(error, "No se pudo cargar la configuración.");
   }
@@ -410,9 +418,15 @@ export async function loadConfiguration() {
 function bindPage() {
   if (claim(byId("config-empresa-form"))) {
     byId("config-empresa-form").addEventListener("submit", saveCompany);
+    companyDraft = attachDraft(byId("config-empresa-form"), {
+      formKey: "company",
+    });
   }
   if (claim(byId("config-umbrales-form"))) {
     byId("config-umbrales-form").addEventListener("submit", saveThresholds);
+    thresholdsDraft = attachDraft(byId("config-umbrales-form"), {
+      formKey: "thresholds",
+    });
   }
   if (claim(byId("config-logo-elegir"))) {
     byId("config-logo-elegir").addEventListener("click", () =>
@@ -482,6 +496,15 @@ export async function initConfiguracionView() {
     // Sin preferencias se queda el tamaño por defecto.
   }
 }
+
+const openConfiguration = () => {
+  window.showPage?.(
+    "configuracion",
+    document.querySelector('#sidebar [data-page="configuracion"]'),
+  );
+};
+registerDraftOpener("company", openConfiguration);
+registerDraftOpener("thresholds", openConfiguration);
 
 export const __testHooks = { loadConfiguration, fileToJpeg };
 

@@ -6,16 +6,17 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
+use crate::commands::drafts::purge_old_drafts;
 use crate::commands::products::{purge_best_effort, remaining_product_days};
 use crate::db::connection::current_app_data_dir;
 use crate::db::notifications::{
     notify, watch_enter, watch_leave, Audience, Entity, CRITICAL, WARNING,
 };
-use crate::errors::{log_error, AppError};
+use crate::errors::{log_error, map_db_error, AppError};
 use crate::models::product::format_quantity_milli;
-use crate::timestamps::{format_utc_timestamp, today_local};
+use crate::timestamps::{format_utc_timestamp, parse_utc_timestamp, today_local};
 
 const WATCH_SAVEPOINT: &str = "notification_watches";
 
@@ -317,6 +318,47 @@ pub fn evaluate_backup_watch(
     sync_watches(connection, "N-11", situations, now)
 }
 
+/// N-11 con los valores guardados en `settings`.
+fn evaluate_saved_backup_watch(
+    connection: &Connection,
+    now: DateTime<Utc>,
+) -> Result<(), AppError> {
+    let failed = |error| map_db_error(error, "evaluateBackupWatch", &[]);
+    let read = |key: &str| -> rusqlite::Result<Option<String>> {
+        connection
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+    };
+    let last_backup_at = read("lastBackupAt")
+        .map_err(failed)?
+        .as_deref()
+        .and_then(parse_utc_timestamp);
+    let reminder_days = read("backupReminderDays")
+        .map_err(failed)?
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(7);
+    let reference: Option<String> = connection
+        .query_row("SELECT MIN(createdAt) FROM users", [], |row| row.get(0))
+        .map_err(failed)?;
+    let reference = reference
+        .as_deref()
+        .and_then(parse_utc_timestamp)
+        .unwrap_or(now);
+    evaluate_backup_watch(connection, now, last_backup_at, reference, reminder_days).map_err(failed)
+}
+
+pub fn evaluate_backup_watch_best_effort(connection: &Connection, now: DateTime<Utc>) {
+    best_effort(
+        connection,
+        now,
+        "backup_watch",
+        "evaluate_backup_watch",
+        |connection| evaluate_saved_backup_watch(connection, now),
+    );
+}
+
 /// Evalúa los avisos sin poner en riesgo la operación del usuario: un fallo
 /// se deshace con su `SAVEPOINT`, se registra y la operación sigue (como la
 /// purga de `spec-02` §7.6).
@@ -420,23 +462,23 @@ pub fn run_startup_processes(connection: &mut Connection, now: DateTime<Utc>) {
     // Registra su propio fallo; su aviso solo viaja en respuestas de comandos.
     let _ = purge_best_effort(&transaction, now);
     evaluate_watches_best_effort(&transaction, now);
-    if let Err(error) = purge_old_notifications(&transaction, now) {
+    evaluate_backup_watch_best_effort(&transaction, now);
+    let report = |step: &str, result: rusqlite::Result<usize>| {
+        let Err(error) = result else { return };
         let error = AppError::new(
             "internal",
             "Ocurrió un error inesperado",
-            &format!("failed to purge old notifications: {error}"),
+            &format!("failed to {step}: {error}"),
         );
         let fallback: PathBuf = std::env::temp_dir();
         let app_data_dir = current_app_data_dir().unwrap_or(&fallback);
-        log_error(
-            &transaction,
-            "automation",
-            "purge_old_notifications",
-            &error,
-            now,
-            app_data_dir,
-        );
-    }
+        log_error(&transaction, "automation", step, &error, now, app_data_dir);
+    };
+    report(
+        "purge_old_notifications",
+        purge_old_notifications(&transaction, now),
+    );
+    report("purge_old_drafts", purge_old_drafts(&transaction, now));
     let _ = transaction.commit();
 }
 

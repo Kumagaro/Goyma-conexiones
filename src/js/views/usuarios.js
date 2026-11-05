@@ -1,3 +1,4 @@
+import { attachDraft, registerDraftOpener } from "../utils/drafts.js";
 import { getSession, loadSession } from "../session.js";
 import {
   createUser,
@@ -14,11 +15,13 @@ import {
 } from "../utils/feedback.js";
 import { installFormValidation } from "../utils/formValidation.js";
 
+let userDraft = null;
 let users = [];
 let editingUserId = null;
 
 function showUserTab(tab) {
   if (tab === "create" && getSession()?.role !== "administrador") return;
+  if (tab === "create") void userDraft?.offer();
 
   document
     .querySelectorAll("#page-usuarios .config-subview")
@@ -70,12 +73,17 @@ async function initializeUsersView() {
   document
     .querySelector("[data-user-action='cancel']")
     ?.addEventListener("click", () => {
+      userDraft?.clear();
       resetUserForm();
       showUserTab("list");
     });
   const userForm = document.getElementById("usuario-form");
   if (userForm) {
     installFormValidation(userForm);
+    userDraft = attachDraft(userForm, {
+      formKey: "user",
+      recordId: () => editingUserId,
+    });
     userForm.addEventListener("submit", handleCreateUser);
   }
 
@@ -191,6 +199,7 @@ async function handleCreateUser(event) {
       password,
     );
     notifySuccess(`Usuario ${created.username} creado correctamente.`);
+    userDraft?.clear();
     form.reset();
   } catch (error) {
     reportError(error, "No se pudo crear el usuario.", USER_FIELDS);
@@ -295,6 +304,7 @@ async function handleUpdateUser(event) {
         notifyWarning(
           `Los datos se guardaron, pero la contraseña no se cambió. ${error?.message || "No se pudo cambiar la contraseña."}`,
         );
+        userDraft?.clear();
         resetUserForm();
         showUserTab("list");
         return;
@@ -302,6 +312,7 @@ async function handleUpdateUser(event) {
     }
 
     notifySuccess("Los datos del usuario se actualizaron correctamente.");
+    userDraft?.clear();
     resetUserForm();
     showUserTab("list");
   } catch (error) {
@@ -326,6 +337,15 @@ function resetUserForm() {
   const title = document.getElementById("usuario-form-title");
   if (title) title.textContent = "Datos de Usuario";
 }
+
+registerDraftOpener("user", (userId) => {
+  window.showPage?.(
+    "usuarios",
+    document.querySelector('#sidebar [data-page="usuarios"]'),
+  );
+  if (userId == null) showUserTab("create");
+  else openEditUser(userId);
+});
 
 function setEditPasswordMode(isEditing) {
   const form = document.getElementById("usuario-form");

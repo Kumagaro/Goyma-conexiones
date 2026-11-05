@@ -39,6 +39,9 @@ impl AppError {
         matches!(
             self.code.as_str(),
             "duplicateField"
+                | "backupFailed"
+                | "invalidBackup"
+                | "restoreFailed"
                 | "notFound"
                 | "invalidState"
                 | "stockInsuficiente"

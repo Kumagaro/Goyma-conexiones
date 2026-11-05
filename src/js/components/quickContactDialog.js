@@ -1,3 +1,4 @@
+import { registerDraftOpener } from "../utils/drafts.js";
 import { openFormDialog } from "./formDialog.js";
 import { createClient } from "../services/clientsService.js";
 import { createSupplier } from "../services/suppliersService.js";
@@ -9,12 +10,14 @@ import { createSupplier } from "../services/suppliersService.js";
 const KINDS = {
   client: {
     title: "Nuevo cliente",
+    draftKey: "quickClient",
     noun: "cliente",
     create: (payload) => createClient(payload),
     extraFields: [{ name: "invoiceInfo", label: "Información de Factura" }],
   },
   supplier: {
     title: "Nuevo proveedor",
+    draftKey: "quickSupplier",
     noun: "proveedor",
     create: (payload) => createSupplier(payload),
     extraFields: [],
@@ -27,6 +30,7 @@ export function openQuickContactDialog({ kind, initialText = "" }) {
   const [firstWord = "", ...rest] = String(initialText).trim().split(/\s+/);
   return openFormDialog({
     title: config.title,
+    draftKey: config.draftKey,
     submitText: `Crear ${config.noun}`,
     missingMessage: `Completa los campos obligatorios del ${config.noun}.`,
     fields: [
@@ -62,3 +66,10 @@ export function openQuickContactDialog({ kind, initialText = "" }) {
     onSubmit: (payload) => config.create(payload),
   });
 }
+
+registerDraftOpener("quickClient", () =>
+  openQuickContactDialog({ kind: "client" }),
+);
+registerDraftOpener("quickSupplier", () =>
+  openQuickContactDialog({ kind: "supplier" }),
+);

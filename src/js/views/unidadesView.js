@@ -1,3 +1,4 @@
+import { attachDraft, registerDraftOpener } from "../utils/drafts.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import {
   clearFieldErrors,
@@ -20,6 +21,8 @@ import {
 } from "../services/unitsService.js";
 import { el, messageRow, setOptions } from "../utils/dom.js";
 
+let unitDraft = null;
+let conversionDraft = null;
 let units = [];
 let conversions = [];
 let editingUnitId = null;
@@ -58,7 +61,13 @@ async function initializeUnidadesView() {
   const conversorCantidad = document.getElementById("conversor-cantidad");
   const conversorSwap = document.querySelector(".conversor-swap");
 
-  if (form) form.addEventListener("submit", handleUnitSubmit);
+  if (form) {
+    form.addEventListener("submit", handleUnitSubmit);
+    unitDraft = attachDraft(form, {
+      formKey: "unit",
+      recordId: () => editingUnitId,
+    });
+  }
   if (searchInput) searchInput.addEventListener("input", handleUnitSearch);
   if (nameInput) nameInput.addEventListener("input", handleUnitNameInput);
   if (abbreviationInput)
@@ -79,8 +88,13 @@ async function initializeUnidadesView() {
     if (conversionModal?.classList.contains("active")) closeConversionModal();
   });
 
-  if (conversionForm)
+  if (conversionForm) {
     conversionForm.addEventListener("submit", handleConversionSubmit);
+    conversionDraft = attachDraft(conversionForm, {
+      formKey: "conversion",
+      recordId: () => editingConversionId,
+    });
+  }
   if (conversionCancelButton)
     conversionCancelButton.addEventListener("click", closeConversionModal);
   if (conversionCreateButton)
@@ -250,6 +264,7 @@ async function handleUnitSubmit(event) {
 
     const productCreation = wasEditing ? null : pendingProductUnitCreation;
     pendingProductUnitCreation = null;
+    unitDraft?.clear();
     closeUnitModal();
     await loadUnits();
     productCreation?.onCreated?.(createdUnit);
@@ -362,7 +377,26 @@ function openUnitModal(unitId = null, initialName = "", forProduct = false) {
 
   if (modal) modal.classList.add("active");
   if (nameInput) setTimeout(() => nameInput.focus(), 100);
+  void unitDraft?.offer();
 }
+
+registerDraftOpener("unit", async (unitId) => {
+  window.showPage?.(
+    "unidades",
+    document.querySelector('#sidebar [data-page="unidades"]'),
+  );
+  await loadUnits();
+  openUnitModal(unitId ?? null);
+});
+
+registerDraftOpener("conversion", async (conversionId) => {
+  window.showPage?.(
+    "unidades",
+    document.querySelector('#sidebar [data-page="unidades"]'),
+  );
+  await Promise.all([loadUnits(), loadConversions()]);
+  openConversionModal(conversionId ?? null);
+});
 
 export function openUnitModalForProduct(name, onCreated, onCancelled) {
   pendingProductUnitCreation = { onCreated, onCancelled };
@@ -370,6 +404,7 @@ export function openUnitModalForProduct(name, onCreated, onCancelled) {
 }
 
 function cancelUnitModal() {
+  unitDraft?.clear();
   const pendingCreation = pendingProductUnitCreation;
   pendingProductUnitCreation = null;
   closeUnitModal();
@@ -554,6 +589,7 @@ function openConversionModal(conversionId = null) {
 
   if (modal) modal.classList.add("active");
   if (factorInput) setTimeout(() => factorInput.focus(), 100);
+  void conversionDraft?.offer();
 }
 
 function updateConversionPreview() {
@@ -582,6 +618,7 @@ function updateConversionPreview() {
 }
 
 function closeConversionModal() {
+  conversionDraft?.clear();
   const modal = document.getElementById("modal-conversion");
   const form = document.getElementById("conversion-form");
   editingConversionId = null;

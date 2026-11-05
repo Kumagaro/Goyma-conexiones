@@ -1,3 +1,4 @@
+import { attachDraft, registerDraftOpener } from "../utils/drafts.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import { renderInvoiceHistory } from "../components/invoiceHistory.js";
 import {
@@ -20,6 +21,7 @@ import { formatDate, formatId, formatMoney } from "../utils/formatters.js";
 import { el, messageRow } from "../utils/dom.js";
 import { debounce } from "../utils/requestGuard.js";
 
+let clientDraft = null;
 let clients = [];
 let editingClientId = null;
 let currentClientId = null;
@@ -98,7 +100,12 @@ function bindForm() {
     event.preventDefault();
     void handleClientSubmit();
   });
+  clientDraft = attachDraft(form, {
+    formKey: "client",
+    recordId: () => editingClientId,
+  });
   document.getElementById("cliente-cancelar")?.addEventListener("click", () => {
+    clientDraft?.clear();
     resetClientForm();
     showClienteTab("list", document.getElementById("tab-cliente-list"));
   });
@@ -166,6 +173,7 @@ function showClienteTab(tab, button = null) {
   if (searchBar) searchBar.style.display = tab === "list" ? "" : "none";
 
   if (tab === "create" && editingClientId === null) resetClientForm();
+  if (tab === "create") void clientDraft?.offer();
 }
 
 async function loadClients(query = "") {
@@ -269,6 +277,7 @@ async function handleClientSubmit() {
       notifySuccess("Cliente creado correctamente.");
     }
 
+    clientDraft?.clear();
     resetClientForm();
     await loadClients();
     showClienteTab("list", document.getElementById("tab-cliente-list"));
@@ -433,7 +442,19 @@ async function handleDeleteClient(clientId) {
 }
 
 window.showClienteTab = showClienteTab;
+
+registerDraftOpener("client", async (clientId) => {
+  window.showPage?.(
+    "clientes",
+    document.querySelector('#sidebar [data-page="clientes"]'),
+  );
+  await loadClients();
+  if (clientId == null) {
+    showClienteTab("create", document.getElementById("tab-cliente-create"));
+  } else openClientForm(clientId);
+});
 window.cancelarClienteForm = () => {
+  clientDraft?.clear();
   resetClientForm();
   showClienteTab("list", document.getElementById("tab-cliente-list"));
 };

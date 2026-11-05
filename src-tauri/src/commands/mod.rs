@@ -3,6 +3,7 @@ pub mod categories;
 pub mod clients;
 pub mod conversions;
 pub mod dashboard;
+pub mod drafts;
 pub mod history;
 pub mod invoices;
 pub mod notifications;

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::commands::auth::require_session;
+use crate::commands::auth::{require_session, Author};
 use crate::commands::products::purge_best_effort;
 use crate::db::connection::lock_conn;
 use crate::db::notifications::{insert_affected_products_notification, AffectedProductsKind};
@@ -276,7 +276,7 @@ pub fn delete_unit_inner(
     now: DateTime<Utc>,
     unit_id: i64,
 ) -> Result<DeleteUnitResult, AppError> {
-    require_session(connection, now)?;
+    let actor = require_session(connection, now)?;
 
     let tx = connection
         .transaction()
@@ -340,6 +340,16 @@ pub fn delete_unit_inner(
         )
         .map_err(|error| map_db_error(error, "deleteUnit", &[]))?;
     }
+
+    crate::activity::record_deletion(
+        &tx,
+        &Author::User(&actor),
+        now,
+        "unit",
+        "SELECT name FROM units WHERE id = ?1",
+        unit_id,
+    )
+    .map_err(|error| map_db_error(error, "deleteUnit", &[]))?;
 
     tx.execute(
         "DELETE FROM unitConversions WHERE fromUnitId = ?1 OR toUnitId = ?1",

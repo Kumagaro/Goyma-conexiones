@@ -331,6 +331,9 @@ const paginacionEstado = {};
 const PAGINABLES = [
   /* Dashboard: lento movimiento lista todos los productos activos (DB-06) */
   { id: "dash-lento" },
+  /* Borradores y registro de actividad */
+  { id: "borradores-body" },
+  { id: "actividad-body" },
   /* Listados principales */
   { id: "productos-body" },
   { id: "productos-condiciones-body" },

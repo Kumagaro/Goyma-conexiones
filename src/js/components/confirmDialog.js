@@ -5,6 +5,8 @@ export function confirmDialog({
   message = "",
   confirmText = "Confirmar",
   cancelText = "Cancelar",
+  confirmClass = "btn-danger",
+  dismissValue = false,
 } = {}) {
   const opener = document.activeElement;
   const overlay = document.createElement("div");
@@ -44,7 +46,7 @@ export function confirmDialog({
 
   const confirmButton = document.createElement("button");
   confirmButton.type = "button";
-  confirmButton.className = "btn-danger";
+  confirmButton.className = confirmClass;
   confirmButton.dataset.action = "confirm";
   confirmButton.textContent = confirmText;
   actions.append(cancelButton, confirmButton);
@@ -67,7 +69,7 @@ export function confirmDialog({
     const handleKeydown = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        finish(false);
+        finish(dismissValue);
         return;
       }
       if (event.key !== "Tab") return;
@@ -86,7 +88,7 @@ export function confirmDialog({
     cancelButton.addEventListener("click", () => finish(false));
     confirmButton.addEventListener("click", () => finish(true));
     overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) finish(false);
+      if (event.target === overlay) finish(dismissValue);
     });
     document.addEventListener("keydown", handleKeydown);
     document.body.append(overlay);

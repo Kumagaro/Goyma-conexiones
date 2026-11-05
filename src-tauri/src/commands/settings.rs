@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::commands::auth::require_session;
+use crate::commands::auth::{require_session, Author};
 use crate::db::connection::{current_app_data_dir, lock_conn};
 use crate::errors::{log_error, map_db_error, AppError};
 use crate::models::product::format_factor_micro;
@@ -61,7 +61,7 @@ pub fn update_settings_inner(
     now: DateTime<Utc>,
     input: UpdateSettingsInput,
 ) -> Result<Settings, AppError> {
-    require_session(connection, now)?;
+    let actor = require_session(connection, now)?;
     for (value, min, max, message) in [
         (
             input.low_stock_threshold,
@@ -103,6 +103,18 @@ pub fn update_settings_inner(
             )
             .map_err(|error| map_db_error(error, "updateSettings", &[]))?;
     }
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "config",
+            entity_type: "settings",
+            label: "Umbrales",
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, "updateSettings", &[]))?;
     crate::automation::evaluate_watches_best_effort(&transaction, now);
     let settings = read_settings(&transaction)?;
     transaction
@@ -279,6 +291,26 @@ pub fn update_exchange_rate_inner(
             params![timestamp, currency, previous, rate_micro, actor.id(), actor.username()],
         )
         .map_err(|error| map_db_error(error, "updateExchangeRate", &[]))?;
+    let change = match previous {
+        Some(previous) => format!(
+            "{} → {}",
+            format_factor_micro(previous),
+            format_factor_micro(rate_micro)
+        ),
+        None => format_factor_micro(rate_micro),
+    };
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "config",
+            entity_type: "exchangeRate",
+            label: currency,
+            details: Some(&change),
+        },
+    )
+    .map_err(|error| map_db_error(error, "updateExchangeRate", &[]))?;
     transaction
         .commit()
         .map_err(|error| map_db_error(error, "updateExchangeRate", &[]))?;
@@ -372,7 +404,7 @@ pub fn update_company_profile_inner(
     app_data_dir: &Path,
     input: UpdateCompanyProfileInput,
 ) -> Result<CompanyProfile, AppError> {
-    require_session(connection, now)?;
+    let actor = require_session(connection, now)?;
     let fields = [
         (
             "companyName",
@@ -418,6 +450,18 @@ pub fn update_company_profile_inner(
             )
             .map_err(|error| map_db_error(error, "updateCompanyProfile", &[]))?;
     }
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "config",
+            entity_type: "settings",
+            label: "Datos de la empresa",
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, "updateCompanyProfile", &[]))?;
     let profile = read_company_profile(&transaction, app_data_dir)?;
     transaction
         .commit()
@@ -475,7 +519,7 @@ pub fn save_company_logo_inner(
     app_data_dir: &Path,
     jpeg: Option<Vec<u8>>,
 ) -> Result<CompanyProfile, AppError> {
-    require_session(connection, now)?;
+    let actor = require_session(connection, now)?;
     if let Some(bytes) = &jpeg {
         validate_jpeg(bytes)?;
     }
@@ -499,12 +543,30 @@ pub fn save_company_logo_inner(
         }
     }
     let value = if jpeg.is_some() { LOGO_FILE } else { "" };
-    connection
+    let transaction = connection
+        .transaction()
+        .map_err(|error| map_db_error(error, "saveCompanyLogo", &[]))?;
+    transaction
         .execute(
             "INSERT INTO settings (key, value, updatedAt) VALUES ('companyLogoFile', ?1, ?2)
              ON CONFLICT (key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt",
             params![value, format_utc_timestamp(now)],
         )
+        .map_err(|error| map_db_error(error, "saveCompanyLogo", &[]))?;
+    crate::activity::record_activity(
+        &transaction,
+        &Author::User(&actor),
+        now,
+        crate::activity::Entry {
+            action: "config",
+            entity_type: "settings",
+            label: "Logo de la empresa",
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, "saveCompanyLogo", &[]))?;
+    transaction
+        .commit()
         .map_err(|error| map_db_error(error, "saveCompanyLogo", &[]))?;
     read_company_profile(connection, app_data_dir)
 }

@@ -63,6 +63,7 @@ impl Actor {
 /// no da acceso a `users` ni `sessions`, solo firma con "Sistema".
 pub enum Author<'a> {
     User(&'a Actor),
+    Admin(&'a AdminActor),
     System,
 }
 
@@ -70,6 +71,7 @@ impl Author<'_> {
     pub fn id(&self) -> Option<i64> {
         match self {
             Self::User(actor) => Some(actor.id()),
+            Self::Admin(admin) => Some(admin.id()),
             Self::System => None,
         }
     }
@@ -77,6 +79,7 @@ impl Author<'_> {
     pub fn name(&self) -> &str {
         match self {
             Self::User(actor) => actor.username(),
+            Self::Admin(admin) => &admin.username,
             Self::System => "Sistema",
         }
     }
@@ -85,6 +88,7 @@ impl Author<'_> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminActor {
     id: i64,
+    username: String,
 }
 
 impl AdminActor {
@@ -190,7 +194,10 @@ pub fn require_admin(connection: &Connection, now: DateTime<Utc>) -> Result<Admi
             "actor role is not administrator",
         ));
     }
-    Ok(AdminActor { id: actor.id })
+    Ok(AdminActor {
+        id: actor.id,
+        username: actor.username,
+    })
 }
 
 pub fn login_inner(

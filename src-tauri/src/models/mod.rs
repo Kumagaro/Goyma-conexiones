@@ -1,8 +1,12 @@
+pub mod activity;
+pub mod backup;
 pub mod category;
 pub mod client;
 pub mod consumption;
 pub mod conversion;
+pub mod csv;
 pub mod dashboard;
+pub mod draft;
 pub mod invoice;
 pub mod invoice_line;
 pub mod lot;
