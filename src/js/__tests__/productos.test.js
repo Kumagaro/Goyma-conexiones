@@ -1181,7 +1181,7 @@ describe("listados y detalle de productos", () => {
     );
     const paginationStart = dashboard.indexOf("const PAGINACION_OPCIONES");
     const paginationEnd = dashboard.indexOf(
-      "// ====== Dashboard: KPIs",
+      "// ===== Pestañas unificadas",
       paginationStart,
     );
     expect(paginationStart).toBeGreaterThanOrEqual(0);

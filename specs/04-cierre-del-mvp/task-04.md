@@ -146,10 +146,11 @@
 
 ## 4. Fase 4 — Dashboard
 
-- [ ] Test (Rust): `getDashboardKpis` con un escenario fijo (ventas y servicios cobrados y por cobrar, en días distintos; garantías, insumos y pérdidas; productos con margen distinto; un cliente eliminado) que verifica a mano cada cifra de DB-02 a DB-07 para cada período (hoy, semana, mes, 3 m, 6 m, 1 año, rango); ingresos por fecha de cobro; costo real FIFO; Pareto 80/20 de productos y clientes; lento movimiento con un producto nunca vendido (S-09). Matriz de autorización.
-- [ ] Test (Vitest, HTML de producción): con un DTO fijo, cada id del mockup (`data-kpi`, `dash-gasto-*`, `dash-estrella-*`, `dash-frecuentes`, `dash-vendidos-*`, `dash-lento`, `dash-chart`) muestra su valor; el selector de período tiene las siete opciones y recarga; los equivalentes en otras monedas aparecen según las preferencias; estado de error con "Reintentar"; tarjeta de reservas activas con enlaces; se recalcula al volver al dashboard tras guardar.
-- [ ] Implementación: `commands/dashboard.rs`, `dashboardService.js`, `dashboardView.js` y el HTML (opciones de período y tarjeta de reservas sin cambiar el diseño).
-- [ ] Cierre: suites, lint, formato, `pendientes.md` (PEN-16) y commit.
+- [x] Test (Rust): `getDashboardKpis` con un escenario fijo (ventas y servicios cobrados y por cobrar, en días distintos; garantías, insumos y pérdidas; productos con margen distinto; un cliente eliminado) que verifica a mano cada cifra de DB-02 a DB-07 para cada período (hoy, semana, mes, 3 m, 6 m, 1 año, rango); ingresos por fecha de cobro; costo real FIFO; Pareto 80/20 de productos y clientes; lento movimiento con un producto nunca vendido (S-09). Matriz de autorización.
+- [x] Test (Vitest, HTML de producción): con un DTO fijo, cada id del mockup (`data-kpi`, `dash-gasto-*`, `dash-estrella-*`, `dash-frecuentes`, `dash-vendidos-*`, `dash-lento`, `dash-chart`) muestra su valor; el selector de período tiene las siete opciones y recarga; los equivalentes en otras monedas aparecen según las preferencias; estado de error con "Reintentar"; tarjeta de reservas activas con enlaces; se recalcula al volver al dashboard tras guardar.
+- [x] Implementación: `commands/dashboard.rs`, `dashboardService.js`, `dashboardView.js` y el HTML (opciones de período y tarjeta de reservas sin cambiar el diseño).
+- **Decisiones de implementación:** el total de "Resumen de Gastos" incluye las pérdidas (línea aparte) para coincidir con la tarjeta "Total de Gastos"; el valor del inventario y los agotados no tienen historial, así que no muestran variación ni minigráfico; con período anterior en cero se muestra "Sin comparación" en vez de un porcentaje; los renderizadores pasan de `dashboard.js` a `dashboardView.js`, con DOM.
+- [x] Cierre: suites, lint, formato, `pendientes.md` (PEN-16) y commit.
 
 ## 5. Fase 5 — Borradores, registro de actividad, CSV y respaldo
 

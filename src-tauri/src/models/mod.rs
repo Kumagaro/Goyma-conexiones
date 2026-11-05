@@ -2,6 +2,7 @@ pub mod category;
 pub mod client;
 pub mod consumption;
 pub mod conversion;
+pub mod dashboard;
 pub mod invoice;
 pub mod invoice_line;
 pub mod lot;

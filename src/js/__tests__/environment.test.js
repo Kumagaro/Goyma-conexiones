@@ -144,23 +144,6 @@ describe("Vitest con jsdom", () => {
   });
 
   it("SG-01: ningún innerHTML del JS de producción recibe una plantilla o concatenación", async () => {
-    // Renderizadores de datos de prueba del mockup que su fase sustituye al
-    // conectar datos reales; cada fase quita aquí sus líneas.
-    const pendingByPhase = {
-      "dashboard.js": [
-        // Fase 4 (DB-01): KPIs, listas y gastos del dashboard.
-        "valor.innerHTML = valorHtml(def, k);",
-        "$('[data-role=\"delta\"]', fila).innerHTML = variacion(",
-        "$('[data-role=\"spark\"]', fila).innerHTML = sparkInterior(k.tendencia);",
-        "$(idCuerpo).innerHTML = items.length",
-        '$("#dash-frecuentes").innerHTML = datos.clientesFrecuentes.length',
-        '$("#dash-gasto-garantia").innerHTML = dineroUnidad(g.garantia);',
-        '$("#dash-gasto-insumos").innerHTML = dineroUnidad(g.insumos);',
-        '$("#dash-gasto-total").innerHTML = dineroUnidad(total);',
-        '$("#dash-vendidos-a").innerHTML = items',
-        '$("#dash-vendidos-b").innerHTML = items',
-      ],
-    };
     const sourceFiles = await collectSourceFiles(path.join(sourceRoot, "js"));
     const productionJs = sourceFiles.filter(
       (filePath) =>
@@ -169,7 +152,6 @@ describe("Vitest con jsdom", () => {
         !filePath.includes(`${path.sep}libs${path.sep}`),
     );
     const violations = [];
-    const pendingSeen = new Set();
     for (const filePath of productionJs) {
       const name = path.basename(filePath);
       const source = (await readFile(filePath, "utf8")).replace(/\r\n/g, "\n");
@@ -181,19 +163,10 @@ describe("Vitest con jsdom", () => {
         const line = source
           .slice(lineStart, source.indexOf("\n", match.index))
           .trim();
-        if (pendingByPhase[name]?.includes(line)) {
-          pendingSeen.add(`${name}: ${line}`);
-          continue;
-        }
         violations.push(`${name}: ${line}`);
       }
     }
     expect(violations).toEqual([]);
-    // Una línea pendiente que ya no existe se quita de la lista.
-    const pending = Object.entries(pendingByPhase).flatMap(([name, lines]) =>
-      lines.map((line) => `${name}: ${line}`),
-    );
-    expect(pending.filter((entry) => !pendingSeen.has(entry))).toEqual([]);
   });
 
   it("las secciones migradas de contactos y facturas no tienen manejadores inline", async () => {

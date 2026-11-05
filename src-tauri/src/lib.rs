@@ -96,6 +96,7 @@ pub fn run() {
             commands::history::list_history_products,
             commands::history::export_history_excel,
             commands::history::export_history_pdf,
+            commands::dashboard::get_dashboard_kpis,
             commands::dashboard::get_dashboard_summary,
             commands::invoices::list_invoices,
             commands::invoices::get_invoice,

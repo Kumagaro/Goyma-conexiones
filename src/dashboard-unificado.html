@@ -1216,54 +1216,73 @@
               <button
                 type="button"
                 class="tab"
-                data-periodo="hoy"
+                data-periodo="today"
                 aria-pressed="false"
-                data-action="cambiarPeriodoDashboard"
-                data-periodo="hoy"
               >
                 Hoy
               </button>
               <button
                 type="button"
                 class="tab"
-                data-periodo="7d"
+                data-periodo="week"
                 aria-pressed="false"
-                data-action="cambiarPeriodoDashboard"
-                data-periodo="7d"
               >
-                7 Días
+                Semana
               </button>
               <button
                 type="button"
                 class="tab active"
-                data-periodo="mes"
+                data-periodo="month"
                 aria-pressed="true"
-                data-action="cambiarPeriodoDashboard"
-                data-periodo="mes"
               >
                 Mes
               </button>
               <button
                 type="button"
                 class="tab"
-                data-periodo="anio"
+                data-periodo="3m"
                 aria-pressed="false"
-                data-action="cambiarPeriodoDashboard"
-                data-periodo="anio"
               >
-                Año
+                3 Meses
+              </button>
+              <button
+                type="button"
+                class="tab"
+                data-periodo="6m"
+                aria-pressed="false"
+              >
+                6 Meses
+              </button>
+              <button
+                type="button"
+                class="tab"
+                data-periodo="1y"
+                aria-pressed="false"
+              >
+                1 Año
+              </button>
+              <button
+                type="button"
+                class="tab"
+                data-periodo="custom"
+                aria-pressed="false"
+              >
+                Rango
               </button>
             </div>
             <p class="period-range" id="dash-rango"></p>
           </div>
+          <form id="dash-rango-form" class="dash-range" novalidate hidden>
+            <label for="dash-rango-desde">Desde</label>
+            <input type="date" id="dash-rango-desde" />
+            <label for="dash-rango-hasta">Hasta</label>
+            <input type="date" id="dash-rango-hasta" />
+            <button type="submit" class="btn-secondary">Aplicar rango</button>
+          </form>
 
           <div id="dash-error" class="dash-error" role="alert" hidden>
             <span>No se pudieron cargar los datos del dashboard.</span>
-            <button
-              type="button"
-              class="btn-secondary"
-              data-action="cambiarPeriodoDashboard"
-            >
+            <button type="button" class="btn-secondary" id="dash-reintentar">
               Reintentar
             </button>
           </div>
@@ -1280,6 +1299,7 @@
               <div>
                 <div class="kpi-hero-label">Ingresos Totales</div>
                 <div class="kpi-hero-value" data-role="valor"></div>
+                <div class="dash-note" data-role="nota"></div>
               </div>
               <div class="kpi-hero-bottom">
                 <span class="kpi-delta" data-role="delta"></span>
@@ -1322,6 +1342,7 @@
               <div>
                 <div class="kpi-hero-label">Promedio de Ventas Diarias</div>
                 <div class="kpi-hero-value" data-role="valor"></div>
+                <div class="dash-note" data-role="nota"></div>
               </div>
               <div class="kpi-hero-bottom">
                 <span class="kpi-delta" data-role="delta"></span>
@@ -1343,6 +1364,7 @@
               <div>
                 <div class="kpi-hero-label">Ganancia Neta</div>
                 <div class="kpi-hero-value" data-role="valor"></div>
+                <div class="dash-note" data-role="nota"></div>
               </div>
               <div class="kpi-hero-bottom">
                 <span class="kpi-delta" data-role="delta"></span>
@@ -1373,6 +1395,7 @@
                     ><span class="txt">Margen de Ganancia</span>
                   </div>
                   <div class="kpi-sec-value" data-role="valor"></div>
+                  <div class="dash-note" data-role="nota"></div>
                 </div>
                 <svg
                   class="kpi-spark kpi-sec-spark"
@@ -1396,6 +1419,7 @@
                     ><span class="txt">Total de Gastos</span>
                   </div>
                   <div class="kpi-sec-value" data-role="valor"></div>
+                  <div class="dash-note" data-role="nota"></div>
                 </div>
                 <svg
                   class="kpi-spark kpi-sec-spark"
@@ -1419,6 +1443,7 @@
                     ><span class="txt">Valor de Inventario</span>
                   </div>
                   <div class="kpi-sec-value" data-role="valor"></div>
+                  <div class="dash-note" data-role="nota"></div>
                 </div>
                 <svg
                   class="kpi-spark kpi-sec-spark"
@@ -1463,7 +1488,6 @@
                     type="button"
                     class="legend-item legend-toggle"
                     aria-pressed="true"
-                    data-action="alternarSerieIngresos"
                     data-serie="0"
                   >
                     <div class="legend-color legend-color-ventas"></div>
@@ -1473,7 +1497,6 @@
                     type="button"
                     class="legend-item legend-toggle"
                     aria-pressed="true"
-                    data-action="alternarSerieIngresos"
                     data-serie="1"
                   >
                     <div class="legend-color legend-color-servicios"></div>
@@ -1483,7 +1506,6 @@
                     type="button"
                     class="legend-item legend-toggle"
                     aria-pressed="true"
-                    data-action="alternarSerieIngresos"
                     data-serie="2"
                   >
                     <div class="legend-color legend-color-total"></div>
@@ -1491,6 +1513,7 @@
                   </button>
                 </div>
               </header>
+              <p class="dash-note" id="dash-reparto"></p>
               <div class="chart-canvas" id="dash-chart-wrap">
                 <canvas
                   id="dash-chart"
@@ -1513,6 +1536,10 @@
                 <div class="expense-item">
                   <span class="expense-label">Gastos de Insumos</span>
                   <span class="expense-value" id="dash-gasto-insumos"></span>
+                </div>
+                <div class="expense-item">
+                  <span class="expense-label">Pérdidas</span>
+                  <span class="expense-value" id="dash-gasto-perdidas"></span>
                 </div>
                 <div class="expense-item expense-item-total">
                   <span class="expense-label">Total de Gastos</span>
@@ -1566,6 +1593,7 @@
           <section class="main-bottom row-expenses-inventory">
             <article class="inventory-details">
               <h3 class="card-title">Resumen de Inventario</h3>
+              <p class="dash-note" id="dash-inventario-cantidad"></p>
               <div class="inventory-cards">
                 <div class="out-of-stock">
                   <h4 class="card-subtitle">Productos Agotados</h4>
@@ -1581,10 +1609,18 @@
                     <span id="dash-agotados-sin-categoria">0</span>
                   </div>
                   <div class="inv-actions">
-                    <button class="action-btn" data-goto-page="productos">
+                    <button
+                      class="action-btn"
+                      type="button"
+                      id="dash-agotados-ver-agotados"
+                    >
                       Ver Agotados
                     </button>
-                    <button class="action-btn" data-goto-page="productos">
+                    <button
+                      class="action-btn"
+                      type="button"
+                      id="dash-agotados-ver-descontinuados"
+                    >
                       Ver Descontinuados
                     </button>
                   </div>
@@ -1610,14 +1646,24 @@
                     <thead>
                       <tr>
                         <th>Producto</th>
+                        <th>Vendido</th>
+                        <th>Precio</th>
                         <th>Días</th>
-                        <th>Stock</th>
                       </tr>
                     </thead>
                     <tbody id="dash-lento"></tbody>
                   </table>
                 </div>
               </div>
+            </article>
+            <article class="inventory-details" id="dash-reservas">
+              <h3 class="card-title">Reservas Activas</h3>
+              <div class="dash-reservas-resumen">
+                <div class="stock-count" id="dash-reservas-total">0</div>
+                <div class="dash-note" id="dash-reservas-monto"></div>
+              </div>
+              <h4 class="card-subtitle">Vencen en los próximos 3 días</h4>
+              <div id="dash-reservas-lista"></div>
             </article>
           </section>
         </div>
