@@ -116,6 +116,7 @@ pub fn update_settings_inner(
     )
     .map_err(|error| map_db_error(error, "updateSettings", &[]))?;
     crate::automation::evaluate_watches_best_effort(&transaction, now);
+    crate::automation::evaluate_backup_watch_best_effort(&transaction, now);
     let settings = read_settings(&transaction)?;
     transaction
         .commit()

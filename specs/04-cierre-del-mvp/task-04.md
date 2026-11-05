@@ -193,7 +193,7 @@
 
 ### 5.6 Cierre del módulo y del MVP
 
-- [ ] Revisión contra `spec-04` requisito por requisito (MG, TO, SG, NT, RS, CF, IM, CV, DB, BR, RA, CSV, RP) y contra la trazabilidad de la §12.
+- [x] Revisión contra `spec-04` requisito por requisito (MG, TO, SG, NT, RS, CF, IM, CV, DB, BR, RA, CSV, RP) y contra la trazabilidad de la §12.
 - [x] Matriz de autorización: los 31 comandos nuevos con su fila; `listActivityLog` con la de Contador rechazado.
 - [x] Contrato `invoke ↔ generate_handler!`: **107 comandos**, sin `pendingWrapper`.
 - [x] `environment.test.js`: sin manejadores inline, sin `innerHTML` con datos, sin jsPDF, sin datos simulados en `dashboard.js`, CSP presente.

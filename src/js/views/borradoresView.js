@@ -59,6 +59,14 @@ async function removeDraft({ formKey, recordId }) {
   }
 }
 
+async function openForm({ formKey, recordId }) {
+  try {
+    await openDraft(formKey, recordId);
+  } catch (error) {
+    notifyError(error, "No se pudo abrir el formulario.");
+  }
+}
+
 function draftRow(draft) {
   return el(
     "tr",
@@ -76,9 +84,7 @@ function draftRow(draft) {
       el(
         "div",
         { class: "row-actions" },
-        actionButton("Abrir", "", () => {
-          void openDraft(draft.formKey, draft.recordId);
-        }),
+        actionButton("Abrir", "", () => void openForm(draft)),
         actionButton("Eliminar", " danger", () => void removeDraft(draft)),
       ),
     ),

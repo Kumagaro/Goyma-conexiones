@@ -542,6 +542,51 @@ mod tests {
     }
 
     #[test]
+    fn the_backup_reminder_follows_its_threshold_and_a_new_copy() {
+        let (mut connection, _, now) = signed_in();
+        let reminders = |connection: &Connection| -> i64 {
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM notifications WHERE type = 'N-11'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let last_copy = format_utc_timestamp(now - Duration::days(10));
+        connection
+            .execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'lastBackupAt'",
+                [&last_copy],
+            )
+            .unwrap();
+
+        // CF-04: cambiar el umbral reevalúa la situación con el valor nuevo.
+        crate::commands::settings::update_settings_inner(
+            &mut connection,
+            now,
+            crate::models::settings::UpdateSettingsInput {
+                low_stock_threshold: 5,
+                stale_invoice_days: 30,
+                backup_reminder_days: 3,
+            },
+        )
+        .unwrap();
+        assert_eq!(reminders(&connection), 1);
+
+        // Sale de la situación con una copia y vuelve a avisar al repetirse.
+        make_copy(&mut connection, now);
+        connection
+            .execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'lastBackupAt'",
+                [&last_copy],
+            )
+            .unwrap();
+        crate::automation::evaluate_backup_watch_best_effort(&connection, now);
+        assert_eq!(reminders(&connection), 2);
+    }
+
+    #[test]
     fn a_failed_daily_copy_does_not_stop_the_application() {
         let (mut connection, dir, now) = signed_in();
         fs::remove_dir_all(dir.join(BACKUP_DIR)).unwrap();

@@ -120,7 +120,10 @@ export function attachDraft(
 
   async function ask() {
     const values = await askForDraft(formKey, recordId());
-    if (values) await restore(values);
+    if (!values) return;
+    await restore(values);
+    // Restaurar dispara `input` antes de reponer lo que aporta la vista.
+    schedule();
   }
 
   form.addEventListener("input", schedule);

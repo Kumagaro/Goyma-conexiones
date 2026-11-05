@@ -150,6 +150,37 @@ describe("attachDraft", () => {
     expect(calls("delete_draft")).toHaveLength(1);
   });
 
+  it("tras recuperar guarda el estado completo, no el de medio camino", async () => {
+    const { attachDraft, restoreForm, serializeForm } =
+      await import("../utils/drafts.js");
+    vi.useFakeTimers();
+    const form = buildForm();
+    let lines = [];
+    const draft = attachDraft(form, {
+      formKey: "saleInvoice",
+      serialize: () => ({ ...serializeForm(form), lines }),
+      restore: async (values) => {
+        restoreForm(form, values);
+        await Promise.resolve();
+        lines = values.lines;
+      },
+    });
+    invokeMock.mockImplementation((command) =>
+      Promise.resolve(
+        command === "get_draft"
+          ? { payload: '{"nombre":"Ana","lines":[1,2]}' }
+          : null,
+      ),
+    );
+    confirmMock.mockResolvedValueOnce(true);
+
+    await draft.offer();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const saved = calls("save_draft").at(-1)[1];
+    expect(JSON.parse(saved.payload).lines).toEqual([1, 2]);
+  });
+
   it("sin borrador no pregunta", async () => {
     const { attachDraft } = await import("../utils/drafts.js");
     const draft = attachDraft(buildForm(), { formKey: "client" });
@@ -215,6 +246,24 @@ describe("sección Borradores (HTML de producción)", () => {
         formKey: "client",
         recordId: 12,
       }),
+    );
+  });
+
+  it("si el formulario no se puede abrir lo dice", async () => {
+    const view = await start();
+    const { registerDraftOpener } = await import("../utils/drafts.js");
+    registerDraftOpener("client", () =>
+      Promise.reject(new Error("El cliente ya no existe")),
+    );
+    await view.loadDrafts();
+
+    document
+      .querySelectorAll("#borradores-body tr")[1]
+      .querySelector("button")
+      .click();
+
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain("El cliente ya no existe"),
     );
   });
 

@@ -278,6 +278,11 @@ function entryDeleteMessage(detail) {
 // Comparten listado, formulario (crear y editar), detalle y cambio de estado;
 // las diferencias de cada tipo viven en su configuración.
 
+// §7.2: el mensaje nombra lo afectado.
+function invoiceSavedMessage(number) {
+  return number ? `Factura ${number} guardada.` : "Factura guardada.";
+}
+
 // BR-02: el contacto de un borrador se vuelve a comprobar al recuperarlo.
 async function existingContact(kind, contact) {
   if (contact?.id == null) return null;
@@ -1183,11 +1188,7 @@ function createInvoiceSubmodule(cfg) {
         : await cfg.create(input);
       const invoiceId = wasEditing ? wasEditing.id : result?.invoiceId;
       await saveAttachmentChanges(invoiceId);
-      notifySuccess(
-        wasEditing
-          ? "Factura actualizada correctamente."
-          : "Factura registrada correctamente.",
-      );
+      notifySuccess(invoiceSavedMessage(result?.number ?? wasEditing?.number));
       notifyWarning(result?.expiredCleanupWarning);
       draft?.clear();
       resetForm();
@@ -2121,7 +2122,7 @@ async function handleLossSubmit() {
   try {
     const result = await createLossInvoice(input);
     lossDraft?.clear();
-    notifySuccess("Pérdida registrada correctamente.");
+    notifySuccess(invoiceSavedMessage(result?.number));
     notifyWarning(result?.expiredCleanupWarning);
     lossProductCombobox?.setSelected(null);
     void loadLossUnits(null);

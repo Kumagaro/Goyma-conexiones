@@ -169,6 +169,14 @@ describe("Vitest con jsdom", () => {
     expect(violations).toEqual([]);
   });
 
+  it("dashboard.js ya no trae datos simulados", async () => {
+    const source = await readFile(
+      path.join(sourceRoot, "js", "dashboard.js"),
+      "utf8",
+    );
+    expect(source).not.toMatch(/DATOS_EJEMPLO|obtenerDatosDashboard/);
+  });
+
   it("las secciones migradas de contactos y facturas no tienen manejadores inline", async () => {
     const html = await readFile(
       path.join(sourceRoot, "dashboard-unificado.html"),
