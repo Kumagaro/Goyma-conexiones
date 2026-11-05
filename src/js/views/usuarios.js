@@ -311,7 +311,7 @@ async function handleUpdateUser(event) {
       }
     }
 
-    notifySuccess("Los datos del usuario se actualizaron correctamente.");
+    notifySuccess(`Usuario ${username} actualizado.`);
     userDraft?.clear();
     resetUserForm();
     showUserTab("list");

@@ -185,7 +185,7 @@ async function handleCategorySubmit(event) {
   try {
     if (editingCategoryId !== null) {
       await updateCategory(editingCategoryId, name, description ?? "");
-      const successMessage = "Categoría actualizada correctamente.";
+      const successMessage = `Categoría «${name}» actualizada.`;
       categoryDraft?.clear();
       resetCategoryForm();
       await loadCategories();
@@ -194,7 +194,7 @@ async function handleCategorySubmit(event) {
       return;
     } else {
       await createCategory(name, description ?? "");
-      const successMessage = "Categoría creada correctamente.";
+      const successMessage = `Categoría «${name}» creada.`;
       categoryDraft?.clear();
       resetCategoryForm();
       await loadCategories();
@@ -427,7 +427,7 @@ async function handleDeleteCategory(categoryId) {
     const result = await deleteCategory(categoryId);
     await loadCategories();
     notifySuccess(
-      `La categoría se eliminó correctamente. ${Number(result?.affectedProducts ?? category.productCount ?? 0)} producto(s) quedaron sin categoría.`,
+      `Categoría «${category.name}» eliminada. ${Number(result?.affectedProducts ?? category.productCount ?? 0)} producto(s) quedaron sin categoría.`,
     );
     showCategoryTab("list");
   } catch (error) {

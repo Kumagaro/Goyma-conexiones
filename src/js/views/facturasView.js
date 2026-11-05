@@ -1495,7 +1495,9 @@ function createInvoiceSubmodule(cfg) {
         target,
         target === "completed" && hasPayment ? paymentSelect?.value : undefined,
       );
-      notifySuccess("Estado de la factura actualizado.");
+      notifySuccess(
+        `Estado de la factura ${result?.number ?? ""} actualizado.`,
+      );
       notifyWarning(result?.expiredCleanupWarning);
       await loadInvoices();
       await openDetail(invoiceId);
@@ -1537,7 +1539,7 @@ function createInvoiceSubmodule(cfg) {
     if (!confirmed) return;
     try {
       const deleted = await deleteInvoice(Number(invoiceId));
-      notifySuccess("Factura eliminada.");
+      notifySuccess(`Factura ${deleted?.number ?? ""} eliminada.`);
       notifyWarning(deleted?.expiredCleanupWarning);
       if (currentId === Number(invoiceId)) {
         currentId = null;
@@ -2200,7 +2202,7 @@ async function handleDeleteLoss(invoiceId) {
   if (!confirmed) return;
   try {
     const deleted = await deleteInvoice(Number(invoiceId));
-    notifySuccess("Pérdida eliminada.");
+    notifySuccess(`Factura ${deleted?.number ?? ""} eliminada.`);
     notifyWarning(deleted?.expiredCleanupWarning);
     if (currentLossId === Number(invoiceId)) {
       currentLossId = null;

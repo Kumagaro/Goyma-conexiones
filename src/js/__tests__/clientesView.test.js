@@ -445,9 +445,7 @@ describe("clientesView", () => {
     createClient.mockResolvedValueOnce({ id: 12 });
     submit();
     await vi.waitFor(() =>
-      expect(toastsOfType("success").at(-1)?.textContent).toContain(
-        "Cliente creado correctamente.",
-      ),
+      expect(toastsOfType("success").at(-1)?.textContent).toContain("creado."),
     );
     expect(document.querySelector("#cliente-form .form-feedback")).toBeNull();
   });

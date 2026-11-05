@@ -34,6 +34,7 @@ const CURRENCIES = Object.keys(CURRENCY_LABELS);
 const HISTORY_HEADER = "th-fecha-historial-tasas";
 
 let companyDraft = null;
+let ratesDraft = null;
 let thresholdsDraft = null;
 let preferences = { visibleCurrencies: [], pageSize: 20 };
 let rates = [];
@@ -209,10 +210,28 @@ async function loadRates() {
   renderCurrencyWarning();
 }
 
+const rateInputs = () => [
+  ...document.querySelectorAll("#rate-cards [data-currency]"),
+];
+
+function serializeRates() {
+  return Object.fromEntries(
+    rateInputs().map((input) => [input.dataset.currency, input.value]),
+  );
+}
+
+function restoreRates(values) {
+  for (const input of rateInputs()) {
+    if (!(input.dataset.currency in values)) continue;
+    input.value = values[input.dataset.currency];
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
 /** Guarda solo las tasas que cambiaron; cada una deja su historial. */
 async function saveRates() {
   const current = new Map(rates.map((rate) => [rate.currency, rate.rate]));
-  const changed = [...document.querySelectorAll("#rate-cards [data-currency]")]
+  const changed = rateInputs()
     .map((input) => [input.dataset.currency, input.value.trim(), input])
     .filter(([code, value]) => value && value !== current.get(code));
   if (!changed.length) {
@@ -229,6 +248,7 @@ async function saveRates() {
       reportError(error, "No se pudo guardar la tasa.", [[/tasa/i, input]]);
     }
   }
+  if (saved === changed.length) ratesDraft?.clear();
   if (saved) {
     notifySuccess(
       saved === 1
@@ -410,6 +430,7 @@ export async function loadConfiguration() {
     // Uno tras otro: los dos preguntan con un diálogo.
     await companyDraft?.offer();
     await thresholdsDraft?.offer();
+    await ratesDraft?.offer();
   } catch (error) {
     notifyError(error, "No se pudo cargar la configuración.");
   }
@@ -426,6 +447,13 @@ function bindPage() {
     byId("config-umbrales-form").addEventListener("submit", saveThresholds);
     thresholdsDraft = attachDraft(byId("config-umbrales-form"), {
       formKey: "thresholds",
+    });
+  }
+  if (claim(byId("rate-cards"))) {
+    ratesDraft = attachDraft(byId("rate-cards"), {
+      formKey: "rates",
+      serialize: serializeRates,
+      restore: restoreRates,
     });
   }
   if (claim(byId("config-logo-elegir"))) {
@@ -505,6 +533,7 @@ const openConfiguration = () => {
 };
 registerDraftOpener("company", openConfiguration);
 registerDraftOpener("thresholds", openConfiguration);
+registerDraftOpener("rates", openConfiguration);
 
 export const __testHooks = { loadConfiguration, fileToJpeg };
 

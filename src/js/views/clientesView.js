@@ -271,10 +271,14 @@ async function handleClientSubmit() {
   try {
     if (editingClientId !== null) {
       await updateClient(editingClientId, payload);
-      notifySuccess("Cliente actualizado correctamente.");
+      notifySuccess(
+        `Cliente «${payload.firstName} ${payload.lastName}» actualizado.`,
+      );
     } else {
       await createClient(payload);
-      notifySuccess("Cliente creado correctamente.");
+      notifySuccess(
+        `Cliente «${payload.firstName} ${payload.lastName}» creado.`,
+      );
     }
 
     clientDraft?.clear();
@@ -431,6 +435,7 @@ async function handleDeleteClient(clientId) {
 
   try {
     await deleteClient(clientId);
+    notifySuccess(`Cliente «${name}» eliminado.`);
     const detailId =
       currentClientId === Number(clientId) ? null : currentClientId;
     currentClientId = detailId;

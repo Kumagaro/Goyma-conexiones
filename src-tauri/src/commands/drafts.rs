@@ -29,6 +29,7 @@ pub const DRAFT_FORMS: &[&str] = &[
     "profile",
     "company",
     "thresholds",
+    "rates",
     "quickClient",
     "quickSupplier",
     "quickProduct",

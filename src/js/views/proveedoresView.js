@@ -469,10 +469,14 @@ async function handleSupplierSubmit() {
   try {
     if (editingSupplierId !== null) {
       await updateSupplier(editingSupplierId, payload);
-      notifySuccess("Proveedor actualizado correctamente.");
+      notifySuccess(
+        `Proveedor «${payload.firstName} ${payload.lastName}» actualizado.`,
+      );
     } else {
       await createSupplier(payload);
-      notifySuccess("Proveedor creado correctamente.");
+      notifySuccess(
+        `Proveedor «${payload.firstName} ${payload.lastName}» creado.`,
+      );
     }
 
     supplierDraft?.clear();
@@ -629,6 +633,7 @@ async function handleDeleteSupplier(supplierId) {
 
   try {
     await deleteSupplier(supplierId);
+    notifySuccess(`Proveedor «${name}» eliminado.`);
     const detailId =
       currentSupplierId === Number(supplierId) ? null : currentSupplierId;
     currentSupplierId = detailId;

@@ -28,6 +28,7 @@ const FORM_LABELS = {
   profile: "Mi perfil",
   company: "Datos de la empresa",
   thresholds: "Umbrales",
+  rates: "Tasas de cambio",
   quickClient: "Alta rápida de cliente",
   quickSupplier: "Alta rápida de proveedor",
   quickProduct: "Alta rápida de producto",

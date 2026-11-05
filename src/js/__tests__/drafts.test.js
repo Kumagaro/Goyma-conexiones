@@ -292,6 +292,56 @@ describe("sección Borradores (HTML de producción)", () => {
   });
 });
 
+describe("tasas de cambio", () => {
+  it("guarda lo escrito sin guardar y lo recupera al volver", async () => {
+    const html = await readFile(
+      path.resolve(process.cwd(), "src", "dashboard-unificado.html"),
+      "utf8",
+    );
+    const page = new DOMParser()
+      .parseFromString(html, "text/html")
+      .getElementById("page-configuracion");
+    document.body.replaceChildren(document.importNode(page, true));
+    const responses = {
+      get_user_preferences: { visibleCurrencies: [], pageSize: 20 },
+      get_company_profile: {},
+      get_settings: {
+        lowStockThreshold: 5,
+        staleInvoiceDays: 30,
+        backupReminderDays: 7,
+      },
+      list_exchange_rates: [],
+      list_exchange_rate_history: [],
+    };
+    let rateDraft = null;
+    invokeMock.mockImplementation((command, args) => {
+      if (command === "get_draft") {
+        return Promise.resolve(args.formKey === "rates" ? rateDraft : null);
+      }
+      return Promise.resolve(responses[command] ?? null);
+    });
+    const { __testHooks, initConfiguracionView } =
+      await import("../views/configuracionView.js");
+    await initConfiguracionView();
+    await __testHooks.loadConfiguration();
+
+    const input = document.getElementById("config-tasa-CUP");
+    input.value = "670";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.waitFor(() => expect(calls("save_draft")).toHaveLength(1), {
+      timeout: 3000,
+    });
+    const [, saved] = calls("save_draft")[0];
+    expect(saved.formKey).toBe("rates");
+    expect(JSON.parse(saved.payload).CUP).toBe("670");
+
+    rateDraft = { payload: saved.payload };
+    confirmMock.mockResolvedValueOnce(true);
+    await __testHooks.loadConfiguration();
+    expect(document.getElementById("config-tasa-CUP").value).toBe("670");
+  });
+});
+
 describe("factura recuperada de un borrador", () => {
   let pageHtml = "";
 

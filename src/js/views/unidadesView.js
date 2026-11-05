@@ -268,11 +268,7 @@ async function handleUnitSubmit(event) {
     closeUnitModal();
     await loadUnits();
     productCreation?.onCreated?.(createdUnit);
-    notifySuccess(
-      wasEditing
-        ? "Unidad actualizada correctamente."
-        : "Unidad creada correctamente.",
-    );
+    notifySuccess(`Unidad «${name}» ${wasEditing ? "actualizada" : "creada"}.`);
   } catch (error) {
     reportError(error, "No se pudo guardar la unidad.", [
       [/abreviación/i, abbreviationInput],
@@ -445,7 +441,7 @@ async function handleDeleteUnit(unitId) {
     await loadConversions();
     populateConversorSelectors();
     notifySuccess(
-      `Unidad eliminada. ${affectedProducts} producto(s) quedaron sin unidad y ${deletedConversions} conversión(es) se eliminó(n).`,
+      `Unidad «${unit.name}» eliminada. ${affectedProducts} producto(s) quedaron sin unidad y ${deletedConversions} conversión(es) se eliminó(n).`,
     );
   } catch (error) {
     notifyError(error, "No se pudo eliminar la unidad.");
@@ -617,6 +613,11 @@ function updateConversionPreview() {
   preview.textContent = `1 ${fromLabel} = ${factor} ${toLabel}`;
 }
 
+function conversionLabel(fromUnitId, toUnitId) {
+  const unitName = (id) => units.find((unit) => unit.id === id)?.name ?? "";
+  return `${unitName(fromUnitId)} → ${unitName(toUnitId)}`;
+}
+
 function closeConversionModal() {
   conversionDraft?.clear();
   const modal = document.getElementById("modal-conversion");
@@ -667,9 +668,7 @@ async function handleConversionSubmit(event) {
     closeConversionModal();
     await loadConversions();
     notifySuccess(
-      wasEditing
-        ? "Conversión actualizada correctamente."
-        : "Conversión creada correctamente.",
+      `Conversión ${conversionLabel(fromUnitId, toUnitId)} ${wasEditing ? "actualizada" : "creada"}.`,
     );
   } catch (error) {
     reportError(error, "No se pudo guardar la conversión.", [
@@ -691,7 +690,9 @@ async function handleDeleteConversion(conversionId) {
   try {
     await deleteConversion(conversionId);
     await loadConversions();
-    notifySuccess("Conversión eliminada correctamente.");
+    notifySuccess(
+      `Conversión ${conversion.fromUnit.name} → ${conversion.toUnit.name} eliminada.`,
+    );
   } catch (error) {
     notifyError(error, "No se pudo eliminar la conversión.");
   }

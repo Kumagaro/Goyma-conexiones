@@ -1087,7 +1087,7 @@ async function handleProductSubmit(event) {
       await createProduct({ ...input, cost, quantity });
       productDraft?.clear();
       openProductForm();
-      notifySuccess("Producto creado correctamente.");
+      notifySuccess(`Producto «${name}» creado.`);
     } else {
       const result = await updateProduct({
         productId: editingProductId,
@@ -1095,7 +1095,7 @@ async function handleProductSubmit(event) {
       });
       productDraft?.clear();
       openProductForm();
-      notifySuccess("Producto actualizado correctamente.");
+      notifySuccess(`Producto «${name}» actualizado.`);
       notifyWarning(result?.expiredCleanupWarning);
     }
   } catch (error) {
