@@ -100,3 +100,14 @@
   --duration-fast: 150ms;
   --duration-base: 220ms;
 }
+
+/* WebView2 (Edge) añade sus propios botones: la app ya tiene el suyo */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-primary);
+}

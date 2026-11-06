@@ -109,9 +109,26 @@ button.notificaciones {
 }
 
 #producto-list .list-table td:last-child {
-  width: 170px;
-  max-width: 170px;
+  width: 230px;
+  min-width: 230px;
+  max-width: 230px;
   white-space: normal;
+}
+
+#producto-list .list-table td:nth-child(n + 3):not(:last-child) {
+  white-space: nowrap;
+}
+
+/* Si la tabla no cabe, las acciones siguen a la vista al desplazarla */
+#producto-list .list-table th:last-child,
+#producto-list .list-table td:last-child {
+  position: sticky;
+  right: 0;
+  background-color: var(--color-white);
+}
+
+#producto-list .col-acciones {
+  flex-wrap: wrap;
 }
 
 #producto-list .action-link {
@@ -135,17 +152,48 @@ button.notificaciones {
   white-space: nowrap;
 }
 
-/* Selectores sueltos fuera de un .field */
-#page-actividad select,
-#config-csv-tipo {
-  min-height: 40px;
-  padding: var(--space-2) var(--space-3);
+/* Controles: un solo aspecto en toda la aplicación */
+select,
+.modal-card input:not([type="checkbox"]):not([type="radio"]),
+.modal-card textarea {
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-sm);
-  background: var(--color-white);
+  background-color: var(--color-white);
   color: var(--color-ink);
   font: inherit;
   font-size: var(--text-base);
+}
+
+select:not([multiple]),
+.modal-card input:not([type="checkbox"]):not([type="radio"]),
+.field input[type="date"],
+.autocomplete-row input[role="combobox"] {
+  box-sizing: border-box;
+  min-height: 46px;
+}
+
+.modal-card input:not([type="checkbox"]):not([type="radio"]),
+.modal-card textarea {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+}
+
+select[multiple] {
+  padding: var(--space-2);
+}
+
+select:focus,
+.modal-card input:focus,
+.modal-card textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-tint);
+}
+
+.line-items select,
+.line-items input {
+  min-height: 40px;
+  padding-block: var(--space-2);
 }
 
 #config-respaldo .config-block-title:not(:first-child) {
@@ -164,7 +212,6 @@ button.notificaciones {
 /* Buscadores de las facturas: como cualquier campo */
 .autocomplete-row input[role="combobox"] {
   width: 100%;
-  min-height: 44px;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-sm);

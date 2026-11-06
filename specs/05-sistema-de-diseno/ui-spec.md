@@ -64,6 +64,7 @@ Azul principal: **`#2563eb`** (decisión del dueño).
 - **Acciones de fila:** `.action-link`, altura mínima 32px; `.danger` para destructivas.
 - **Títulos de página:** cada página tiene un único `<h1 class="page-title">`.
 - **Foco:** todo lo interactivo muestra el anillo `:focus-visible`. Quitar `outline` exige un sustituto visible.
+- **Campos:** todos los `input`, `select` y `textarea` miden 46px, con el mismo borde, radio y foco, también en diálogos; dentro de las líneas de factura, 40px. El navegador no añade controles propios: el ojo de contraseña es solo el de la aplicación.
 - **Solo icono:** `<button>` real con `aria-label`. Un `<div>` nunca es clicable.
 - **Tablas:** `.list-table`. Si no caben, se desplazan dentro de su contenedor, nunca se cortan.
 - **Estados vacíos:** dicen qué falta y ofrecen la acción para crearlo. Con filtros activos dicen que no hay coincidencias.
