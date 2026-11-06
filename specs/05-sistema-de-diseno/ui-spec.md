@@ -67,6 +67,7 @@ Azul principal: **`#2563eb`** (decisión del dueño).
 - **Campos:** todos los `input`, `select` y `textarea` miden 46px, con el mismo borde, radio y foco, también en diálogos; dentro de las líneas de factura, 40px. El navegador no añade controles propios: el ojo de contraseña es solo el de la aplicación.
 - **Solo icono:** `<button>` real con `aria-label`. Un `<div>` nunca es clicable.
 - **Tablas:** `.list-table`. Si no caben, se desplazan dentro de su contenedor, nunca se cortan.
+- **Contenedores:** nada sobresale de su tarjeta o columna. Los textos largos saltan de línea o se cortan con puntos suspensivos.
 - **Estados vacíos:** dicen qué falta y ofrecen la acción para crearlo. Con filtros activos dicen que no hay coincidencias.
 
 ## 6. Formularios y textos
@@ -80,7 +81,7 @@ Azul principal: **`#2563eb`** (decisión del dueño).
 
 ## 7. Ventana
 
-Tamaño inicial **1280×800**, mínimo **1024×640** (decisión del dueño). El diseño de escritorio es el principal.
+La ventana abre **maximizada y no se puede reducir** (decisión del dueño), conservando la barra de título para minimizar y cerrar. En pantallas pequeñas el diseño debe funcionar desde **1024×640**. El diseño de escritorio es el principal.
 
 ## 8. Tareas
 

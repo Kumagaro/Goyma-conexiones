@@ -85,9 +85,100 @@ button.notificaciones {
 }
 
 /* Las tablas anchas se desplazan dentro de su vista, nunca se cortan */
-.config-subview[id$="-list"],
-.table-scroll {
+div:has(> .list-table) {
   overflow-x: auto;
+}
+
+/* La gráfica se ajusta a su columna, no al revés */
+.main-top > *,
+.chart-canvas {
+  min-width: 0;
+}
+
+/* Los textos largos se cortan o saltan de línea, nunca salen de su tarjeta */
+.bienvenido,
+.star-items > *,
+.inventory-cards > *,
+.side-col > * {
+  min-width: 0;
+}
+
+#dashboard-greeting {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.star-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.star-table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.star-table td:last-child {
+  width: 48px;
+}
+
+.categories-list {
+  flex-wrap: wrap;
+}
+
+.categories-list span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kpi-sec-label span.txt {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* Tarjetas de indicadores: el minigráfico cede antes que salirse */
+.kpi-hero-grid > *,
+.kpi-secondary-grid > *,
+.kpi-sec-mid > div,
+.kpi-hero-bottom {
+  min-width: 0;
+}
+
+/* Un minigráfico nunca encoge: si no cabe junto a la variación, baja de línea.
+   Con overflow visible, encogido se dibujaría fuera de la tarjeta. */
+.kpi-hero-bottom {
+  flex-wrap: wrap;
+}
+
+.kpi-spark {
+  flex: 0 0 64px;
+  margin-left: auto;
+  overflow: hidden;
+}
+
+.kpi-sec-spark {
+  flex-basis: 60px;
+}
+
+.kpi-sec-mid > div {
+  flex: 1;
+}
+
+.kpi-secondary-grid,
+.kpi-hero-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .kpi-secondary-grid,
+  .kpi-hero-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .list-table td:last-child {
