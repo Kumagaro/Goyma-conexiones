@@ -15,7 +15,7 @@ import {
   reportError,
   requireFields,
 } from "../utils/feedback.js";
-import { el, messageRow } from "../utils/dom.js";
+import { el, messageRow, emptyState } from "../utils/dom.js";
 import { formatMoney } from "../utils/formatters.js";
 
 let categoryDraft = null;
@@ -245,7 +245,16 @@ function renderCategoryList(items) {
   if (ingresosHeader) ingresosHeader.hidden = false;
 
   if (!items.length) {
-    messageRow(body, "Aún no hay categorías.", 5);
+    emptyState(body, {
+      empty: "Aún no hay categorías.",
+      filtered: Boolean(
+        document.getElementById("categoria-search")?.value.trim(),
+      ),
+      action: {
+        label: "Crear categoría",
+        onClick: () => showCategoryTab("create"),
+      },
+    });
     return;
   }
 

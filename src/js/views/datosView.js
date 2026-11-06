@@ -178,7 +178,7 @@ async function restore(source, label) {
   const confirmed = await confirmDialog({
     title: "Restaurar copia",
     message: `Se reemplazarán todos los datos actuales por los de «${label}». Antes se guardará una copia de lo actual y la sesión se cerrará.`,
-    confirmText: "Continuar",
+    confirmText: "Restaurar",
   });
   if (!confirmed) return;
   const result = await openFormDialog({

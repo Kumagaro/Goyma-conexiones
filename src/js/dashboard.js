@@ -91,6 +91,8 @@ const knownPages = [
   "facturas-perdidas",
   "facturas-servicios",
   "notificaciones",
+  "borradores",
+  "actividad",
   "perfil",
 ];
 

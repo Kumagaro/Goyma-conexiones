@@ -1,3 +1,5 @@
+import { clearFieldError, setFieldError } from "./feedback.js";
+
 const messages = {
   username:
     "El nombre de usuario debe tener de 3 a 50 caracteres alfanuméricos (letras y números, sin acentos ni espacios)",
@@ -20,30 +22,49 @@ export function installFormValidation(root = document) {
     return () => {};
   }
 
+  let checkingOnBlur = false;
+
   const handleInvalid = (event) => {
     const field = event.target;
     if (typeof field?.setCustomValidity !== "function") {
       return;
     }
 
-    const message = getValidationMessage(field);
-    if (message) {
-      field.setCustomValidity(message);
+    const message = getValidationMessage(field) || field.validationMessage;
+    if (!message) return;
+    // El error va junto al campo, no en el globo del navegador (ui-spec §6).
+    event.preventDefault();
+    field.setCustomValidity(message);
+    setFieldError(field, message);
+    if (!checkingOnBlur && !document.activeElement?.matches?.(":invalid")) {
+      field.focus();
     }
   };
 
   const clearMessage = (event) => {
     if (typeof event.target?.setCustomValidity === "function") {
       event.target.setCustomValidity("");
+      clearFieldError(event.target);
     }
+  };
+
+  // Un campo vacío se avisa al guardar: al pasar por él no molesta.
+  const checkOnBlur = (event) => {
+    const field = event.target;
+    if (!field?.willValidate || !field.value) return;
+    checkingOnBlur = true;
+    field.checkValidity();
+    checkingOnBlur = false;
   };
 
   root.addEventListener("invalid", handleInvalid, true);
   root.addEventListener("input", clearMessage, true);
+  root.addEventListener("focusout", checkOnBlur, true);
 
   return () => {
     root.removeEventListener("invalid", handleInvalid, true);
     root.removeEventListener("input", clearMessage, true);
+    root.removeEventListener("focusout", checkOnBlur, true);
   };
 }
 

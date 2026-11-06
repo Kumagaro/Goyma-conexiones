@@ -3,7 +3,9 @@
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta charset="utf-8" />
+    <link rel="stylesheet" href="./css/design-system.css" />
     <link rel="stylesheet" href="./css/dashboard.css" />
+    <link rel="stylesheet" href="./css/components.css" />
     <link rel="stylesheet" href="./css/toast.css" />
     <link rel="stylesheet" href="./css/print.css" />
   </head>
@@ -1188,14 +1190,16 @@
         <div id="page-dashboard" class="page active">
           <div class="panel-top">
             <div class="bienvenido">
-              <span class="text-wrapper" id="dashboard-greeting"
-                >Bienvenido de nuevo.</span
-              >
+              <h1 class="text-wrapper" id="dashboard-greeting">
+                Bienvenido de nuevo.
+              </h1>
             </div>
-            <div
+            <button
+              type="button"
               class="notificaciones"
               data-goto-page="notificaciones"
               title="Ver notificaciones"
+              aria-label="Ver notificaciones"
             >
               <svg class="icon vuesax-linear">
                 <use href="#icon-bell"></use>
@@ -1206,7 +1210,7 @@
                 style="display: none"
                 >0</span
               >
-            </div>
+            </button>
             <div
               class="usuario"
               title="Ver mi perfil"
@@ -1681,6 +1685,7 @@
         </div>
         <!-- ===================== PRODUCTOS ===================== -->
         <div id="page-productos" class="page">
+          <h1 class="page-title">Productos</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button
@@ -1719,7 +1724,7 @@
                 placeholder="Buscar producto…"
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -1770,10 +1775,10 @@
                   <th>Nombre</th>
                   <th>Categoría</th>
                   <th>Unidad</th>
-                  <th style="text-align: right">Precio de Venta</th>
-                  <th style="text-align: right">Precio de Entrada</th>
-                  <th style="text-align: center">Disponible en Stock</th>
-                  <th id="productos-valor-total" style="text-align: right">
+                  <th class="text-right">Precio de Venta</th>
+                  <th class="text-right">Precio de Entrada</th>
+                  <th class="text-center">Disponible en Stock</th>
+                  <th class="text-right" id="productos-valor-total">
                     Valor Total
                   </th>
                   <th>Acciones</th>
@@ -1985,10 +1990,7 @@
               </div>
               <div class="field">
                 <label
-                  ><svg
-                    class="icon"
-                    style="width: 16px; height: 16px; vertical-align: -3px"
-                  >
+                  ><svg class="icon icon-16 icon-inline">
                     <use href="#icon-calendar"></use>
                   </svg>
                   Fecha Inicial</label
@@ -1997,10 +1999,7 @@
               </div>
               <div class="field">
                 <label
-                  ><svg
-                    class="icon"
-                    style="width: 16px; height: 16px; vertical-align: -3px"
-                  >
+                  ><svg class="icon icon-16 icon-inline">
                     <use href="#icon-calendar"></use>
                   </svg>
                   Fecha Final</label
@@ -2009,10 +2008,7 @@
               </div>
               <div class="field">
                 <label
-                  ><svg
-                    class="icon"
-                    style="width: 16px; height: 16px; vertical-align: -3px"
-                  >
+                  ><svg class="icon icon-16 icon-inline">
                     <use href="#icon-filter"></use>
                   </svg>
                   Tipo de Movimiento</label
@@ -2057,7 +2053,7 @@
                   disabled
                   title="No hay movimientos para exportar"
                 >
-                  <svg class="icon" style="width: 16px; height: 16px">
+                  <svg class="icon icon-16">
                     <use href="#icon-export"></use>
                   </svg>
                   Exportar a Excel
@@ -2069,7 +2065,7 @@
                   disabled
                   title="No hay movimientos para exportar"
                 >
-                  <svg class="icon" style="width: 16px; height: 16px">
+                  <svg class="icon icon-16">
                     <use href="#icon-export"></use>
                   </svg>
                   Exportar a PDF
@@ -2083,10 +2079,10 @@
                     Fecha
                   </th>
                   <th>Tipo de Movimiento</th>
-                  <th style="text-align: center">Cantidad</th>
-                  <th style="text-align: center">Stock Resultante</th>
-                  <th style="text-align: right">Precio Unitario</th>
-                  <th style="text-align: right">Precio Total</th>
+                  <th class="text-center">Cantidad</th>
+                  <th class="text-center">Stock Resultante</th>
+                  <th class="text-right">Precio Unitario</th>
+                  <th class="text-right">Precio Total</th>
                   <th>Factura</th>
                   <th>Usuario</th>
                 </tr>
@@ -2300,7 +2296,7 @@
                 class="btn-secondary"
                 id="producto-ver-historial"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-history"></use>
                 </svg>
                 Ver Historial
@@ -2310,7 +2306,7 @@
                 class="btn-danger"
                 data-product-detail-action="delete"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Producto
@@ -2320,7 +2316,7 @@
                 class="btn-primary"
                 data-product-detail-action="edit"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -2345,6 +2341,7 @@
         </div>
         <!-- ===================== CATEGORÍAS ===================== -->
         <div id="page-categorias" class="page">
+          <h1 class="page-title">Categorías</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-categoria-list">
@@ -2361,7 +2358,7 @@
                 placeholder="Buscar categoría..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -2384,10 +2381,8 @@
                 <tr>
                   <th>Nombre</th>
                   <th>Descripción</th>
-                  <th style="text-align: center">Cantidad de Productos</th>
-                  <th id="categorias-ingresos" style="text-align: right">
-                    Ingresos
-                  </th>
+                  <th class="text-center">Cantidad de Productos</th>
+                  <th class="text-right" id="categorias-ingresos">Ingresos</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -2493,7 +2488,7 @@
             </div>
 
             <!-- Productos de la categoría: siempre visible, es el contenido principal de esta vista -->
-            <h3 class="cat-view-section-title" style="margin: 4px 0 10px">
+            <h3 class="cat-view-section-title stack-sm">
               Listado de Productos
             </h3>
             <div id="categoria-ver-productos" class="pv-invoice-grid"></div>
@@ -2504,7 +2499,7 @@
                 class="btn-danger"
                 data-categoria-detail-action="delete"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Categoría
@@ -2514,7 +2509,7 @@
                 class="btn-primary"
                 data-categoria-detail-action="edit"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -2525,6 +2520,7 @@
 
         <!-- ===================== CLIENTES ===================== -->
         <div id="page-clientes" class="page">
+          <h1 class="page-title">Clientes</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-cliente-list">Clientes</button>
@@ -2539,7 +2535,7 @@
                 placeholder="Buscar cliente..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -2901,13 +2897,13 @@
 
             <div class="form-actions">
               <button type="button" class="btn-danger">
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Cliente
               </button>
               <button type="button" class="btn-primary">
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -2918,6 +2914,7 @@
 
         <!-- ===================== PROVEEDORES ===================== -->
         <div id="page-proveedores" class="page">
+          <h1 class="page-title">Proveedores</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-proveedor-list">
@@ -2937,7 +2934,7 @@
                 placeholder="Buscar proveedor..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -3093,10 +3090,7 @@
               </div>
               <div class="field">
                 <label for="historial-proveedor-desde"
-                  ><svg
-                    class="icon"
-                    style="width: 16px; height: 16px; vertical-align: -3px"
-                  >
+                  ><svg class="icon icon-16 icon-inline">
                     <use href="#icon-calendar"></use>
                   </svg>
                   Fecha Inicial</label
@@ -3105,10 +3099,7 @@
               </div>
               <div class="field">
                 <label for="historial-proveedor-hasta"
-                  ><svg
-                    class="icon"
-                    style="width: 16px; height: 16px; vertical-align: -3px"
-                  >
+                  ><svg class="icon icon-16 icon-inline">
                     <use href="#icon-calendar"></use>
                   </svg>
                   Fecha Final</label
@@ -3123,8 +3114,8 @@
                     Fecha
                   </th>
                   <th>Estado</th>
-                  <th style="text-align: center">Cantidad Productos</th>
-                  <th style="text-align: right">Total</th>
+                  <th class="text-center">Cantidad Productos</th>
+                  <th class="text-right">Total</th>
                   <th>Factura</th>
                   <th>Responsable</th>
                   <th>Acciones</th>
@@ -3325,13 +3316,13 @@
 
             <div class="form-actions">
               <button type="button" class="btn-danger">
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Proveedor
               </button>
               <button type="button" class="btn-primary">
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -3344,7 +3335,7 @@
         <div id="page-unidades" class="page">
           <div class="section-toolbar">
             <div>
-              <h2 class="page-title">Unidades de Medida</h2>
+              <h1 class="page-title">Unidades de Medida</h1>
               <p class="page-subtitle">
                 Gestiona las unidades de tu inventario y sus conversiones entre
                 sí.
@@ -3357,7 +3348,7 @@
                 placeholder="Buscar unidad o conversión..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -3373,7 +3364,7 @@
           <!-- Conversor rápido: demuestra que las conversiones son funcionales -->
           <div class="conversor-card">
             <div class="conversor-titulo">
-              <svg class="icon" style="width: 20px; height: 20px">
+              <svg class="icon icon-20">
                 <use href="#icon-swap"></use>
               </svg>
               Conversor Rápido
@@ -3416,7 +3407,7 @@
                 class="btn-primary"
                 data-unit-action="create"
               >
-                <svg class="icon" style="width: 18px; height: 18px">
+                <svg class="icon icon-18">
                   <use href="#icon-plus"></use>
                 </svg>
                 Nueva Unidad
@@ -3434,7 +3425,7 @@
                   <th>ID</th>
                   <th>Nombre de Unidad</th>
                   <th>Abreviación</th>
-                  <th style="text-align: center">Productos con Unidad</th>
+                  <th class="text-center">Productos con Unidad</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -3451,7 +3442,7 @@
                 class="btn-primary"
                 data-conversion-action="create"
               >
-                <svg class="icon" style="width: 18px; height: 18px">
+                <svg class="icon icon-18">
                   <use href="#icon-plus"></use>
                 </svg>
                 Nueva Conversión
@@ -3462,7 +3453,7 @@
                 <tr>
                   <th>Unidad de Origen</th>
                   <th>Unidad de Destino</th>
-                  <th style="text-align: center">Factor</th>
+                  <th class="text-center">Factor</th>
                   <th>Equivalencia</th>
                   <th>Acciones</th>
                 </tr>
@@ -3474,6 +3465,7 @@
 
         <!-- ===================== FACTURAS DE ENTRADA ===================== -->
         <div id="page-facturas-entrada" class="page">
+          <h1 class="page-title">Facturas de Entrada</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-entrada-list">
@@ -3490,7 +3482,7 @@
                 placeholder="Buscar por proveedor o No. de factura..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -3537,9 +3529,9 @@
                   <th id="th-fecha-facturas-entrada" class="th-sortable">
                     Emisión
                   </th>
-                  <th style="text-align: right">Total</th>
+                  <th class="text-right">Total</th>
                   <th>Estado</th>
-                  <th style="text-align: center">Productos</th>
+                  <th class="text-center">Productos</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -3549,11 +3541,7 @@
 
           <!-- Vista: crear / editar factura -->
           <div id="factura-entrada-create" class="config-subview">
-            <form
-              class="form-card"
-              id="factura-entrada-form"
-              style="max-width: 100%"
-            >
+            <form class="form-card max-w-full" id="factura-entrada-form">
               <div>
                 <h3 id="factura-form-title">Nueva Factura de Entrada</h3>
               </div>
@@ -3580,7 +3568,7 @@
                       id="factura-proveedor-add"
                       title="¿No lo encuentras? Registrar proveedor nuevo"
                     >
-                      <svg class="icon" style="width: 20px; height: 20px">
+                      <svg class="icon icon-20">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
@@ -3638,7 +3626,7 @@
                     margin-bottom: 15px;
                   "
                 >
-                  <div class="autocomplete-row" style="flex: 1 1 320px">
+                  <div class="autocomplete-row flex-320">
                     <input
                       type="text"
                       id="factura-buscar-producto"
@@ -3665,7 +3653,7 @@
                 </div>
               </div>
 
-              <div class="factura-form-row" style="align-items: flex-start">
+              <div class="factura-form-row items-start">
                 <div class="dropzone" id="factura-dropzone">
                   <input
                     type="file"
@@ -3683,12 +3671,12 @@
                     </div>
                   </div>
                   <div class="file-chip">
-                    <svg class="icon" style="width: 16px; height: 16px">
+                    <svg class="icon icon-16">
                       <use href="#icon-paperclip"></use>
                     </svg>
                     <span id="factura-archivo-nombre"></span>
                     <button type="button" id="factura-archivo-quitar">
-                      <svg class="icon" style="width: 14px; height: 14px">
+                      <svg class="icon icon-14">
                         <use href="#icon-close"></use>
                       </svg>
                     </button>
@@ -3710,7 +3698,7 @@
                   </div>
                 </div>
 
-                <div class="field" style="flex: 1 1 260px">
+                <div class="field flex-260">
                   <label>Descripción</label>
                   <textarea
                     id="factura-descripcion"
@@ -3849,9 +3837,7 @@
               </div>
             </div>
 
-            <h3 class="cat-view-section-title" style="margin: 4px 0 10px">
-              Productos
-            </h3>
+            <h3 class="cat-view-section-title stack-sm">Productos</h3>
             <div class="line-items">
               <div class="li-row li-head">
                 <div>No</div>
@@ -3864,10 +3850,7 @@
               <div id="factura-ver-productos"></div>
             </div>
 
-            <div
-              class="factura-form-row"
-              style="align-items: flex-start; margin-top: 25px"
-            >
+            <div class="factura-form-row items-start mt-25">
               <div class="factura-file-card">
                 <svg class="icon" style="width: 60px; height: 60px">
                   <use href="#icon-receipt"></use>
@@ -3921,7 +3904,7 @@
                 class="btn-secondary"
                 id="factura-entrada-imprimir"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-receipt"></use>
                 </svg>
                 Imprimir
@@ -3931,7 +3914,7 @@
                 class="btn-secondary"
                 id="factura-entrada-exportar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-export"></use>
                 </svg>
                 Exportar a PDF
@@ -3941,7 +3924,7 @@
                 class="btn-secondary"
                 id="factura-entrada-guardar-equipo"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-export"></use>
                 </svg>
                 Guardar en el equipo
@@ -3951,7 +3934,7 @@
                 class="btn-danger"
                 id="factura-entrada-eliminar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Factura
@@ -3961,7 +3944,7 @@
                 class="btn-primary"
                 id="factura-entrada-editar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -3972,6 +3955,7 @@
 
         <!-- ===================== FACTURAS DE VENTA ===================== -->
         <div id="page-facturas-venta" class="page">
+          <h1 class="page-title">Facturas de Venta</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-venta-list">
@@ -3988,7 +3972,7 @@
                 placeholder="Buscar por cliente o No. de factura..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -4036,7 +4020,7 @@
                   <th id="th-fecha-facturas-venta" class="th-sortable">
                     Emisión
                   </th>
-                  <th style="text-align: right">Total</th>
+                  <th class="text-right">Total</th>
                   <th>Estado</th>
                   <th>Reservada hasta</th>
                   <th>Acciones</th>
@@ -4048,11 +4032,7 @@
 
           <!-- Vista: crear / editar factura -->
           <div id="factura-venta-create" class="config-subview">
-            <form
-              class="form-card"
-              id="factura-venta-form"
-              style="max-width: 100%"
-            >
+            <form class="form-card max-w-full" id="factura-venta-form">
               <div>
                 <h3 id="factura-venta-form-title">Nueva Factura de Venta</h3>
               </div>
@@ -4077,7 +4057,7 @@
                       id="factura-venta-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
                     >
-                      <svg class="icon" style="width: 20px; height: 20px">
+                      <svg class="icon icon-20">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
@@ -4136,7 +4116,7 @@
                     margin-bottom: 15px;
                   "
                 >
-                  <div class="autocomplete-row" style="flex: 1 1 320px">
+                  <div class="autocomplete-row flex-320">
                     <input
                       type="text"
                       id="factura-venta-buscar-producto"
@@ -4163,7 +4143,7 @@
                 </div>
               </div>
 
-              <div class="factura-form-row" style="align-items: flex-start">
+              <div class="factura-form-row items-start">
                 <div class="factura-summary-card">
                   <div class="factura-summary-row">
                     <span>Subtotal</span>
@@ -4179,7 +4159,7 @@
                   </div>
                 </div>
 
-                <div class="field" style="flex: 1 1 260px">
+                <div class="field flex-260">
                   <label>Descripción</label>
                   <textarea
                     id="factura-venta-descripcion"
@@ -4339,9 +4319,7 @@
               </div>
             </div>
 
-            <h3 class="cat-view-section-title" style="margin: 4px 0 10px">
-              Productos
-            </h3>
+            <h3 class="cat-view-section-title stack-sm">Productos</h3>
             <div class="line-items">
               <div class="li-row li-head">
                 <div>No</div>
@@ -4354,10 +4332,7 @@
               <div id="factura-venta-ver-productos"></div>
             </div>
 
-            <div
-              class="factura-form-row"
-              style="align-items: flex-start; margin-top: 25px"
-            >
+            <div class="factura-form-row items-start mt-25">
               <div class="factura-summary-card">
                 <div class="factura-summary-row">
                   <span>Subtotal</span>
@@ -4394,7 +4369,7 @@
                 class="btn-secondary"
                 id="factura-venta-imprimir"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-receipt"></use>
                 </svg>
                 Imprimir
@@ -4404,7 +4379,7 @@
                 class="btn-secondary"
                 id="factura-venta-exportar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-export"></use>
                 </svg>
                 Exportar a PDF
@@ -4414,7 +4389,7 @@
                 class="btn-danger"
                 id="factura-venta-eliminar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Factura
@@ -4424,7 +4399,7 @@
                 class="btn-primary"
                 id="factura-venta-editar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -4435,6 +4410,7 @@
 
         <!-- ===================== FACTURAS DE SERVICIOS ===================== -->
         <div id="page-facturas-servicios" class="page">
+          <h1 class="page-title">Facturas de Servicio</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-servicios-list">
@@ -4451,7 +4427,7 @@
                 placeholder="Buscar por cliente o No. de factura..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -4499,7 +4475,7 @@
                   <th id="th-fecha-facturas-servicios" class="th-sortable">
                     Emisión
                   </th>
-                  <th style="text-align: right">Total</th>
+                  <th class="text-right">Total</th>
                   <th>Estado</th>
                   <th>Reservada hasta</th>
                   <th>Acciones</th>
@@ -4511,11 +4487,7 @@
 
           <!-- Vista: crear / editar factura -->
           <div id="factura-servicios-create" class="config-subview">
-            <form
-              class="form-card"
-              id="factura-servicios-form"
-              style="max-width: 100%"
-            >
+            <form class="form-card max-w-full" id="factura-servicios-form">
               <div>
                 <h3 id="factura-servicio-form-title">
                   Nueva Factura de Servicios
@@ -4542,7 +4514,7 @@
                       id="factura-servicio-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
                     >
-                      <svg class="icon" style="width: 20px; height: 20px">
+                      <svg class="icon icon-20">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
@@ -4601,7 +4573,7 @@
                     margin-bottom: 15px;
                   "
                 >
-                  <div class="autocomplete-row" style="flex: 1 1 320px">
+                  <div class="autocomplete-row flex-320">
                     <input
                       type="text"
                       id="factura-servicio-buscar"
@@ -4628,7 +4600,7 @@
                 </div>
               </div>
 
-              <div class="factura-form-row" style="align-items: flex-start">
+              <div class="factura-form-row items-start">
                 <div class="factura-summary-card">
                   <div class="factura-summary-row">
                     <span>Subtotal</span>
@@ -4644,7 +4616,7 @@
                   </div>
                 </div>
 
-                <div class="field" style="flex: 1 1 260px">
+                <div class="field flex-260">
                   <label>Descripción</label>
                   <textarea
                     id="factura-servicio-descripcion"
@@ -4810,9 +4782,7 @@
               </div>
             </div>
 
-            <h3 class="cat-view-section-title" style="margin: 4px 0 10px">
-              Productos / Insumos
-            </h3>
+            <h3 class="cat-view-section-title stack-sm">Productos / Insumos</h3>
             <div class="line-items">
               <div class="li-row li-head">
                 <div>No</div>
@@ -4825,10 +4795,7 @@
               <div id="factura-servicio-ver-productos"></div>
             </div>
 
-            <div
-              class="factura-form-row"
-              style="align-items: flex-start; margin-top: 25px"
-            >
+            <div class="factura-form-row items-start mt-25">
               <div class="factura-summary-card">
                 <div class="factura-summary-row">
                   <span>Subtotal</span>
@@ -4868,7 +4835,7 @@
                 class="btn-secondary"
                 id="factura-servicio-imprimir"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-receipt"></use>
                 </svg>
                 Imprimir
@@ -4878,7 +4845,7 @@
                 class="btn-secondary"
                 id="factura-servicio-exportar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-export"></use>
                 </svg>
                 Exportar a PDF
@@ -4888,7 +4855,7 @@
                 class="btn-danger"
                 id="factura-servicio-eliminar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Factura
@@ -4898,7 +4865,7 @@
                 class="btn-primary"
                 id="factura-servicio-editar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -4909,6 +4876,7 @@
 
         <!-- ===================== FACTURAS DE INSUMOS ===================== -->
         <div id="page-facturas-insumos" class="page">
+          <h1 class="page-title">Facturas de Insumos</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-insumos-list">
@@ -4925,7 +4893,7 @@
                 placeholder="Buscar por cliente o No. de factura..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -4973,7 +4941,7 @@
                     Emisión
                   </th>
                   <th>Factura de Servicio</th>
-                  <th style="text-align: right">Costo Total</th>
+                  <th class="text-right">Costo Total</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>
@@ -4984,11 +4952,7 @@
 
           <!-- Vista: crear / editar factura -->
           <div id="factura-insumos-create" class="config-subview">
-            <form
-              class="form-card"
-              id="factura-insumos-form"
-              style="max-width: 100%"
-            >
+            <form class="form-card max-w-full" id="factura-insumos-form">
               <div>
                 <h3 id="factura-insumo-form-title">
                   Nueva Factura de Gasto de Insumos
@@ -5015,7 +4979,7 @@
                       id="factura-insumo-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
                     >
-                      <svg class="icon" style="width: 20px; height: 20px">
+                      <svg class="icon icon-20">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
@@ -5068,7 +5032,7 @@
                     margin-bottom: 15px;
                   "
                 >
-                  <div class="autocomplete-row" style="flex: 1 1 320px">
+                  <div class="autocomplete-row flex-320">
                     <input
                       type="text"
                       id="factura-insumo-buscar"
@@ -5095,7 +5059,7 @@
                 </div>
               </div>
 
-              <div class="factura-form-row" style="align-items: flex-start">
+              <div class="factura-form-row items-start">
                 <div class="factura-summary-card">
                   <div class="factura-summary-row">
                     <span>Subtotal</span>
@@ -5111,7 +5075,7 @@
                   </div>
                 </div>
 
-                <div class="field" style="flex: 1 1 260px">
+                <div class="field flex-260">
                   <label>Descripción</label>
                   <textarea
                     id="factura-insumo-descripcion"
@@ -5251,9 +5215,7 @@
               </div>
             </div>
 
-            <h3 class="cat-view-section-title" style="margin: 4px 0 10px">
-              Productos / Insumos
-            </h3>
+            <h3 class="cat-view-section-title stack-sm">Productos / Insumos</h3>
             <div class="line-items">
               <div class="li-row li-head">
                 <div>No</div>
@@ -5266,10 +5228,7 @@
               <div id="factura-insumo-ver-productos"></div>
             </div>
 
-            <div
-              class="factura-form-row"
-              style="align-items: flex-start; margin-top: 25px"
-            >
+            <div class="factura-form-row items-start mt-25">
               <div class="factura-summary-card">
                 <div class="factura-summary-row">
                   <span>Subtotal</span>
@@ -5306,7 +5265,7 @@
                 class="btn-secondary"
                 id="factura-insumo-imprimir"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-receipt"></use>
                 </svg>
                 Imprimir
@@ -5316,7 +5275,7 @@
                 class="btn-secondary"
                 id="factura-insumo-exportar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-export"></use>
                 </svg>
                 Exportar a PDF
@@ -5326,7 +5285,7 @@
                 class="btn-danger"
                 id="factura-insumo-eliminar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Factura
@@ -5336,7 +5295,7 @@
                 class="btn-primary"
                 id="factura-insumo-editar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -5347,6 +5306,7 @@
 
         <!-- ===================== FACTURAS DE GARANTÍA ===================== -->
         <div id="page-facturas-garantia" class="page">
+          <h1 class="page-title">Facturas de Garantía</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-garantia-list">
@@ -5363,7 +5323,7 @@
                 placeholder="Buscar por cliente o No. de factura..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -5411,7 +5371,7 @@
                     Emisión
                   </th>
                   <th>Factura Original</th>
-                  <th style="text-align: right">Costo Total</th>
+                  <th class="text-right">Costo Total</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>
@@ -5422,11 +5382,7 @@
 
           <!-- Vista: crear / editar factura -->
           <div id="factura-garantia-create" class="config-subview">
-            <form
-              class="form-card"
-              id="factura-garantia-form"
-              style="max-width: 100%"
-            >
+            <form class="form-card max-w-full" id="factura-garantia-form">
               <div>
                 <h3 id="factura-garantia-form-title">
                   Nueva Factura de Gasto de Garantía
@@ -5453,7 +5409,7 @@
                       id="factura-garantia-cliente-add"
                       title="¿No lo encuentras? Registrar cliente nuevo"
                     >
-                      <svg class="icon" style="width: 20px; height: 20px">
+                      <svg class="icon icon-20">
                         <use href="#icon-plus"></use>
                       </svg>
                     </button>
@@ -5506,7 +5462,7 @@
                     margin-bottom: 15px;
                   "
                 >
-                  <div class="autocomplete-row" style="flex: 1 1 320px">
+                  <div class="autocomplete-row flex-320">
                     <input
                       type="text"
                       id="factura-garantia-buscar"
@@ -5533,7 +5489,7 @@
                 </div>
               </div>
 
-              <div class="factura-form-row" style="align-items: flex-start">
+              <div class="factura-form-row items-start">
                 <div class="factura-summary-card">
                   <div class="factura-summary-row">
                     <span>Subtotal</span>
@@ -5549,7 +5505,7 @@
                   </div>
                 </div>
 
-                <div class="field" style="flex: 1 1 260px">
+                <div class="field flex-260">
                   <label>Descripción</label>
                   <textarea
                     id="factura-garantia-descripcion"
@@ -5695,9 +5651,7 @@
               </div>
             </div>
 
-            <h3 class="cat-view-section-title" style="margin: 4px 0 10px">
-              Productos / Insumos
-            </h3>
+            <h3 class="cat-view-section-title stack-sm">Productos / Insumos</h3>
             <div class="line-items">
               <div class="li-row li-head">
                 <div>No</div>
@@ -5710,10 +5664,7 @@
               <div id="factura-garantia-ver-productos"></div>
             </div>
 
-            <div
-              class="factura-form-row"
-              style="align-items: flex-start; margin-top: 25px"
-            >
+            <div class="factura-form-row items-start mt-25">
               <div class="factura-summary-card">
                 <div class="factura-summary-row">
                   <span>Subtotal</span>
@@ -5753,7 +5704,7 @@
                 class="btn-secondary"
                 id="factura-garantia-imprimir"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-receipt"></use>
                 </svg>
                 Imprimir
@@ -5763,7 +5714,7 @@
                 class="btn-secondary"
                 id="factura-garantia-exportar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-export"></use>
                 </svg>
                 Exportar a PDF
@@ -5773,7 +5724,7 @@
                 class="btn-danger"
                 id="factura-garantia-eliminar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Factura
@@ -5783,7 +5734,7 @@
                 class="btn-primary"
                 id="factura-garantia-editar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
                 Editar
@@ -5794,6 +5745,7 @@
 
         <!-- ===================== FACTURAS DE PÉRDIDAS ===================== -->
         <div id="page-facturas-perdidas" class="page">
+          <h1 class="page-title">Facturas de Pérdidas</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-factura-perdidas-list">
@@ -5810,7 +5762,7 @@
                 placeholder="Buscar por producto o No. de factura..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -5846,7 +5798,7 @@
                   <th>No. Factura</th>
                   <th>Producto</th>
                   <th>Cantidad</th>
-                  <th style="text-align: right">Costo Total</th>
+                  <th class="text-right">Costo Total</th>
                   <th id="th-fecha-facturas-perdidas" class="th-sortable">
                     Fecha
                   </th>
@@ -5859,11 +5811,7 @@
 
           <!-- Vista: crear / editar factura -->
           <div id="factura-perdidas-create" class="config-subview">
-            <form
-              class="form-card"
-              id="factura-perdidas-form"
-              style="max-width: 100%"
-            >
+            <form class="form-card max-w-full" id="factura-perdidas-form">
               <div>
                 <h3 id="factura-perdida-form-title">
                   Nueva Factura de Pérdidas
@@ -6064,7 +6012,7 @@
                 class="btn-secondary"
                 id="factura-perdida-imprimir"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-receipt"></use>
                 </svg>
                 Imprimir
@@ -6074,7 +6022,7 @@
                 class="btn-secondary"
                 id="factura-perdida-exportar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-export"></use>
                 </svg>
                 Exportar a PDF
@@ -6084,7 +6032,7 @@
                 class="btn-danger"
                 id="factura-perdida-eliminar"
               >
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-trash"></use>
                 </svg>
                 Eliminar Factura
@@ -6095,6 +6043,7 @@
 
         <!-- ===================== FACTURAS - VISTA GENERAL ===================== -->
         <div id="page-facturas-general" class="page">
+          <h1 class="page-title">Facturas</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active">Todas las Facturas</button>
@@ -6106,7 +6055,7 @@
                 placeholder="Buscar por número, cliente o proveedor..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -6116,10 +6065,7 @@
           <div class="historial-toolbar">
             <div class="field field-select-item">
               <label
-                ><svg
-                  class="icon"
-                  style="width: 16px; height: 16px; vertical-align: -3px"
-                >
+                ><svg class="icon icon-16 icon-inline">
                   <use href="#icon-filter"></use>
                 </svg>
                 Tipo</label
@@ -6136,10 +6082,7 @@
             </div>
             <div class="field field-select-item">
               <label
-                ><svg
-                  class="icon"
-                  style="width: 16px; height: 16px; vertical-align: -3px"
-                >
+                ><svg class="icon icon-16 icon-inline">
                   <use href="#icon-filter"></use>
                 </svg>
                 Estado</label
@@ -6181,7 +6124,7 @@
                   <th id="th-fecha-facturas-general" class="th-sortable">
                     Fecha
                   </th>
-                  <th style="text-align: right">Total</th>
+                  <th class="text-right">Total</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>
@@ -6193,6 +6136,7 @@
 
         <!-- ===================== USUARIOS ===================== -->
         <div id="page-usuarios" class="page">
+          <h1 class="page-title">Usuarios</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button class="tab active" id="tab-usuario-list" type="button">
@@ -6209,7 +6153,7 @@
                 placeholder="Buscar usuario..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
@@ -6329,7 +6273,7 @@
                       data-action="togglePassword"
                       data-target="usuario-password"
                     >
-                      <svg class="icon" style="width: 18px; height: 18px">
+                      <svg class="icon icon-18">
                         <use href="#icon-eye"></use>
                       </svg>
                     </button>
@@ -6354,7 +6298,7 @@
                       data-action="togglePassword"
                       data-target="usuario-password-confirm"
                     >
-                      <svg class="icon" style="width: 18px; height: 18px">
+                      <svg class="icon icon-18">
                         <use href="#icon-eye"></use>
                       </svg>
                     </button>
@@ -6372,7 +6316,7 @@
                   Cancelar
                 </button>
                 <button type="submit" class="btn-primary">
-                  <svg class="icon" style="width: 16px; height: 16px">
+                  <svg class="icon icon-16">
                     <use href="#icon-check"></use>
                   </svg>
                   Guardar Cambios
@@ -6384,6 +6328,7 @@
 
         <!-- ===================== CONFIGURACIÓN ===================== -->
         <div id="page-configuracion" class="page">
+          <h1 class="page-title">Configuración</h1>
           <div class="config-tabs" aria-label="Secciones de configuración">
             <button
               type="button"
@@ -6510,7 +6455,7 @@
                     id="config-logo-quitar"
                     hidden
                   >
-                    <svg class="icon" style="width: 14px; height: 14px">
+                    <svg class="icon icon-14">
                       <use href="#icon-trash"></use>
                     </svg>
                     Quitar Logo
@@ -6735,7 +6680,7 @@
         <!-- ===================== NOTIFICACIONES ===================== -->
         <div id="page-actividad" class="page">
           <div class="section-toolbar">
-            <h2 class="card-title">Registro de Actividad</h2>
+            <h1 class="page-title">Registro de Actividad</h1>
             <div class="search-bar">
               <input
                 type="text"
@@ -6745,7 +6690,7 @@
               />
             </div>
           </div>
-          <div class="historial-toolbar" style="align-items: center">
+          <div class="historial-toolbar items-center">
             <label class="date-filter">
               Desde
               <input type="date" id="actividad-desde" />
@@ -6786,7 +6731,7 @@
         </div>
         <div id="page-borradores" class="page">
           <div class="section-toolbar">
-            <h2 class="card-title">Borradores</h2>
+            <h1 class="page-title">Borradores</h1>
           </div>
           <table class="list-table">
             <thead>
@@ -6801,6 +6746,7 @@
           </table>
         </div>
         <div id="page-notificaciones" class="page">
+          <h1 class="page-title">Notificaciones</h1>
           <div class="section-toolbar">
             <div class="view-tabs">
               <button type="button" class="tab active" id="tab-notif-todas">
@@ -6823,13 +6769,13 @@
                 placeholder="Buscar notificación..."
               />
               <button type="button" aria-label="Buscar">
-                <svg class="icon" style="color: #fff">
+                <svg class="icon text-on-dark">
                   <use href="#icon-search"></use>
                 </svg>
               </button>
             </div>
           </div>
-          <div class="historial-toolbar" style="align-items: center">
+          <div class="historial-toolbar items-center">
             <label class="date-filter">
               <svg class="icon"><use href="#icon-calendar"></use></svg>
               <input
@@ -6851,7 +6797,7 @@
               style="margin-left: auto"
               id="notif-marcar-todas"
             >
-              <svg class="icon" style="width: 16px; height: 16px">
+              <svg class="icon icon-16">
                 <use href="#icon-check"></use>
               </svg>
               Marcar todas como leídas
@@ -6861,7 +6807,7 @@
               class="btn-secondary"
               id="notif-eliminar-todas"
             >
-              <svg class="icon" style="width: 16px; height: 16px">
+              <svg class="icon icon-16">
                 <use href="#icon-trash"></use>
               </svg>
               Eliminar todas
@@ -6872,6 +6818,7 @@
 
         <!-- ===================== PERFIL ===================== -->
         <div id="page-perfil" class="page">
+          <h1 class="page-title">Mi Perfil</h1>
           <div
             class="feedback-inline"
             id="reserved-data-warning"
@@ -6893,7 +6840,7 @@
             >
               <h3 style="font-size: 28px">Información de Perfil</h3>
               <button type="submit" class="btn-primary">
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-check"></use>
                 </svg>
                 Guardar Cambios
@@ -6979,7 +6926,7 @@
                   data-action="togglePassword"
                   data-target="perfil-pass-actual"
                 >
-                  <svg class="icon" style="width: 18px; height: 18px">
+                  <svg class="icon icon-18">
                     <use href="#icon-eye"></use>
                   </svg>
                 </button>
@@ -7000,7 +6947,7 @@
                   data-action="togglePassword"
                   data-target="perfil-pass-nueva"
                 >
-                  <svg class="icon" style="width: 18px; height: 18px">
+                  <svg class="icon icon-18">
                     <use href="#icon-eye"></use>
                   </svg>
                 </button>
@@ -7023,7 +6970,7 @@
                   data-action="togglePassword"
                   data-target="perfil-pass-confirmar"
                 >
-                  <svg class="icon" style="width: 18px; height: 18px">
+                  <svg class="icon icon-18">
                     <use href="#icon-eye"></use>
                   </svg>
                 </button>
@@ -7031,7 +6978,7 @@
             </div>
             <div class="form-actions">
               <button type="submit" class="btn-primary">
-                <svg class="icon" style="width: 16px; height: 16px">
+                <svg class="icon icon-16">
                   <use href="#icon-check"></use>
                 </svg>
                 Cambiar Contraseña
@@ -7221,7 +7168,7 @@
               class="btn-primary"
               data-profile-action="edit"
             >
-              <svg class="icon" style="width: 16px; height: 16px">
+              <svg class="icon icon-16">
                 <use href="#icon-edit"></use>
               </svg>
               Editar

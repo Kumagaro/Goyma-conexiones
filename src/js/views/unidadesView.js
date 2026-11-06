@@ -19,7 +19,7 @@ import {
   updateConversionFactor,
   updateUnit,
 } from "../services/unitsService.js";
-import { el, messageRow, setOptions } from "../utils/dom.js";
+import { el, messageRow, setOptions, emptyState } from "../utils/dom.js";
 
 let unitDraft = null;
 let conversionDraft = null;
@@ -299,7 +299,11 @@ function renderUnitList(items) {
   if (!body) return;
 
   if (!items.length) {
-    messageRow(body, "Aún no hay unidades.", 5);
+    emptyState(body, {
+      empty: "Aún no hay unidades.",
+      filtered: Boolean(document.getElementById("unidad-search")?.value.trim()),
+      action: { label: "Crear unidad", onClick: () => openUnitModal() },
+    });
     return;
   }
 
@@ -423,11 +427,14 @@ async function handleDeleteUnit(unitId) {
   const productCount = Number(unit.productCount ?? 0);
   const conversionCount = Number(unit.conversionCount ?? 0);
 
-  const confirmed = await confirmDialog(
-    productCount > 0 || conversionCount > 0
-      ? `La unidad "${unit.name}" tiene ${productCount} producto(s) asignados y ${conversionCount} conversión(es). Si la eliminas, se quitarán esos vínculos. ¿Deseas continuar?`
-      : `¿Eliminar la unidad "${unit.name}"?`,
-  );
+  const confirmed = await confirmDialog({
+    title: "Eliminar unidad",
+    message:
+      productCount > 0 || conversionCount > 0
+        ? `La unidad "${unit.name}" tiene ${productCount} producto(s) asignados y ${conversionCount} conversión(es). Si la eliminas, se quitarán esos vínculos. ¿Deseas continuar?`
+        : `¿Eliminar la unidad "${unit.name}"?`,
+    confirmText: "Eliminar",
+  });
 
   if (!confirmed) return;
 
@@ -475,7 +482,14 @@ function renderConversionList(items) {
   if (!body) return;
 
   if (!items.length) {
-    messageRow(body, "Aún no hay conversiones.", 5);
+    emptyState(body, {
+      empty: "Aún no hay conversiones.",
+      filtered: Boolean(document.getElementById("unidad-search")?.value.trim()),
+      action: {
+        label: "Crear conversión",
+        onClick: () => openConversionModal(),
+      },
+    });
     return;
   }
 
@@ -681,9 +695,11 @@ async function handleDeleteConversion(conversionId) {
   const conversion = conversions.find((item) => item.id === conversionId);
   if (!conversion) return;
 
-  const confirmed = await confirmDialog(
-    `¿Eliminar la conversión entre "${conversion.fromUnit.name}" y "${conversion.toUnit.name}"? Esta acción no se puede deshacer.`,
-  );
+  const confirmed = await confirmDialog({
+    title: "Eliminar conversión",
+    message: `¿Eliminar la conversión entre "${conversion.fromUnit.name}" y "${conversion.toUnit.name}"? Esta acción no se puede deshacer.`,
+    confirmText: "Eliminar",
+  });
 
   if (!confirmed) return;
 

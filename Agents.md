@@ -44,7 +44,7 @@ Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en 
 | Origen de datos en frontend | Siempre desde SQLite vía comando Tauri; nunca hardcodeado ni mock en código de producción |
 | Formateo | `Prettier` para HTML/CSS/JS; `rustfmt` + `clippy` para Rust — el código debe quedar formateado y sin warnings antes de darse por terminado |
 | Complejidad | Preferir siempre la solución más simple que cumpla el requisito; no introducir librerías o patrones nuevos sin justificarlo en `plan.md` |
-| Estilos visuales existentes | No modificar sin necesidad directa de la feature en curso (ver `auth.css`, `dashboard.css`) |
+| Estilos visuales | Toda interfaz sigue `specs/05-sistema-de-diseno/ui-spec.md`: colores, tamaños y radios salen de las variables de `design-system.css`, y los componentes nuevos van en `components.css`. No modificar estilos existentes sin necesidad directa de la feature en curso |
 | Autorización de comandos protegidos | Toda mutación de `users` o `sessions` vive en una función que exige `&Actor`/`&AdminActor` en su firma; esos tipos solo se obtienen vía `require_session`/`require_admin` (constructores privados al módulo), nunca fabricados por un comando. Todo comando nuevo que necesite sesión o rol Administrador se añade a la matriz de tests de autorización de la feature correspondiente — ningún comando protegido queda sin su fila |
 
 ---

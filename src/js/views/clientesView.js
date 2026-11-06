@@ -18,7 +18,7 @@ import {
   updateClient,
 } from "../services/clientsService.js";
 import { formatDate, formatId, formatMoney } from "../utils/formatters.js";
-import { el, messageRow } from "../utils/dom.js";
+import { el, messageRow, emptyState } from "../utils/dom.js";
 import { debounce } from "../utils/requestGuard.js";
 
 let clientDraft = null;
@@ -198,7 +198,20 @@ function renderClientList(items) {
   if (!body) return;
 
   if (!items.length) {
-    messageRow(body, "Aún no hay clientes.", 5);
+    emptyState(body, {
+      empty: "Aún no hay clientes.",
+      filtered: Boolean(
+        document.getElementById("cliente-search")?.value.trim(),
+      ),
+      action: {
+        label: "Crear cliente",
+        onClick: () =>
+          showClienteTab(
+            "create",
+            document.getElementById("tab-cliente-create"),
+          ),
+      },
+    });
     return;
   }
 
@@ -481,4 +494,7 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     void initClientesView();
   });
+} else {
+  // Los módulos corren con el documento ya analizado: nunca en "loading".
+  void initClientesView();
 }

@@ -1,3 +1,4 @@
+import { installFormValidation } from "../utils/formValidation.js";
 import {
   getDashboardKpis,
   getDashboardSummary,
@@ -72,6 +73,7 @@ export function initDashboardView() {
 }
 
 async function initializeDashboardView() {
+  installFormValidation(document);
   bindOutOfStockActions();
   bindDashboardControls();
   window.addEventListener("page:change", (event) => {
@@ -639,7 +641,7 @@ function createChart(canvas) {
   }
   Chart.defaults.font.family = '"Inter-Regular", Helvetica, Arial, sans-serif';
   Chart.defaults.font.size = 12;
-  Chart.defaults.color = "#020f1e80";
+  Chart.defaults.color = "#56606e";
 
   // Línea/área: cada serie con su color y un relleno suave del mismo color.
   const series = (label, color, fill, order, extra = {}) => ({

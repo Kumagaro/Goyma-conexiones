@@ -1,0 +1,102 @@
+/* Sistema de diseño: fuentes y variables (specs/05-sistema-de-diseno/ui-spec.md).
+   Se carga antes que cualquier otra hoja. */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../assets/fonts/inter-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Poppins";
+  src: url("../assets/fonts/poppins-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Poppins";
+  src: url("../assets/fonts/poppins-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Poppins";
+  src: url("../assets/fonts/poppins-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-body: "Inter", "Segoe UI", Arial, sans-serif;
+  --font-heading: "Poppins", "Segoe UI", Arial, sans-serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 28px;
+  --text-4xl: 32px;
+  --text-5xl: 40px;
+
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-soft: #2563eb14;
+  --color-primary-tint: #2563eb26;
+  --color-primary-ring: #2563eb4d;
+  --color-primary-border: #2563eb80;
+
+  --color-ink: #020f1e;
+  --color-ink-soft: #020f1e0d;
+  --color-text-secondary: #374151;
+  --color-text-muted: #56606e;
+  --color-line: #020f1e24;
+  --color-line-strong: #020f1e4d;
+
+  --color-bg: #f7f7f7;
+  --color-white: #ffffff;
+  --color-on-dark-muted: #ffffffcc;
+  --color-on-dark-line: #ffffff33;
+
+  --color-danger: #dc2626;
+  --color-danger-soft: #dc262614;
+  --color-danger-border: #dc262680;
+
+  --color-success: #16a34a;
+  --color-success-text: #15803d;
+  --color-success-soft: #16a34a14;
+
+  --color-warning: #f48430;
+  --color-warning-text: #b45309;
+  --color-warning-soft: #f4843020;
+
+  --color-accent-violet: #ac79d3;
+  --color-accent-pink: #e11d74;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+}

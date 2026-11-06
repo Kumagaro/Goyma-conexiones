@@ -328,10 +328,18 @@ describe("tasas de cambio", () => {
     const input = document.getElementById("config-tasa-CUP");
     input.value = "670";
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    await vi.waitFor(() => expect(calls("save_draft")).toHaveLength(1), {
-      timeout: 3000,
-    });
-    const [, saved] = calls("save_draft")[0];
+    await vi.waitFor(
+      () =>
+        expect(
+          calls("save_draft").some(([, args]) => args.formKey === "rates"),
+        ).toBe(true),
+      {
+        timeout: 3000,
+      },
+    );
+    const [, saved] = calls("save_draft").find(
+      ([, args]) => args.formKey === "rates",
+    );
     expect(saved.formKey).toBe("rates");
     expect(JSON.parse(saved.payload).CUP).toBe("670");
 

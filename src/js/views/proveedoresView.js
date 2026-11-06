@@ -19,7 +19,7 @@ import {
 } from "../services/suppliersService.js";
 import { formatDate, formatId, formatMoney } from "../utils/formatters.js";
 import { ENTRY_STATUS_LABELS } from "../utils/invoiceLabels.js";
-import { el, messageRow, setOptions } from "../utils/dom.js";
+import { el, messageRow, setOptions, emptyState } from "../utils/dom.js";
 import { debounce } from "../utils/requestGuard.js";
 
 let supplierDraft = null;
@@ -268,7 +268,20 @@ function renderSupplierList(items) {
   if (!body) return;
 
   if (!items.length) {
-    messageRow(body, "Aún no hay proveedores.", 5);
+    emptyState(body, {
+      empty: "Aún no hay proveedores.",
+      filtered: Boolean(
+        document.getElementById("proveedor-search")?.value.trim(),
+      ),
+      action: {
+        label: "Crear proveedor",
+        onClick: () =>
+          showProveedorTab(
+            "create",
+            document.getElementById("tab-proveedor-create"),
+          ),
+      },
+    });
     return;
   }
 
@@ -686,4 +699,7 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     void initProveedoresView();
   });
+} else {
+  // Los módulos corren con el documento ya analizado: nunca en "loading".
+  void initProveedoresView();
 }

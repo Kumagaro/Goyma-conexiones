@@ -8,10 +8,10 @@
   --blue-dark: #16307a;
   --orange: #f48430;
   --text: #020f1e;
-  --muted: rgba(2, 15, 30, 0.5);
+  --muted: var(--color-text-muted);
   --line: #020f1e;
   --white: #ffffff;
-  --font: Inter, "Segoe UI", Arial, sans-serif;
+  --font: var(--font-body);
 }
 
 html,
@@ -293,11 +293,10 @@ body {
 }
 
 .primary-button {
-  width: fit-content;
-  min-width: 250px;
+  width: 100%;
   padding-block: clamp(8px, 1.6vh, 18px);
   padding-inline: 34px;
-  background: var(--bg-dark);
+  background: var(--blue);
   color: var(--white);
   font-size: clamp(12px, 1.8vh, 20px);
   border: 0;
@@ -306,7 +305,7 @@ body {
 }
 
 .primary-button:hover {
-  background: var(--blue);
+  background: var(--color-primary-hover);
 }
 
 .step-actions {
@@ -317,12 +316,9 @@ body {
 .feedback {
   min-height: clamp(0px, 1.6vh, 24px);
   font-size: 14px;
-  font-weight: 500;
-  color: var(--orange);
-  width: 100%;
-  background-color: #2563eb0f;
-  padding: 20px;
-  border-left: 4px solid;
+  font-weight: 500; 
+  width: 100%; 
+  padding: 20px; 
   border-radius: 10px;
 }
 
@@ -367,7 +363,7 @@ body {
 /* Laptops (1025–1366px aprox.): el panel de marca ya es visible pero
    angosto (42vw puede bajar de ~460px); se reduce el ancho inline
    para que el logo y el texto no se aprieten */
-@media (min-width: 1025px) and (max-width: 1366px) {
+@media (min-width: 1024px) and (max-width: 1366px) {
   .auth-side {
     padding-inline: 36px;
   }
@@ -378,7 +374,7 @@ body {
 }
 
 /* Tablet y móvil: se oculta el panel de marca, solo queda el formulario */
-@media (max-width: 1024px) {
+@media (max-width: 1023px) {
   .auth-screen {
     flex-direction: column;
   }

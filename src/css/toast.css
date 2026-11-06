@@ -20,13 +20,13 @@
   align-items: flex-start;
   gap: 12px;
   padding: 14px 14px 14px 16px;
-  border: 1px solid #020f1e1f;
+  border: 1px solid var(--color-line);
   border-left: 4px solid var(--tone);
-  border-radius: 10px;
-  background-color: #fff;
-  box-shadow: 0 12px 32px #020f1e29;
-  color: #020f1e;
-  font-family: "Poppins", Helvetica, sans-serif;
+  border-radius: var(--radius-md);
+  background-color: var(--color-white);
+  box-shadow: 0 12px 32px var(--color-line);
+  color: var(--color-ink);
+  font-family: var(--font-heading);
   pointer-events: auto;
   animation: toast-enter 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
   transition:
@@ -81,15 +81,15 @@
 
 .toast-title {
   margin: 0 0 2px;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
 .toast-message {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.4;
-  color: #020f1ebf;
+  color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
 
@@ -97,11 +97,11 @@
   margin-top: 8px;
   padding: 4px 10px;
   border: 1px solid var(--tone);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--tone);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -119,13 +119,13 @@
   border: none;
   border-radius: 50%;
   background: none;
-  color: #020f1e80;
+  color: var(--color-text-muted);
   cursor: pointer;
 }
 
 .toast-close:hover {
-  background-color: #020f1e0d;
-  color: #020f1e;
+  background-color: var(--color-ink-soft);
+  color: var(--color-ink);
 }
 
 .toast-close-icon {
@@ -182,54 +182,54 @@
 /* Error junto a un campo (spec-04 TO-01): se conserva bajo el campo. */
 .field-error {
   margin: 4px 0 0;
-  font-size: 13px;
-  color: #ef4444;
+  font-size: var(--text-sm);
+  color: var(--color-danger);
 }
 
 /* ---------- Pestaña de notificaciones (spec-04 NT-01) ---------- */
 /* Prioridad con la misma paleta de los toasts; dashboard.css no se toca. */
 .notif-row-critico .notif-icon,
 .notif-row-critico.no-leida .notif-icon {
-  background-color: #ef44441a;
-  color: #ef4444;
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 .notif-row-advertencia .notif-icon,
 .notif-row-advertencia.no-leida .notif-icon {
-  background-color: #f484301a;
-  color: #f48430;
+  background-color: var(--color-warning-soft);
+  color: var(--color-warning-text);
 }
 
 .notif-row-informativo .notif-icon,
 .notif-row-informativo.no-leida .notif-icon {
-  background-color: #2563eb1a;
-  color: #2563eb;
+  background-color: var(--color-primary-tint);
+  color: var(--color-primary);
 }
 
 .notif-prioridad {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .notif-prioridad-critico {
-  background-color: #ef44441a;
+  background-color: var(--color-danger-soft);
   color: #b91c1c;
 }
 
 .notif-prioridad-advertencia {
-  background-color: #f484301a;
+  background-color: var(--color-warning-soft);
   color: #b45309;
 }
 
 .notif-prioridad-informativo {
-  background-color: #2563eb1a;
-  color: #1d4ed8;
+  background-color: var(--color-primary-tint);
+  color: var(--color-primary-hover);
 }
 
 .notif-row:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
@@ -241,16 +241,16 @@
   width: 36px;
   height: 36px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: #020f1e80;
+  color: var(--color-text-muted);
   cursor: pointer;
 }
 
 .notif-delete:hover,
 .notif-delete:focus-visible {
-  background-color: #ef44441a;
-  color: #ef4444;
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 .notif-delete .icon {
@@ -260,9 +260,9 @@
 
 /* Dashboard: notas bajo las cifras, rango de fechas y reservas (spec-04) */
 .dash-note {
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 16px;
-  color: #020f1e80;
+  color: var(--color-text-muted);
 }
 
 .expense-value .dash-note,

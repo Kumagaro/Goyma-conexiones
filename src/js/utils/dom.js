@@ -25,6 +25,33 @@ export function messageRow(body, text, colspan) {
   );
 }
 
+/**
+ * Lista vacía (ui-spec §5): con filtros dice que no hay coincidencias; sin
+ * ellos, qué falta y la acción para crearlo.
+ */
+export function emptyState(body, { empty, filtered = false, action = null }) {
+  const colspan = body.closest("table")?.rows[0]?.cells.length ?? 1;
+  const cell = el(
+    "td",
+    { colspan, class: "empty-row" },
+    el(
+      "span",
+      { class: "empty-text" },
+      filtered ? "No hay resultados con estos filtros." : empty,
+    ),
+  );
+  if (action && !filtered) {
+    const button = el(
+      "button",
+      { type: "button", class: "btn-secondary empty-action" },
+      action.label,
+    );
+    button.addEventListener("click", action.onClick);
+    cell.append(button);
+  }
+  body.replaceChildren(el("tr", {}, cell));
+}
+
 /** Sustituye las opciones de un select; cada opción es `[valor, texto]`. */
 export function setOptions(select, options) {
   select.replaceChildren(

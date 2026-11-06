@@ -1,0 +1,275 @@
+/* Componentes y utilidades del sistema de diseño. Se carga después de
+   dashboard.css (specs/05-sistema-de-diseno/ui-spec.md). */
+
+body {
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+h4,
+.page-title,
+.card-title,
+.config-block-title {
+  font-family: var(--font-heading);
+}
+
+/* Foco visible en todo lo interactivo */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+#sidebar :focus-visible,
+.panel-top .notificaciones:focus-visible,
+.panel-top .usuario:focus-visible {
+  outline-color: var(--color-white);
+}
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
+  outline: none;
+}
+
+.search-bar:focus-within {
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
+}
+
+.date-filter:focus-within {
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
+}
+
+/* Botones: misma escala */
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  justify-content: center;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  box-shadow: none;
+}
+
+.action-link {
+  min-height: 32px;
+}
+
+button.notificaciones {
+  border: none;
+  color: inherit;
+  font: inherit;
+}
+
+/* Título de página */
+.page-title {
+  margin: 0 0 var(--space-4);
+  color: var(--color-ink);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.section-toolbar .page-title {
+  margin-bottom: 0;
+}
+
+#dashboard-greeting {
+  margin: 0;
+}
+
+/* Las tablas anchas se desplazan dentro de su vista, nunca se cortan */
+.config-subview[id$="-list"],
+.table-scroll {
+  overflow-x: auto;
+}
+
+.list-table td:last-child {
+  white-space: nowrap;
+}
+
+#producto-search-bar select {
+  flex: 1 1 190px;
+  width: auto;
+}
+
+/* Productos: la tabla más ancha; las acciones nunca quedan fuera de la vista */
+#producto-list .list-table thead th {
+  white-space: normal;
+}
+
+#producto-list .list-table td:nth-child(2) {
+  min-width: 150px;
+}
+
+#producto-list .list-table td:last-child {
+  width: 170px;
+  max-width: 170px;
+  white-space: normal;
+}
+
+#producto-list .action-link {
+  margin-bottom: 4px;
+}
+
+/* Mejor vendidos: una sola columna, con el margen a la vista */
+.products-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.product-item {
+  min-width: 0;
+}
+
+.product-item .best-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Selectores sueltos fuera de un .field */
+#page-actividad select,
+#config-csv-tipo {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--text-base);
+}
+
+#config-respaldo .config-block-title:not(:first-child) {
+  margin-top: var(--space-7);
+}
+
+#config-respaldo .list-table {
+  margin-bottom: var(--space-3);
+}
+
+#config-csv-omitidas {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Buscadores de las facturas: como cualquier campo */
+.autocomplete-row input[role="combobox"] {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--text-base);
+}
+
+.autocomplete-row input[role="combobox"]:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-tint);
+}
+
+#actividad-orden-boton {
+  min-height: 0;
+  padding: 0;
+  border: none;
+  color: var(--color-ink);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+/* Estado vacío con acción */
+.empty-row .empty-action {
+  margin-top: var(--space-2);
+}
+
+.empty-row .empty-text {
+  display: block;
+}
+
+/* Utilidades */
+.icon-14 {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.icon-16 {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.icon-18 {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+.icon-20 {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+.icon-inline {
+  vertical-align: -3px;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-on-dark {
+  color: var(--color-white);
+}
+
+.max-w-full {
+  max-width: 100%;
+}
+
+.flex-260 {
+  flex: 1 1 260px;
+}
+
+.flex-320 {
+  flex: 1 1 320px;
+}
+
+.items-start {
+  align-items: flex-start;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.mt-25 {
+  margin-top: 25px;
+}
+
+.stack-sm {
+  margin: 4px 0 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

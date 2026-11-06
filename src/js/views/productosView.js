@@ -1,3 +1,4 @@
+import { emptyState } from "../utils/dom.js";
 import {
   attachDraft,
   registerDraftOpener,
@@ -328,7 +329,25 @@ function renderProductList(items) {
   if (totalHeader) totalHeader.hidden = false;
   body.replaceChildren();
   if (!items.length) {
-    renderLoadingRow(body, 9, "Aún no hay productos.");
+    const filters = readProductFilters();
+    emptyState(body, {
+      empty: "Aún no hay productos.",
+      filtered: Boolean(
+        filters.search ||
+        filters.categoryId ||
+        filters.withoutCategory ||
+        filters.stock !== "all" ||
+        filters.expiry !== "all",
+      ),
+      action: {
+        label: "Crear producto",
+        onClick: () =>
+          showProductoTab(
+            "create",
+            document.getElementById("tab-producto-create"),
+          ),
+      },
+    });
     return;
   }
 

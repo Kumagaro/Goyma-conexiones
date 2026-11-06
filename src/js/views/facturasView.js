@@ -1,3 +1,4 @@
+import { emptyState } from "../utils/dom.js";
 import { createCombobox } from "../components/combobox.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import { openQuickContactDialog } from "../components/quickContactDialog.js";
@@ -258,7 +259,9 @@ function entryDeleteMessage(detail) {
   const affected = (detail?.lines ?? []).filter(
     (line) => line?.remainingQuantity && line.remainingQuantity !== "0",
   );
-  if (!affected.length) return "¿Deseas eliminar esta factura de entrada?";
+  if (!affected.length) {
+    return `¿Deseas eliminar la factura ${detail?.number ?? "de entrada"}?`;
+  }
   const items = affected.map((line) => {
     const unit = line.unitAbbreviation ? ` ${line.unitAbbreviation}` : "";
     const consumed =
@@ -268,7 +271,7 @@ function entryDeleteMessage(detail) {
     return `• ${line.productName ?? ""}: se perderán ${line.remainingQuantity}${unit}${consumed}.`;
   });
   return [
-    "Al eliminar esta compra se quitarán del inventario las unidades que aún quedan:",
+    `Al eliminar la compra ${detail?.number ?? ""} se quitarán del inventario las unidades que aún quedan:`,
     ...items,
     "¿Deseas continuar?",
   ].join("\n");
@@ -1250,7 +1253,11 @@ function createInvoiceSubmodule(cfg) {
     const body = document.getElementById(cfg.bodyId);
     if (!body) return;
     if (!items.length) {
-      messageRow(body, `Aún no hay facturas de ${cfg.noun}.`);
+      emptyState(body, {
+        empty: `Aún no hay facturas de ${cfg.noun}.`,
+        filtered: Object.keys(readListFilters(cfg.view, true)).length > 0,
+        action: { label: "Crear factura", onClick: () => void startNew() },
+      });
       return;
     }
     body.replaceChildren();
@@ -1288,6 +1295,8 @@ function createInvoiceSubmodule(cfg) {
       ]) {
         const actionButton = document.createElement("button");
         actionButton.type = "button";
+        actionButton.className =
+          action === "delete" ? "action-link danger" : "action-link";
         actionButton.textContent = label;
         actionButton.dataset.invoiceAction = action;
         actionButton.dataset.invoiceId = String(item?.id ?? "");
@@ -1481,7 +1490,7 @@ function createInvoiceSubmodule(cfg) {
     if (currentId == null) return;
     if (target === "cancelled") {
       const confirmed = await confirmDialog({
-        title: "Cancelar factura",
+        title: `Cancelar factura ${currentDetail?.number ?? ""}`,
         message: cfg.cancelMessage,
         confirmText: "Cancelar factura",
         cancelText: "Volver",
@@ -1519,7 +1528,10 @@ function createInvoiceSubmodule(cfg) {
   }
 
   async function handleDelete(invoiceId) {
-    let message = `¿Deseas eliminar esta factura de ${cfg.noun}?`;
+    const number = lastItems.find(
+      (item) => item.id === Number(invoiceId),
+    )?.number;
+    let message = `¿Deseas eliminar la factura ${number ?? `de ${cfg.noun}`}?`;
     if (isEntry) {
       try {
         const detail =
@@ -2050,7 +2062,19 @@ function renderLossList(items) {
   const body = document.getElementById("facturas-perdidas-body");
   if (!body) return;
   if (!items.length) {
-    messageRow(body, "Aún no hay facturas de pérdidas.");
+    emptyState(body, {
+      empty: "Aún no hay facturas de pérdidas.",
+      filtered:
+        Object.keys(readListFilters("factura-perdidas", false)).length > 0,
+      action: {
+        label: "Registrar pérdida",
+        onClick: () =>
+          showLossTab(
+            "create",
+            document.getElementById("tab-factura-perdidas-create"),
+          ),
+      },
+    });
     return;
   }
   body.replaceChildren();
@@ -2074,6 +2098,8 @@ function renderLossList(items) {
     ]) {
       const button = document.createElement("button");
       button.type = "button";
+      button.className =
+        action === "delete" ? "action-link danger" : "action-link";
       button.textContent = label;
       button.dataset.lossAction = action;
       button.dataset.lossId = String(item?.id ?? "");
@@ -2194,9 +2220,12 @@ function renderLossDetail(detail) {
 }
 
 async function handleDeleteLoss(invoiceId) {
+  const number = lossItems.find(
+    (item) => item.id === Number(invoiceId),
+  )?.number;
   const confirmed = await confirmDialog({
     title: "Eliminar pérdida",
-    message: "¿Deseas eliminar esta factura de pérdida?",
+    message: `¿Deseas eliminar la factura ${number ?? "de pérdida"}?`,
     confirmText: "Eliminar",
   });
   if (!confirmed) return;
@@ -2337,6 +2366,7 @@ export function renderFacturasGeneral(items) {
     const actionsCell = document.createElement("td");
     const viewButton = document.createElement("button");
     viewButton.type = "button";
+    viewButton.className = "action-link";
     viewButton.textContent = "Ver";
     viewButton.dataset.generalType = type;
     viewButton.dataset.generalId = String(item?.id ?? "");

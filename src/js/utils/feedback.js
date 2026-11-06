@@ -52,7 +52,7 @@ export function setFieldError(input, message) {
     error.id = id;
     error.className = "field-error";
     // Junto al control; en un combobox, tras su contenedor.
-    const anchor = input.closest(".autocomplete-row") ?? input;
+    const anchor = input.closest(".autocomplete-row, .input-box") ?? input;
     anchor.after(error);
   }
   error.textContent = message;
