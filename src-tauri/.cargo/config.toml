@@ -1,0 +1,4 @@
+# Compilar sin internet: Cargo usa solo las dependencias ya descargadas.
+# Para añadir o actualizar una: cargo --config net.offline=false <comando>
+[net]
+offline = true
