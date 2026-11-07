@@ -96,7 +96,7 @@ No marques una tarea como completa sin haber verificado que el código funciona 
 
 ## 7. Comandos del proyecto
 
-- **Desarrollo / build:** `npm run tauri:dev` y `npm run tauri:build` (Tauri v2, frontend estático en `src/`). Requiere Rust 1.88 o superior (`rust-version` en `src-tauri/Cargo.toml`).
+- **Desarrollo / build:** `npm run tauri:dev` y `npm run tauri:build` (Tauri v2, frontend estático en `src/`). La compilación funciona sin internet tras preparar el equipo una vez (`docs/compilacion-sin-conexion.md`). Requiere Rust 1.88 o superior (`rust-version` en `src-tauri/Cargo.toml`).
 - **Formateo:** `npx prettier --write .` para frontend (respeta `.prettierignore`: librerías minificadas, generados, `*.md`, `auth.css` y `dashboard.css`); `cargo fmt --manifest-path src-tauri/Cargo.toml` y `cargo clippy --manifest-path src-tauri/Cargo.toml` para Rust.
 - **Tests:** `cargo test --manifest-path src-tauri/Cargo.toml` (backend) y `npm test` (frontend, Vitest + jsdom). Lint estricto: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`.
 
