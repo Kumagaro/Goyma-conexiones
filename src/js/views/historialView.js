@@ -113,8 +113,10 @@ function bindHistoryFilters() {
 function buildTypeFilter() {
   const select = document.getElementById("historial-producto-tipo");
   if (!select) return;
-  select.multiple = true;
-  select.replaceChildren();
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "Todos los movimientos";
+  select.replaceChildren(all);
   for (const group of TYPE_GROUPS) {
     const optgroup = document.createElement("optgroup");
     optgroup.label = group.label;
@@ -165,9 +167,7 @@ function readHistoryFilters() {
     document.getElementById("historial-producto-hasta")?.value || undefined;
   const typeSelect = document.getElementById("historial-producto-tipo");
   // Sin selección se devuelven todos los tipos (HP-02).
-  const types = typeSelect
-    ? Array.from(typeSelect.selectedOptions).map((o) => o.value)
-    : [];
+  const types = typeSelect?.value ? [typeSelect.value] : [];
   return { productId, fromDate, toDate, types };
 }
 

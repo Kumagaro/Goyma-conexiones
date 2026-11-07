@@ -1795,14 +1795,6 @@ svg.icon {
   vertical-align: middle;
 }
 
-.list-table tbody tr {
-  transition: background-color var(--duration-fast) ease;
-}
-
-.list-table tbody tr:hover {
-  background-color: var(--color-primary-soft);
-}
-
 .list-table .col-acciones {
   display: flex;
   align-items: center;

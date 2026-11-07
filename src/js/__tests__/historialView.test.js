@@ -119,13 +119,14 @@ describe("historialView", () => {
     await initHistorialView();
 
     const tipo = document.getElementById("historial-producto-tipo");
-    expect(tipo.multiple).toBe(true);
+    expect(tipo.multiple).toBe(false);
     const groups = tipo.querySelectorAll("optgroup");
     expect(groups).toHaveLength(3);
     const values = Array.from(tipo.querySelectorAll("option")).map(
       (o) => o.value,
     );
     expect(values).toEqual([
+      "",
       "initial",
       "entry",
       "saleOut",
@@ -136,7 +137,21 @@ describe("historialView", () => {
       "adjustment",
       "reversal",
     ]);
-    expect(Array.from(tipo.selectedOptions).map((o) => o.value)).toEqual([]);
+    expect(tipo.value).toBe("");
+  });
+
+  it("filtra por el tipo elegido", async () => {
+    mockEmptyHistory();
+    await initHistorialView();
+    getProductHistory.mockClear();
+
+    const tipo = document.getElementById("historial-producto-tipo");
+    tipo.value = "loss";
+    tipo.dispatchEvent(new Event("change"));
+
+    expect(getProductHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ types: ["loss"] }),
+    );
   });
 
   it("pinta los movimientos del backend con textContent", async () => {

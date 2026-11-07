@@ -244,6 +244,23 @@ div:has(> .list-table) {
   background-color: var(--color-white);
 }
 
+/* Hover en la fila completa: se pinta cada celda, también la columna fija */
+table tbody td {
+  transition: background-color var(--duration-fast) ease;
+}
+
+table tbody tr:hover > td {
+  background-color: var(--color-primary-soft);
+}
+
+#producto-list .list-table tbody tr:hover td:last-child {
+  background-image: linear-gradient(
+    var(--color-primary-soft),
+    var(--color-primary-soft)
+  );
+  background-color: var(--color-white);
+}
+
 /* Mejor vendidos: una sola columna, con el margen a la vista */
 .products-grid {
   grid-template-columns: minmax(0, 1fr);
@@ -357,23 +374,6 @@ select:not([multiple]),
 .modal-card textarea {
   width: 100%;
   padding: var(--space-3) var(--space-4);
-}
-
-select[multiple] {
-  padding: var(--space-2);
-}
-
-select[multiple] option {
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-}
-
-select[multiple] option:checked {
-  background: linear-gradient(
-    var(--color-primary-tint),
-    var(--color-primary-tint)
-  );
-  color: var(--color-ink);
 }
 
 select:focus,
