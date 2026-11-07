@@ -15,10 +15,11 @@ export function parseRate(rate) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-// Mismo formato que formatMoney (es-ES agrupa desde 5 cifras).
+// Mismo formato que formatMoney.
 const formatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+  useGrouping: "always",
 });
 
 /**

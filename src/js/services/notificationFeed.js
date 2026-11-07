@@ -27,6 +27,7 @@ const BADGE_IDS = [
 ];
 
 let lastSeenId = null;
+let lastCount = null;
 let queue = Promise.resolve();
 let started = false;
 const listeners = new Set();
@@ -39,6 +40,17 @@ export function onNotificationsChanged(listener) {
 }
 
 export function updateBadges(count) {
+  // La campana se agita solo si llegó algo nuevo, no al abrir la app.
+  if (lastCount !== null && count > lastCount) {
+    const bell = document.querySelector(".notificaciones");
+    bell?.classList.add("is-ringing");
+    bell?.addEventListener(
+      "animationend",
+      () => bell.classList.remove("is-ringing"),
+      { once: true },
+    );
+  }
+  lastCount = count;
   for (const id of BADGE_IDS) {
     const badge = document.getElementById(id);
     if (!badge) continue;

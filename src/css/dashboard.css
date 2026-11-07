@@ -27,7 +27,7 @@ body {
 
 body {
   display: grid;
-  background-color: var(--color-white);
+  background-color: var(--color-bg);
   grid-template-columns: auto 1fr;
   min-height: 100vh;
 }
@@ -47,7 +47,8 @@ svg.icon {
   top: 0;
   align-self: start;
   transition: 300ms ease-in-out;
-  overflow: hidden;
+  max-height: 100vh;
+  overflow: hidden auto;
   text-wrap: nowrap;
 
   ul {
@@ -235,7 +236,7 @@ svg.icon {
   grid-template-rows: auto 1fr;
   min-height: 100vh;
   min-width: 0;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .panel-top {
@@ -374,7 +375,7 @@ svg.icon {
 
 .page {
   display: none;
-  animation: fadeIn 320ms ease;
+  animation: page-in 180ms var(--ease-out);
 }
 
 .page.active {
@@ -1795,10 +1796,7 @@ svg.icon {
 }
 
 .list-table tbody tr {
-  transition:
-    background-color 200ms ease,
-    box-shadow 200ms ease,
-    transform 150ms ease;
+  transition: background-color var(--duration-fast) ease;
 }
 
 .list-table tbody tr:hover {
@@ -2576,7 +2574,6 @@ svg.icon {
   position: fixed;
   inset: 0;
   background-color: var(--color-line-strong);
-  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;

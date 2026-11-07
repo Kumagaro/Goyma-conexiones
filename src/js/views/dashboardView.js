@@ -1,9 +1,12 @@
 import { installFormValidation } from "../utils/formValidation.js";
+import { installShortcuts } from "../utils/shortcuts.js";
+import { installTableSort } from "../utils/tableSort.js";
 import {
   getDashboardKpis,
   getDashboardSummary,
 } from "../services/dashboardService.js";
 import {
+  getCompanyProfile,
   getUserPreferences,
   listExchangeRates,
 } from "../services/settingsService.js";
@@ -17,7 +20,6 @@ import {
 import { formatDate, formatMoney } from "../utils/formatters.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const NBSP = " ";
 
 // inverse = true cuando subir es MALO (gastos y productos agotados).
 const KPIS = {
@@ -60,9 +62,11 @@ const COLOR_SALES = "#2563eb";
 const COLOR_SERVICES = "#f48430";
 const COLOR_TOTAL = "#e11d74";
 
+const PERIOD_KEY = "goyma.dashboardPeriod";
+
 let initPromise = null;
 let chart = null;
-let period = { preset: "month" };
+let period = { preset: readStoredPreset() };
 let requestId = 0;
 
 export function initDashboardView() {
@@ -72,8 +76,27 @@ export function initDashboardView() {
   return initPromise;
 }
 
+// Comodidad por usuario: si el almacenamiento falla, se usa el mes actual.
+function readStoredPreset() {
+  try {
+    return localStorage.getItem(PERIOD_KEY) || "month";
+  } catch {
+    return "month";
+  }
+}
+
+function storePreset(preset) {
+  try {
+    if (preset !== "custom") localStorage.setItem(PERIOD_KEY, preset);
+  } catch {
+    // Sin almacenamiento no se recuerda: no afecta al dashboard.
+  }
+}
+
 async function initializeDashboardView() {
   installFormValidation(document);
+  installTableSort();
+  installShortcuts();
   bindOutOfStockActions();
   bindDashboardControls();
   window.addEventListener("page:change", (event) => {
@@ -162,13 +185,15 @@ function markActivePeriod(preset) {
 
 async function loadCurrencies() {
   try {
-    const [preferences, rates] = await Promise.all([
+    const [preferences, rates, company] = await Promise.all([
       getUserPreferences(),
       listExchangeRates(),
+      getCompanyProfile(),
     ]);
     return {
       currencies: preferences?.visibleCurrencies ?? [],
       rates: rates ?? [],
+      company,
     };
   } catch {
     // Sin monedas el dashboard sigue mostrando sus cifras en USD.
@@ -203,8 +228,54 @@ async function loadDashboard(next = period) {
   root.removeAttribute("aria-busy");
   errorBox.hidden = true;
   markActivePeriod(next.preset);
+  storePreset(next.preset);
   renderDashboardKpis(kpis, money);
+  renderFirstSteps(kpis, money);
   return summary;
+}
+
+/** Primer uso: qué falta para empezar; desaparece al completarlo. */
+function renderFirstSteps(kpis, { rates, company }) {
+  const box = document.getElementById("dash-primeros-pasos");
+  if (!box) return;
+  const steps = [
+    {
+      label: "Completa los datos de la empresa",
+      done: !company || Boolean(company.name),
+      page: "configuracion",
+      tab: "cfgtab-empresa",
+    },
+    {
+      label: "Configura las tasas de cambio",
+      done: rates.length > 0,
+      page: "configuracion",
+      tab: "cfgtab-tasas",
+    },
+    {
+      label: "Crea tu primer producto",
+      done: kpis.slowMovers.length > 0,
+      page: "productos",
+      tab: "tab-producto-create",
+    },
+  ];
+  box.hidden = steps.every((step) => step.done);
+  document.getElementById("dash-primeros-pasos-lista").replaceChildren(
+    ...steps.map((step) => {
+      const link = el(
+        "button",
+        { type: "button", class: "action-link", disabled: step.done },
+        step.label,
+      );
+      link.addEventListener("click", () => {
+        window.showPage?.(
+          step.page,
+          document.querySelector(`#sidebar [data-page="${step.page}"]`),
+        );
+        document.getElementById(step.tab)?.click();
+      });
+      return el("li", { class: step.done ? "is-done" : null }, link);
+    }),
+  );
 }
 
 /** Pinta todas las cifras de DB-02 a DB-07. */
@@ -245,9 +316,13 @@ export function renderDashboardKpis(kpis, { currencies, rates }) {
 
 /* ---------- Formato (coma decimal, espacio en los miles) ---------- */
 
-const thousands = (value) =>
-  String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
-const decimal = (value, digits = 1) => value.toFixed(digits).replace(".", ",");
+const decimal = (value, digits = 1) =>
+  new Intl.NumberFormat("es-ES", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+    useGrouping: "always",
+  }).format(value);
+const thousands = (value) => decimal(Math.round(value), 0);
 const trimmed = (value, digits) =>
   String(Number(value.toFixed(digits))).replace(".", ",");
 const percentText = (value) => `${decimal(value)} %`;
@@ -405,7 +480,7 @@ function sparkNodes(raw) {
   const area = `${line} L${lastX.toFixed(1)} ${height} L${points[0][0].toFixed(1)} ${height} Z`;
   return [
     svgNode("path", { class: "kpi-spark-area", d: area }),
-    svgNode("path", { class: "kpi-spark-line", d: line }),
+    svgNode("path", { class: "kpi-spark-line", d: line, pathLength: "1" }),
     svgNode("circle", {
       class: "kpi-spark-dot",
       cx: lastX.toFixed(1),

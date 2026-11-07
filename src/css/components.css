@@ -86,7 +86,26 @@ button.notificaciones {
 
 /* Las tablas anchas se desplazan dentro de su vista, nunca se cortan */
 div:has(> .list-table) {
-  overflow-x: auto;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.list-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.list-table th[tabindex] {
+  cursor: pointer;
+}
+
+.list-table th[aria-sort="ascending"]::after {
+  content: " ▲";
+}
+
+.list-table th[aria-sort="descending"]::after {
+  content: " ▼";
 }
 
 /* La gráfica se ajusta a su columna, no al revés */
@@ -195,15 +214,18 @@ div:has(> .list-table) {
   white-space: normal;
 }
 
+/* Margen justo para que las nueve columnas quepan en la ventana de 1280px */
+#producto-list .list-table thead th,
+#producto-list .list-table tbody td {
+  padding-inline: var(--space-2, 8px);
+}
+
 #producto-list .list-table td:nth-child(2) {
-  min-width: 150px;
+  min-width: 130px;
 }
 
 #producto-list .list-table td:last-child {
-  width: 230px;
-  min-width: 230px;
-  max-width: 230px;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 #producto-list .list-table td:nth-child(n + 3):not(:last-child) {
@@ -215,15 +237,11 @@ div:has(> .list-table) {
 #producto-list .list-table td:last-child {
   position: sticky;
   right: 0;
+  z-index: 2;
+}
+
+#producto-list .list-table td:last-child {
   background-color: var(--color-white);
-}
-
-#producto-list .col-acciones {
-  flex-wrap: wrap;
-}
-
-#producto-list .action-link {
-  margin-bottom: 4px;
 }
 
 /* Mejor vendidos: una sola columna, con el margen a la vista */
@@ -327,6 +345,176 @@ select:focus,
   font-weight: 600;
 }
 
+/* Superficies: tarjetas blancas sobre el fondo azulado */
+.income-chart,
+.stats-column,
+.frequent-customers,
+.expenses-summary,
+.inventory-details,
+.kpi-hero,
+.kpi-secondary,
+.form-card {
+  box-shadow: var(--shadow-card);
+}
+
+/* Tablas: tarjeta ligera, encabezado discreto y filas con línea fina */
+.list-table {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--color-white);
+  box-shadow: var(--shadow-card);
+}
+
+.list-table thead th {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.list-table thead th:first-child {
+  border-top-left-radius: var(--radius-lg);
+}
+
+.list-table thead th:last-child {
+  border-top-right-radius: var(--radius-lg);
+}
+
+.list-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-ink-soft);
+}
+
+.list-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Estados */
+.status-pill {
+  display: inline-flex;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-pill.is-pending {
+  background: var(--color-warning-soft);
+  color: var(--color-warning-text);
+}
+
+.status-pill.is-completed {
+  background: var(--color-success-soft);
+  color: var(--color-success-text);
+}
+
+.status-pill.is-cancelled {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+/* Botón de solo icono: el texto queda para lectores de pantalla */
+.action-link.icon-only {
+  padding: 4px 7px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Menú agrupado */
+.nav-label {
+  margin-top: var(--space-3);
+  padding-inline: var(--space-3);
+  color: var(--color-on-dark-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#sidebar.close .nav-label {
+  display: none;
+}
+
+/* Primeros pasos */
+.first-steps {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-primary-ring);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
+  box-shadow: var(--shadow-card);
+}
+
+.first-steps ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.first-steps .is-done .action-link {
+  border-color: var(--color-line);
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+/* Encabezado fijo de una factura, con su total */
+.form-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-2);
+  background: var(--color-white);
+}
+
+.form-head-total {
+  color: var(--color-ink);
+  font-size: var(--text-md);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Inventario plegable: acorta el dashboard */
+details.inventory-details > summary {
+  cursor: pointer;
+}
+
+details.inventory-details[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+/* Exportar comparte fila con los filtros, si los hay */
+.config-subview[id$="-list"]:has(.historial-toolbar) {
+  position: relative;
+}
+
+.config-subview[id$="-list"]:has(.historial-toolbar) > .list-actions {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 2;
+  margin: 0;
+}
+
 /* Estado vacío con acción */
 .empty-row .empty-action {
   margin-top: var(--space-2);
@@ -399,6 +587,155 @@ select:focus,
 
 .stack-sm {
   margin: 4px 0 10px;
+}
+
+/* Movimiento: corto y solo con transform y opacity (ui-spec §4) */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes error-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes shake {
+  25% {
+    transform: translateX(-3px);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+@keyframes bell-ring {
+  20% {
+    transform: rotate(14deg);
+  }
+  45% {
+    transform: rotate(-11deg);
+  }
+  70% {
+    transform: rotate(6deg);
+  }
+}
+
+.modal-overlay.active {
+  animation: fade-in var(--duration-fast) ease-out;
+}
+
+.modal-overlay.active .modal-card {
+  animation: dialog-in 200ms var(--ease-out);
+}
+
+.list-table tbody tr {
+  animation: fade-in var(--duration-fast) ease-out;
+}
+
+.kpi-hero,
+.kpi-secondary {
+  animation: rise-in var(--duration-base) var(--ease-out) both;
+}
+
+.kpi-hero:nth-child(2),
+.kpi-secondary:nth-child(2) {
+  animation-delay: 30ms;
+}
+
+.kpi-hero:nth-child(3),
+.kpi-secondary:nth-child(3) {
+  animation-delay: 60ms;
+}
+
+.kpi-hero:nth-child(4),
+.kpi-secondary:nth-child(4) {
+  animation-delay: 90ms;
+}
+
+.kpi-spark-line {
+  stroke-dasharray: 1;
+  animation: draw var(--duration-slow) var(--ease-out);
+}
+
+.kpi-spark-area,
+.kpi-spark-dot {
+  animation: fade-in var(--duration-slow) ease-out;
+}
+
+.star-bar-fill {
+  transform-origin: left;
+  animation: grow-x var(--duration-slow) var(--ease-out);
+}
+
+.field-error {
+  animation: error-in var(--duration-fast) ease-out;
+}
+
+[aria-invalid="true"] {
+  animation: shake 200ms ease-in-out;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.action-link {
+  transition:
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    transform 100ms ease;
+}
+
+.btn-primary:active,
+.btn-secondary:active,
+.btn-danger:active,
+.action-link:active {
+  transform: scale(0.97);
+}
+
+.notificaciones.is-ringing .icon {
+  transform-origin: top center;
+  animation: bell-ring 500ms ease-in-out;
 }
 
 @media (prefers-reduced-motion: reduce) {

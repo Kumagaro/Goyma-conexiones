@@ -761,11 +761,13 @@ async function handleConversorChange() {
 
   try {
     const response = await convertQuantity(fromUnitId, toUnitId, quantity);
-    resultado.textContent = response.result;
+    resultado.textContent = response?.result ?? "—";
     resultado.classList.remove("sin-ruta");
   } catch (error) {
-    resultado.textContent =
-      error?.message || "No se pudo calcular la conversión.";
+    // Solo los errores del backend traen un texto apto para el usuario.
+    resultado.textContent = error?.code
+      ? error.message
+      : "No se pudo calcular la conversión.";
     resultado.classList.add("sin-ruta");
   }
 }

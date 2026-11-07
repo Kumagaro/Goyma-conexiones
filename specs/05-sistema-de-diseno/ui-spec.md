@@ -44,7 +44,7 @@ Azul principal: **`#2563eb`** (decisión del dueño).
 | `--color-ink` | `#020f1e` | Texto principal, barra lateral |
 | `--color-text-muted` | `#56606e` | Texto secundario (6:1 sobre blanco) |
 | `--color-line`, `--color-line-strong`, `--color-ink-soft` | Tinta con transparencia | Bordes y fondos neutros |
-| `--color-bg` / `--color-white` | `#f7f7f7` / `#ffffff` | Fondo y superficies |
+| `--color-bg` / `--color-white` / `--color-surface-2` | `#eff3f6` / `#ffffff` / `#f7f9fb` | Fondo azulado, tarjetas y encabezados de tabla |
 | `--color-danger` | `#dc2626` | Destructivo y errores |
 | `--color-success` / `-text` | `#16a34a` / `#15803d` | El de relleno y el apto para texto |
 | `--color-warning` / `-text` | `#f48430` / `#b45309` | El de relleno y el apto para texto |
@@ -56,7 +56,19 @@ Azul principal: **`#2563eb`** (decisión del dueño).
 
 - **Radios:** `--radius-sm` 6px (botones, campos), `--radius-md` 10px, `--radius-lg` 14px (tarjetas), `--radius-xl` 20px, `--radius-pill`.
 - **Espaciado:** múltiplos de 4 (`--space-1` a `--space-8`).
-- **Movimiento:** solo `transform`, `opacity` y colores, con `--duration-fast` 150ms o `--duration-base` 220ms. Nunca `transition: all`. Los botones no saltan al pasar el ratón. Con `prefers-reduced-motion` no hay animación.
+- **Superficies:** tarjetas blancas con `--shadow-card` sobre el fondo azulado. Sin difuminados: son caros en equipos modestos.
+- **Movimiento:** corto, discreto y con `transform` y `opacity` (más el trazo de los minigráficos). Nunca `transition: all` ni bucles infinitos de adorno. Con `prefers-reduced-motion` no hay animación.
+
+| Patrón | Efecto | Duración |
+|---|---|---|
+| Cambio de pantalla | Fundido con subida de 4px | 180ms |
+| Diálogo | Escala de 96 % a 100 % con fundido | 200ms |
+| Filas de tabla | Fundido | 150ms |
+| Tarjetas del dashboard | Suben en cascada, 30ms entre una y otra | 220ms |
+| Minigráficos y barras | La línea se dibuja; la barra crece desde la izquierda | 400ms |
+| Pulsar un botón | Se reduce a 97 % | 100ms |
+| Campo con error | Temblor corto y mensaje que aparece | 200ms |
+| Notificación nueva | La campana se agita | 500ms |
 
 ## 5. Componentes
 
@@ -66,8 +78,14 @@ Azul principal: **`#2563eb`** (decisión del dueño).
 - **Foco:** todo lo interactivo muestra el anillo `:focus-visible`. Quitar `outline` exige un sustituto visible.
 - **Campos:** todos los `input`, `select` y `textarea` miden 46px, con el mismo borde, radio y foco, también en diálogos; dentro de las líneas de factura, 40px. El navegador no añade controles propios: el ojo de contraseña es solo el de la aplicación.
 - **Solo icono:** `<button>` real con `aria-label`. Un `<div>` nunca es clicable.
-- **Tablas:** `.list-table`. Si no caben, se desplazan dentro de su contenedor, nunca se cortan.
+- **Tablas:** `.list-table`: tarjeta con encabezado en mayúscula pequeña y filas con línea fina. Si no caben, se desplazan dentro de su contenedor, nunca se cortan.
+- **Orden y encabezados:** pulsar un encabezado ordena la columna (`tableSort.js`), salvo acciones y fechas con orden propio. El encabezado queda fijo al desplazar la tabla.
+- **Acciones de producto:** Ver y Editar con texto; Descontinuar y Eliminar solo con icono, `title` y texto `.sr-only`.
+- **Atajos:** Ctrl+S guarda el formulario abierto y Ctrl+K lleva a la búsqueda de la página.
+- **Importes:** siempre con separador de miles desde 4 cifras (`1.234,50 USD`), en pantalla, PDF y exportaciones.
+- **Menú:** agrupado con `.nav-label` en Operación, Catálogos y Sistema.
 - **Contenedores:** nada sobresale de su tarjeta o columna. Los textos largos saltan de línea o se cortan con puntos suspensivos.
+- **Estados:** píldora `.status-pill` con fondo suave y texto oscuro: pendiente, completado o cancelado.
 - **Estados vacíos:** dicen qué falta y ofrecen la acción para crearlo. Con filtros activos dicen que no hay coincidencias.
 
 ## 6. Formularios y textos

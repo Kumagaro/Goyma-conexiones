@@ -1,10 +1,12 @@
 const numberFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+  useGrouping: "always",
 });
 
 const quantityFormatter = new Intl.NumberFormat("es-ES", {
   maximumFractionDigits: 3,
+  useGrouping: "always",
 });
 
 export function formatMoney(cents) {

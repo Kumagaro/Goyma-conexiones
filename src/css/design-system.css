@@ -62,7 +62,8 @@
   --color-line: #020f1e24;
   --color-line-strong: #020f1e4d;
 
-  --color-bg: #f7f7f7;
+  --color-bg: #eff3f6;
+  --color-surface-2: #f7f9fb;
   --color-white: #ffffff;
   --color-on-dark-muted: #ffffffcc;
   --color-on-dark-line: #ffffff33;
@@ -99,6 +100,10 @@
 
   --duration-fast: 150ms;
   --duration-base: 220ms;
+  --duration-slow: 400ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --shadow-card: 0 1px 2px #020f1e14, 0 4px 12px #020f1e0d;
 }
 
 /* WebView2 (Edge) añade sus propios botones: la app ya tiene el suyo */

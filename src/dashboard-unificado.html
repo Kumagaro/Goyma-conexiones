@@ -1012,6 +1012,7 @@
             <span class="text">Dashboard</span>
           </a>
         </li>
+        <li class="nav-label"><span class="text">Operación</span></li>
         <li>
           <a href="#" data-page="productos">
             <svg class="icon"><use href="#icon-cube-scan"></use></svg>
@@ -1097,6 +1098,7 @@
             </div>
           </ul>
         </li>
+        <li class="nav-label"><span class="text">Catálogos</span></li>
         <li>
           <a href="#" data-page="categorias">
             <svg class="icon"><use href="#icon-3square"></use></svg>
@@ -1109,6 +1111,7 @@
             <span class="text">Unidades</span>
           </a>
         </li>
+        <li class="nav-label"><span class="text">Sistema</span></li>
         <li>
           <a href="#" data-page="notificaciones">
             <svg class="icon"><use href="#icon-bell"></use></svg>
@@ -1302,6 +1305,11 @@
               Reintentar
             </button>
           </div>
+
+          <section id="dash-primeros-pasos" class="first-steps" hidden>
+            <h2 class="card-title">Primeros pasos</h2>
+            <ol id="dash-primeros-pasos-lista"></ol>
+          </section>
 
           <!-- KPIs: 4 destacados (arriba) + 4 secundarios (abajo) -->
           <section class="kpi-hero-grid" aria-label="Indicadores principales">
@@ -1607,8 +1615,8 @@
           </section>
 
           <section class="main-bottom row-expenses-inventory">
-            <article class="inventory-details">
-              <h3 class="card-title">Resumen de Inventario</h3>
+            <details class="inventory-details">
+              <summary class="card-title">Resumen de Inventario</summary>
               <p class="dash-note" id="dash-inventario-cantidad"></p>
               <div class="inventory-cards">
                 <div class="out-of-stock">
@@ -1671,7 +1679,7 @@
                   </table>
                 </div>
               </div>
-            </article>
+            </details>
             <article class="inventory-details" id="dash-reservas">
               <h3 class="card-title">Reservas Activas</h3>
               <div class="dash-reservas-resumen">

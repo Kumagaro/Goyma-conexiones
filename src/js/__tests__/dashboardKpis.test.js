@@ -141,6 +141,7 @@ describe("dashboard con datos reales (HTML de producción)", () => {
 
   beforeEach(() => {
     document.body.innerHTML = `<main>${pageHtml}</main>`;
+    localStorage.clear();
     vi.clearAllMocks();
     respond();
     chartInstances = [];

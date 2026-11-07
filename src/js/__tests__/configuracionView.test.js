@@ -95,7 +95,7 @@ async function openView() {
 describe("utilidades de monedas (CF-01)", () => {
   it("convierte con la tasa actual, redondea a 2 decimales y omite las monedas sin tasa", () => {
     expect(equivalents(1_250, ["CUP", "EUR", "MLC"], RATES)).toEqual([
-      "8375,00 CUP",
+      "8.375,00 CUP",
       "11,57 EUR",
     ]);
     expect(currenciesWithoutRate(["CUP", "MLC", "SALDO"], RATES)).toEqual([

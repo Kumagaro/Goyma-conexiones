@@ -815,8 +815,8 @@ describe("listados y detalle de productos", () => {
         (row) => row.textContent,
       ),
     ).toEqual([
-      "Costo: 6700,00 CUP",
-      "Precio de venta: 8375,00 CUP",
+      "Costo: 6.700,00 CUP",
+      "Precio de venta: 8.375,00 CUP",
       "Valor total: 66.986,60 CUP",
     ]);
   });

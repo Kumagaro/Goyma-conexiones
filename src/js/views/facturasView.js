@@ -176,6 +176,9 @@ function formatProductOption(item) {
   const unit = item?.unitAbbreviation ? ` ${item.unitAbbreviation}` : "";
   return [
     `${item?.name ?? ""} · stock ${item?.stock ?? "0"}${unit}`,
+    Number.isSafeInteger(item?.sellingPriceCents)
+      ? formatMoney(item.sellingPriceCents)
+      : null,
     item?.isOutOfStock ? "Agotado" : null,
     item?.isDiscontinued ? "Descontinuado" : null,
   ]
@@ -661,6 +664,12 @@ function createInvoiceSubmodule(cfg) {
     input.disabled = disabled;
     input.dataset.lineField = key;
     input.setAttribute("aria-label", `${label} de ${line.productName}`);
+    // Enter vuelve al buscador para seguir añadiendo productos.
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      productCombobox?.getInput().focus();
+    });
     input.addEventListener("input", () => {
       lines[index][key] = input.value;
       const subtotal = lineSubtotalCents(lines[index]);
@@ -814,6 +823,21 @@ function createInvoiceSubmodule(cfg) {
     }
     setText(`${cfg.field}-subtotal`, text);
     setText(`${cfg.field}-total`, text);
+    showHeaderTotal(text);
+  }
+
+  // El total queda a la vista aunque la factura tenga muchas líneas.
+  function showHeaderTotal(text) {
+    const head = field("form-title")?.parentElement;
+    if (!head) return;
+    head.classList.add("form-head");
+    let total = head.querySelector(".form-head-total");
+    if (!total) {
+      total = document.createElement("span");
+      total.className = "form-head-total";
+      head.append(total);
+    }
+    total.textContent = `Total: ${text}`;
   }
 
   // ---------- Adjunto (solo entrada) ----------
@@ -1275,17 +1299,22 @@ function createInvoiceSubmodule(cfg) {
             : "—",
         );
       }
-      texts.push(
-        formatMoney(item?.totalCents ?? 0),
-        cfg.statusLabels[item?.status] ?? item?.status ?? "—",
-      );
+      const statusText = cfg.statusLabels[item?.status] ?? item?.status ?? "—";
+      texts.push(formatMoney(item?.totalCents ?? 0), statusText);
       if (reservable) {
         texts.push(item?.reservedUntil ? formatDate(item.reservedUntil) : "—");
       }
       if (cfg.showsProductCount) texts.push(String(item?.productCount ?? "—"));
       const cells = texts.map((text) => {
         const cell = document.createElement("td");
-        cell.textContent = text;
+        if (text === statusText && item?.status) {
+          const pill = document.createElement("span");
+          pill.className = `status-pill is-${item.status}`;
+          pill.textContent = text;
+          cell.append(pill);
+        } else {
+          cell.textContent = text;
+        }
         return cell;
       });
       const actionsCell = document.createElement("td");

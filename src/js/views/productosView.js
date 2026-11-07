@@ -386,8 +386,14 @@ function renderProductList(items) {
     actions.append(
       createActionButton("view", product.id, "Ver"),
       createActionButton("edit", product.id, "Editar"),
-      createActionButton("discontinue", product.id, "Descontinuar"),
-      createActionButton("delete", product.id, "Eliminar", "danger"),
+      createIconButton("discontinue", product.id, "Descontinuar", "icon-close"),
+      createIconButton(
+        "delete",
+        product.id,
+        "Eliminar",
+        "icon-trash",
+        "danger",
+      ),
     );
     actionsCell.append(actions);
     row.append(actionsCell);
@@ -498,6 +504,24 @@ function createActionButton(action, productId, label, extraClass = "") {
   button.dataset.productAction = action;
   button.dataset.productId = String(productId);
   button.textContent = label;
+  return button;
+}
+
+// El nombre sigue en el botón para lectores de pantalla y al pasar el ratón.
+function createIconButton(action, productId, label, icon, extraClass = "") {
+  const button = createActionButton(action, productId, "", extraClass);
+  button.classList.add("icon-only");
+  button.title = label;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon icon-14");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#${icon}`);
+  svg.append(use);
+  const text = document.createElement("span");
+  text.className = "sr-only";
+  text.textContent = label;
+  button.append(svg, text);
   return button;
 }
 

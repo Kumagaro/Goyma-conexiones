@@ -76,13 +76,13 @@ pub fn movement_type_label(code: &str) -> &str {
     }
 }
 
-/// Importe como en la pantalla (`es-ES`): `1234,50 USD`, `12.345,67 USD`.
-/// Igual que `Intl.NumberFormat("es-ES")`, solo agrupa miles desde 5 cifras.
+/// Importe como en la pantalla: `1.234,50 USD`, `12.345,67 USD`.
+/// Igual que `Intl.NumberFormat("es-ES", { useGrouping: "always" })`.
 pub fn format_money(cents: i64) -> String {
     let sign = if cents < 0 { "-" } else { "" };
     let abs = cents.unsigned_abs();
     let integer = (abs / 100).to_string();
-    let grouped = if integer.len() >= 5 {
+    let grouped = if integer.len() >= 4 {
         let mut out = String::new();
         for (index, digit) in integer.chars().enumerate() {
             if index > 0 && (integer.len() - index).is_multiple_of(3) {
@@ -463,7 +463,7 @@ mod tests {
     #[test]
     fn money_matches_the_es_es_screen_format() {
         assert_eq!(format_money(0), "0,00 USD");
-        assert_eq!(format_money(123_450), "1234,50 USD");
+        assert_eq!(format_money(123_450), "1.234,50 USD");
         assert_eq!(format_money(1_234_567), "12.345,67 USD");
         assert_eq!(format_money(123_456_789_012), "1.234.567.890,12 USD");
         assert_eq!(format_money(-505), "-5,05 USD");

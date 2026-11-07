@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { emptyState } from "../utils/dom.js";
 import { installFormValidation } from "../utils/formValidation.js";
+import { installShortcuts } from "../utils/shortcuts.js";
+import { cellValue, installTableSort } from "../utils/tableSort.js";
 
 const read = (...parts) =>
   readFile(path.resolve(process.cwd(), "src", ...parts), "utf8");
@@ -127,5 +129,79 @@ describe("validación al salir del campo", () => {
     expect(document.getElementById("phone-error").textContent).toBe(
       "Completa este campo",
     );
+  });
+});
+
+describe("ordenar columnas", () => {
+  function table() {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = `<table class="list-table">
+      <thead><tr><th>Nombre</th><th>Total</th><th id="th-fecha-x">Fecha</th><th>Acciones</th></tr></thead>
+      <tbody>
+        <tr><td>Ñandú</td><td>1.250,50 USD</td><td>05/11/2026</td><td></td></tr>
+        <tr><td>Ana</td><td>18,75 USD</td><td>01/02/2026</td><td></td></tr>
+        <tr><td>Óscar</td><td>300,00 USD</td><td>03/01/2026</td><td></td></tr>
+      </tbody></table>`;
+    // Fuera del documento: otra vista ya pudo instalar el orden en `document`.
+    installTableSort(wrapper);
+    return wrapper;
+  }
+  const column = (root, index) =>
+    [...root.querySelectorAll("tbody tr")].map(
+      (row) => row.cells[index].textContent,
+    );
+
+  it("entiende importes, fechas y códigos", () => {
+    expect(cellValue("1.250,50 USD")).toBe(1250.5);
+    expect(cellValue("#00012")).toBe(12);
+    expect(cellValue("05/11/2026")).toBe(20261105);
+    expect(cellValue("Cable 2")).toBe("Cable 2");
+  });
+
+  it("ordena números y textos, y alterna el sentido", () => {
+    const root = table();
+    const [name, total] = root.querySelectorAll("th");
+    total.click();
+    expect(column(root, 1)).toEqual([
+      "18,75 USD",
+      "300,00 USD",
+      "1.250,50 USD",
+    ]);
+    expect(total.getAttribute("aria-sort")).toBe("ascending");
+    total.click();
+    expect(column(root, 1)[0]).toBe("1.250,50 USD");
+    expect(total.getAttribute("aria-sort")).toBe("descending");
+
+    name.click();
+    expect(column(root, 0)).toEqual(["Ana", "Ñandú", "Óscar"]);
+    expect(total.hasAttribute("aria-sort")).toBe(false);
+  });
+
+  it("deja fuera las acciones y la fecha con orden propio", () => {
+    const root = table();
+    const [, , date, actions] = root.querySelectorAll("th");
+    date.click();
+    actions.click();
+    expect(column(root, 0)[0]).toBe("Ñandú");
+    expect(date.hasAttribute("tabindex")).toBe(false);
+    expect(actions.hasAttribute("tabindex")).toBe(false);
+  });
+});
+
+describe("atajos de teclado", () => {
+  it("Ctrl+S guarda el formulario abierto", () => {
+    document.body.innerHTML = `<div class="modal-overlay active"><form></form></div>`;
+    const form = document.querySelector("form");
+    form.requestSubmit = vi.fn();
+    installShortcuts();
+    const event = new KeyboardEvent("keydown", {
+      key: "s",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(event);
+    expect(form.requestSubmit).toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
   });
 });
