@@ -77,6 +77,7 @@ Azul principal: **`#2563eb`** (decisión del dueño).
 - **Títulos de página:** cada página tiene un único `<h1 class="page-title">`.
 - **Foco:** todo lo interactivo muestra el anillo `:focus-visible`. Quitar `outline` exige un sustituto visible.
 - **Campos:** todos los `input`, `select` y `textarea` miden 46px, con el mismo borde, radio y foco, también en diálogos; dentro de las líneas de factura, 40px. El navegador no añade controles propios: el ojo de contraseña es solo el de la aplicación.
+- **Sin excepciones oscuras:** filtros, fechas y buscadores de lista parten de la misma regla base de `components.css`; solo el buscador en píldora y las líneas de factura tienen variante propia.
 - **Solo icono:** `<button>` real con `aria-label`. Un `<div>` nunca es clicable.
 - **Tablas:** `.list-table`: tarjeta con encabezado en mayúscula pequeña y filas con línea fina. Si no caben, se desplazan dentro de su contenedor, nunca se cortan.
 - **Orden y encabezados:** pulsar un encabezado ordena la columna (`tableSort.js`), salvo acciones y fechas con orden propio. El encabezado queda fijo al desplazar la tabla.

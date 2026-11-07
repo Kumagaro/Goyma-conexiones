@@ -486,7 +486,7 @@ describe("listados y detalle de productos", () => {
           <button class="tab" id="tab-producto-historial">Historial</button>
         </div>
         <div id="producto-search-bar">
-          <input id="producto-search" placeholder="Buscar producto…" />
+          <div class="search-bar"><input id="producto-search" placeholder="Buscar producto…" /></div>
           <select id="producto-filtro-categoria"><option value="">Todas las categorías</option></select>
           <select id="producto-filtro-stock">
             <option value="all">Todo el stock</option>
@@ -543,6 +543,7 @@ describe("listados y detalle de productos", () => {
             <button type="submit">Guardar</button>
           </form>
         </div>
+        <div id="producto-historial" class="config-subview"></div>
         <div id="producto-ver" class="config-subview">
           <span id="producto-ver-id"></span><h2 id="producto-ver-nombre"></h2>
           <span id="producto-ver-categoria"></span><span id="producto-ver-stock-tag-txt"></span>
@@ -652,6 +653,24 @@ describe("listados y detalle de productos", () => {
       isLowStock: true,
     },
   ];
+
+  it("la pestaña Historial abre su vista", async () => {
+    const view = await openProductsView();
+    const tab = document.getElementById("tab-producto-historial");
+    await view.showProductoTab("historial", tab);
+
+    expect(
+      document
+        .getElementById("producto-historial")
+        .classList.contains("active"),
+    ).toBe(true);
+    expect(tab.classList.contains("active")).toBe(true);
+    expect(
+      document.getElementById("producto-list").classList.contains("active"),
+    ).toBe(false);
+    expect(document.getElementById("producto-search-bar").hidden).toBe(true);
+    expect(document.querySelector(".search-bar").hidden).toBe(true);
+  });
 
   it("pinta solo productos del backend, badges, acciones y filtra por categoría/stock/caducidad", async () => {
     productServiceMocks.listProducts.mockResolvedValue(activeProducts);

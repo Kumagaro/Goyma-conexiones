@@ -200,7 +200,6 @@ async function initializeProductosView() {
 }
 
 export async function showProductoTab(tab, button = null) {
-  if (tab === "historial") return;
   currentTab = tab;
   document
     .querySelectorAll("#page-productos .config-subview")
@@ -221,6 +220,11 @@ export async function showProductoTab(tab, button = null) {
 
   const searchBar = document.getElementById("producto-search-bar");
   if (searchBar) searchBar.hidden = tab !== "list";
+  // El buscador de arriba solo filtra el listado; las demás pestañas tienen el suyo.
+  const searchField = document
+    .getElementById("producto-search")
+    ?.closest(".search-bar");
+  if (searchField) searchField.hidden = tab !== "list";
   const conditionFilters = document.getElementById(
     "producto-condiciones-toolbar",
   );

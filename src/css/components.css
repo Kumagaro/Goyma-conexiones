@@ -261,6 +261,78 @@ div:has(> .list-table) {
   white-space: nowrap;
 }
 
+/* Todo campo parte de este aspecto. :where no suma especificidad: los casos
+   propios (buscador en píldora, líneas de factura) siguen mandando. */
+:where(
+  input:not([type="checkbox"], [type="radio"], [type="file"], [type="hidden"]),
+  select,
+  textarea
+) {
+  box-sizing: border-box;
+  min-height: 46px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-white);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--text-base);
+}
+
+:where(
+  input:not([type="checkbox"], [type="radio"], [type="file"], [type="hidden"]),
+  select,
+  textarea
+):focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-tint);
+}
+
+/* Filtro de fecha con icono: mismo aspecto que un campo */
+.date-filter {
+  box-sizing: border-box;
+  min-height: 46px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-white);
+  color: var(--color-ink);
+  font-size: var(--text-base);
+}
+
+.date-filter:hover {
+  background-color: var(--color-white);
+}
+
+.date-filter input[type="date"] {
+  min-height: 0;
+  padding: 0;
+  color: var(--color-ink);
+  color-scheme: light;
+}
+
+.date-filter input[type="date"]:focus {
+  box-shadow: none;
+}
+
+.date-filter .icon {
+  color: var(--color-text-muted);
+}
+
+#producto-condiciones-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+#producto-condiciones-toolbar input,
+#producto-condiciones-toolbar select {
+  flex: 1 1 220px;
+  width: auto;
+}
+
 /* Controles: un solo aspecto en toda la aplicación */
 select,
 .modal-card input:not([type="checkbox"]):not([type="radio"]),
@@ -289,6 +361,19 @@ select:not([multiple]),
 
 select[multiple] {
   padding: var(--space-2);
+}
+
+select[multiple] option {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+select[multiple] option:checked {
+  background: linear-gradient(
+    var(--color-primary-tint),
+    var(--color-primary-tint)
+  );
+  color: var(--color-ink);
 }
 
 select:focus,
@@ -321,19 +406,6 @@ select:focus,
 /* Buscadores de las facturas: como cualquier campo */
 .autocomplete-row input[role="combobox"] {
   width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-white);
-  color: var(--color-ink);
-  font: inherit;
-  font-size: var(--text-base);
-}
-
-.autocomplete-row input[role="combobox"]:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-tint);
 }
 
 #actividad-orden-boton {
@@ -432,6 +504,13 @@ select:focus,
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* Menú: margen justo para que "Registro de Actividad" quepa en su botón */
+#sidebar {
+  padding: var(--space-5) var(--space-4);
+  scrollbar-color: var(--color-on-dark-muted) transparent;
+  scrollbar-width: thin;
 }
 
 /* Menú agrupado */
