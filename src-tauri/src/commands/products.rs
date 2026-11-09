@@ -70,17 +70,14 @@ fn is_low_stock(quantity_milli: i64, threshold_milli: Option<i64>) -> bool {
     threshold_milli.is_some_and(|threshold| quantity_milli > 0 && quantity_milli < threshold)
 }
 
-/// Suma de sus líneas en reservas activas (RS-03).
-fn reserved_milli(connection: &Connection, product_id: i64) -> Result<i64, AppError> {
-    connection
-        .query_row(
-            "SELECT COALESCE(SUM(l.quantityMilli), 0)
-             FROM invoiceLines l JOIN invoices i ON i.id = l.invoiceId
-             WHERE l.productId = ?1 AND i.status = 'pending' AND i.reservedUntil IS NOT NULL",
-            [product_id],
-            |row| row.get(0),
-        )
-        .map_err(|error| map_db_error(error, "productReserved", &[]))
+/// Apartado y disponible (`spec-06` EN-01).
+fn reserved_and_available(
+    connection: &Connection,
+    product_id: i64,
+    quantity_milli: i64,
+) -> Result<(i64, i64), AppError> {
+    let reserved = crate::inventory::reserved_milli(connection, product_id, None)?;
+    Ok((reserved, quantity_milli - reserved))
 }
 
 fn parse_low_stock_threshold(raw: &str) -> Result<i64, AppError> {
@@ -310,6 +307,7 @@ pub fn create_product_inner(
         is_low_stock: is_low_stock(quantity_milli, Some(low_stock_threshold_milli)),
         low_stock_threshold: Some(format_quantity_milli(low_stock_threshold_milli)),
         reserved_quantity: format_quantity_milli(0),
+        available_quantity: format_quantity_milli(quantity_milli),
     };
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
@@ -377,6 +375,7 @@ pub fn list_products_inner(
                     p.quantityMilli, p.costCents, p.profitPercentHundredths, p.expiresOn,
                     p.lowStockThresholdMilli
              FROM products p
+             JOIN productAvailability a ON a.productId = p.id
              LEFT JOIN categories c ON c.id = p.categoryId
              LEFT JOIN units u ON u.id = p.unitId
              WHERE p.status = 'active'
@@ -385,9 +384,9 @@ pub fn list_products_inner(
                AND (?3 = 0 OR p.categoryId IS NULL)
                AND (
                     ?4 = 'all'
-                    OR (?4 = 'available' AND p.quantityMilli > 0)
-                    OR (?4 = 'outOfStock' AND p.quantityMilli = 0)
-                    OR (?4 = 'low' AND p.quantityMilli > 0 AND p.quantityMilli < p.lowStockThresholdMilli)
+                    OR (?4 = 'available' AND a.availableMilli > 0)
+                    OR (?4 = 'outOfStock' AND a.availableMilli <= 0)
+                    OR (?4 = 'low' AND a.availableMilli > 0 AND a.availableMilli < p.lowStockThresholdMilli)
                )
                AND (
                     ?5 = 'all'
@@ -432,6 +431,7 @@ pub fn list_products_inner(
         let threshold_milli: Option<i64> = row
             .get(11)
             .map_err(|error| map_db_error(error, "listProducts", &[]))?;
+        let (reserved, available) = reserved_and_available(connection, product_id, quantity_milli)?;
 
         products.push(ProductListItem {
             id: product_id,
@@ -462,10 +462,11 @@ pub fn list_products_inner(
             expires_on: row
                 .get(10)
                 .map_err(|error| map_db_error(error, "listProducts", &[]))?,
-            is_out_of_stock: quantity_milli == 0,
-            is_low_stock: is_low_stock(quantity_milli, threshold_milli),
+            is_out_of_stock: available <= 0,
+            is_low_stock: is_low_stock(available, threshold_milli),
             low_stock_threshold: threshold_milli.map(format_quantity_milli),
-            reserved_quantity: format_quantity_milli(reserved_milli(connection, product_id)?),
+            reserved_quantity: format_quantity_milli(reserved),
+            available_quantity: format_quantity_milli(available.max(0)),
         });
     }
 
@@ -710,14 +711,15 @@ pub fn list_out_of_stock_and_discontinued_inner(
     let mut statement = transaction
         .prepare(
             "SELECT p.id, p.name, p.categoryId, c.name, p.unitId, u.name, u.abbreviation,
-                    p.quantityMilli, p.status, p.discontinuedAt
+                    MAX(a.availableMilli, 0), p.status, p.discontinuedAt
              FROM products p
+             JOIN productAvailability a ON a.productId = p.id
              LEFT JOIN categories c ON c.id = p.categoryId
              LEFT JOIN units u ON u.id = p.unitId
-             WHERE (p.status = 'discontinued' OR p.quantityMilli = 0)
+             WHERE (p.status = 'discontinued' OR a.availableMilli <= 0)
                AND (
                     ?1 = 'all'
-                    OR (?1 = 'outOfStock' AND p.quantityMilli = 0)
+                    OR (?1 = 'outOfStock' AND a.availableMilli <= 0)
                     OR (?1 = 'discontinued' AND p.status = 'discontinued')
                )
                AND (?2 = '' OR instr(p.nameNormalized, ?2) > 0)
@@ -913,10 +915,11 @@ pub fn get_product_inner(
             calculated_price_cents: calculated_price_cents(cost_cents, profit_percent_hundredths),
             profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
             expires_on,
-            is_out_of_stock: quantity_milli == 0,
-            is_low_stock: is_low_stock(quantity_milli, threshold_milli),
+            is_out_of_stock: quantity_milli - reserved_milli <= 0,
+            is_low_stock: is_low_stock(quantity_milli - reserved_milli, threshold_milli),
             low_stock_threshold: threshold_milli.map(format_quantity_milli),
             reserved_quantity: format_quantity_milli(reserved_milli),
+            available_quantity: format_quantity_milli((quantity_milli - reserved_milli).max(0)),
         },
         description,
         is_discontinued,
@@ -942,10 +945,11 @@ fn reserved_invoices_of_product(
 ) -> Result<Vec<(ReservedInvoice, i64)>, AppError> {
     connection
         .prepare(
-            "SELECT i.id, i.number, i.type, i.reservedUntil, SUM(l.quantityMilli)
+            "SELECT i.id, i.number, i.type, i.reservedUntil, SUM(l.quantityMilli - l.deliveredMilli)
              FROM invoices i JOIN invoiceLines l ON l.invoiceId = i.id
-             WHERE l.productId = ?1 AND i.status = 'pending' AND i.reservedUntil IS NOT NULL
-             GROUP BY i.id ORDER BY i.reservedUntil, i.id",
+             WHERE l.productId = ?1 AND i.type IN ('V', 'S') AND i.status <> 'cancelled'
+             GROUP BY i.id HAVING SUM(l.quantityMilli - l.deliveredMilli) > 0
+             ORDER BY i.invoiceDate, i.id",
         )
         .and_then(|mut statement| {
             statement
@@ -1095,6 +1099,8 @@ pub fn update_product_inner(
         })?;
 
     let low_stock_threshold_milli = parse_low_stock_threshold(&input.low_stock_threshold)?;
+    let (reserved, available) =
+        reserved_and_available(&transaction, input.product_id, quantity_milli)?;
 
     let timestamp = format_utc_timestamp(now);
     transaction
@@ -1140,10 +1146,11 @@ pub fn update_product_inner(
         calculated_price_cents: calculated_price_cents(cost_cents, profit_percent_hundredths),
         profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
         expires_on,
-        is_out_of_stock: quantity_milli == 0,
-        is_low_stock: is_low_stock(quantity_milli, Some(low_stock_threshold_milli)),
+        is_out_of_stock: available <= 0,
+        is_low_stock: is_low_stock(available, Some(low_stock_threshold_milli)),
         low_stock_threshold: Some(format_quantity_milli(low_stock_threshold_milli)),
-        reserved_quantity: format_quantity_milli(reserved_milli(&transaction, input.product_id)?),
+        reserved_quantity: format_quantity_milli(reserved),
+        available_quantity: format_quantity_milli(available.max(0)),
     };
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
@@ -1241,6 +1248,18 @@ pub fn delete_product_inner(
             "product missing during manual deletion",
         ));
     };
+
+    let reserved = crate::inventory::reserved_milli(&transaction, product_id, None)?;
+    if reserved > 0 {
+        return Err(AppError::new(
+            "productHasPendingDeliveries",
+            &format!(
+                "Tiene {} unidades sin entregar en facturas",
+                format_quantity_milli(reserved)
+            ),
+            "product with pending deliveries cannot be deleted",
+        ));
+    }
 
     crate::activity::record_deletion(
         &transaction,
@@ -1533,7 +1552,8 @@ pub fn purge_expired_products(
     let purged: Vec<(i64, String)> = connection
         .prepare(
             "SELECT id, name FROM products
-             WHERE status = 'discontinued' AND discontinuedAt <= ?1",
+             WHERE status = 'discontinued' AND discontinuedAt <= ?1
+               AND id NOT IN (SELECT productId FROM productAvailability WHERE reservedMilli > 0)",
         )
         .and_then(|mut statement| {
             statement
@@ -1544,7 +1564,8 @@ pub fn purge_expired_products(
     let deleted = connection
         .execute(
             "DELETE FROM products
-             WHERE status = 'discontinued' AND discontinuedAt <= ?1",
+             WHERE status = 'discontinued' AND discontinuedAt <= ?1
+               AND id NOT IN (SELECT productId FROM productAvailability WHERE reservedMilli > 0)",
             [&cutoff],
         )
         .map_err(|error| map_db_error(error, "purge_expired_products", &[]))?;
@@ -1622,7 +1643,8 @@ fn purge_best_effort_with_app_data_dir(
             let cutoff = expired_products_cutoff(now);
             let expired_count = connection.query_row(
                 "SELECT COUNT(*) FROM products
-                 WHERE status = 'discontinued' AND discontinuedAt <= ?1",
+                 WHERE status = 'discontinued' AND discontinuedAt <= ?1
+               AND id NOT IN (SELECT productId FROM productAvailability WHERE reservedMilli > 0)",
                 [&cutoff],
                 |row| row.get::<_, i64>(0),
             );

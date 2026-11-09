@@ -3,6 +3,7 @@ import { createCombobox } from "../components/combobox.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import { openQuickContactDialog } from "../components/quickContactDialog.js";
 import { openQuickProductDialog } from "../components/quickProductDialog.js";
+import { openFormDialog } from "../components/formDialog.js";
 import {
   changeInvoiceStatus,
   createEntryInvoice,
@@ -17,6 +18,7 @@ import {
   downloadInvoiceAttachment,
   getInvoice,
   listInvoices,
+  recordDeliveries,
   saveInvoiceAttachment,
   updateEntryInvoice,
   updateGuaranteeInvoice,
@@ -124,6 +126,21 @@ function listErrorMessage(error, fallback) {
     : fallback;
 }
 
+// spec-06 EN-02: estado de entrega de Venta y Servicio.
+const DELIVERY_LABELS = {
+  pending: "Sin entregar",
+  partial: "Entregada parcial",
+  delivered: "Entregada",
+};
+const DELIVERY_PILL = { partial: "is-pending", delivered: "is-completed" };
+
+function milliToText(milli) {
+  return (milli / 1000).toLocaleString("es-ES", {
+    maximumFractionDigits: 3,
+    useGrouping: false,
+  });
+}
+
 // Filtros de los listados (§7.7): búsqueda, estado y rango de fechas.
 function readListFilters(prefix, withStatus) {
   const value = (suffix) =>
@@ -133,6 +150,7 @@ function readListFilters(prefix, withStatus) {
   if (withStatus && value("filtro-estado")) {
     filters.status = value("filtro-estado");
   }
+  if (value("filtro-entrega")) filters.delivery = value("filtro-entrega");
   if (value("desde")) filters.fromDate = value("desde");
   if (value("hasta")) filters.toDate = value("hasta");
   return filters;
@@ -144,7 +162,7 @@ function bindListFilters(prefix, reload, claim) {
     const debounced = debounce(() => void reload(), 300);
     search.addEventListener("input", debounced);
   }
-  for (const suffix of ["filtro-estado", "desde", "hasta"]) {
+  for (const suffix of ["filtro-estado", "filtro-entrega", "desde", "hasta"]) {
     const control = document.getElementById(`${prefix}-${suffix}`);
     if (claim(control)) {
       control.addEventListener("change", () => void reload());
@@ -1427,13 +1445,26 @@ function createInvoiceSubmodule(cfg) {
       if (reservable) {
         texts.push(item?.reservedUntil ? formatDate(item.reservedUntil) : "—");
       }
+      const deliveryText = reservable
+        ? (DELIVERY_LABELS[item?.deliveryStatus] ?? "—")
+        : null;
+      if (reservable) texts.push(deliveryText);
       if (cfg.showsProductCount) texts.push(String(item?.productCount ?? "—"));
-      const cells = texts.map((text) => {
+      const cells = texts.map((text, index) => {
         const cell = document.createElement("td");
         if (text === statusText && item?.status) {
           const pill = document.createElement("span");
           pill.className = `status-pill is-${item.status}`;
           pill.textContent = text;
+          cell.append(pill);
+        } else if (
+          reservable &&
+          index === texts.length - 1 - (cfg.showsProductCount ? 1 : 0) &&
+          item?.deliveryStatus
+        ) {
+          const pill = document.createElement("span");
+          pill.className = `status-pill ${DELIVERY_PILL[item.deliveryStatus] ?? ""}`;
+          pill.textContent = deliveryText;
           cell.append(pill);
         } else {
           cell.textContent = text;
@@ -1575,6 +1606,12 @@ function createInvoiceSubmodule(cfg) {
           cell.textContent = text;
           row.append(cell);
         }
+        if (reservable && line?.deliveredQuantity != null) {
+          const delivered = document.createElement("small");
+          delivered.className = "price-calculated li-delivered";
+          delivered.textContent = `Entregado: ${line.deliveredQuantity} de ${line.quantity}`;
+          row.children[2]?.append(delivered);
+        }
         products.append(row);
       }
     }
@@ -1601,7 +1638,20 @@ function createInvoiceSubmodule(cfg) {
     }
     box.replaceChildren();
     const transitions = allowedTransitions(cfg.invoiceType, detail?.status);
-    box.hidden = !transitions.length;
+    const pending = reservable ? pendingLines(detail) : [];
+    box.hidden = !transitions.length && !pending.length;
+    if (pending.length) {
+      const deliverButton = document.createElement("button");
+      deliverButton.type = "button";
+      deliverButton.className = "btn-primary";
+      deliverButton.dataset.deliver = "";
+      deliverButton.textContent = "Registrar entrega";
+      deliverButton.addEventListener(
+        "click",
+        () => void handleDeliver(pending),
+      );
+      box.append(deliverButton);
+    }
     for (const target of transitions) {
       let paymentSelect = null;
       if (target === "completed" && hasPayment) {
@@ -1636,6 +1686,48 @@ function createInvoiceSubmodule(cfg) {
       });
       box.append(actionButton);
     }
+  }
+
+  // spec-06 EN-02: lo que queda por entregar de cada línea.
+  function pendingLines(detail) {
+    if (!detail || detail.status === "cancelled") return [];
+    return (detail.lines ?? [])
+      .map((line) => ({
+        line,
+        pending:
+          (parseDecimal(line.quantity, 3) ?? 0) -
+          (parseDecimal(line.deliveredQuantity ?? "0", 3) ?? 0),
+      }))
+      .filter(({ pending }) => pending > 0);
+  }
+
+  async function handleDeliver(pending) {
+    if (currentId == null) return;
+    const invoiceId = currentId;
+    const result = await openFormDialog({
+      title: `Registrar entrega · ${currentDetail?.number ?? ""}`,
+      submitText: "Registrar entrega",
+      missingMessage: "Indica cuánto se entrega.",
+      fields: pending.map(({ line, pending: milli }) => ({
+        name: `p${line.position}`,
+        label: `${line.productName} (pendiente: ${milliToText(milli)})`,
+        inputMode: "decimal",
+        value: milliToText(milli),
+      })),
+      onSubmit: (values) => {
+        const deliveries = pending
+          .map(({ line }) => ({
+            position: line.position,
+            quantity: String(values[`p${line.position}`] ?? "").trim(),
+          }))
+          .filter(({ quantity }) => quantity && parseDecimal(quantity, 3) > 0);
+        return recordDeliveries({ invoiceId, deliveries });
+      },
+    });
+    if (!result) return;
+    notifySuccess(`Entrega registrada en la factura ${result.number ?? ""}.`);
+    await openDetail(invoiceId);
+    await loadInvoices();
   }
 
   async function handleStatusChange(target, paymentSelect) {

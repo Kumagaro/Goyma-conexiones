@@ -24,7 +24,8 @@ pub fn get_dashboard_summary_inner(
 
     let out_of_stock_total: i64 = connection
         .query_row(
-            "SELECT COUNT(*) FROM products WHERE status = 'active' AND quantityMilli = 0",
+            "SELECT COUNT(*) FROM products p JOIN productAvailability a ON a.productId = p.id
+             WHERE p.status = 'active' AND a.availableMilli <= 0",
             [],
             |row| row.get(0),
         )
@@ -34,8 +35,9 @@ pub fn get_dashboard_summary_inner(
         .prepare(
             "SELECT c.name, COUNT(*) AS total
              FROM products p
+             JOIN productAvailability a ON a.productId = p.id
              INNER JOIN categories c ON c.id = p.categoryId
-             WHERE p.status = 'active' AND p.quantityMilli = 0
+             WHERE p.status = 'active' AND a.availableMilli <= 0
              GROUP BY p.categoryId, c.name
              ORDER BY total DESC, c.name ASC",
         )
@@ -60,7 +62,8 @@ pub fn get_dashboard_summary_inner(
 
     let without_category_count: i64 = connection
         .query_row(
-            "SELECT COUNT(*) FROM products WHERE status = 'active' AND quantityMilli = 0 AND categoryId IS NULL",
+            "SELECT COUNT(*) FROM products p JOIN productAvailability a ON a.productId = p.id
+             WHERE p.status = 'active' AND a.availableMilli <= 0 AND p.categoryId IS NULL",
             [],
             |row| row.get(0),
         )
@@ -254,8 +257,10 @@ fn read_income_lines(connection: &Connection) -> rusqlite::Result<Vec<IncomeLine
             "SELECT i.id, i.type, i.paidAt,
                     COALESCE(i.contactNationalId, 'nombre:' || i.contactFullNameNormalized), i.contactFullName,
                     il.productIdOriginal, il.productName, il.quantityMilli, il.subtotalCents,
-                    COALESCE((SELECT SUM(c.quantityMilli * c.unitCostCents) FROM consumptions c
-                              WHERE c.invoiceLineId = il.id), 0)
+                    COALESCE((SELECT SUM(d.quantityMilli * d.unitCostCents) FROM deliveries d
+                              WHERE d.invoiceLineId = il.id), 0)
+                        + (il.quantityMilli - il.deliveredMilli)
+                          * COALESCE((SELECT costCents FROM products WHERE id = il.productId), 0)
              FROM invoices i JOIN invoiceLines il ON il.invoiceId = i.id
              WHERE i.type IN ('V', 'S') AND i.status = 'completed'",
         )?
@@ -507,10 +512,11 @@ fn build_dashboard_kpis(
 
     let inventory_value = inventory_value_cents(connection)?;
     let (inventory_milli, out_of_stock, average_profit): (i64, i64, f64) = connection.query_row(
-        "SELECT COALESCE(SUM(quantityMilli), 0),
-                COALESCE(SUM(quantityMilli = 0), 0),
-                COALESCE(AVG(profitPercentHundredths), 0.0)
-         FROM products WHERE status = 'active'",
+        "SELECT COALESCE(SUM(p.quantityMilli), 0),
+                COALESCE(SUM(a.availableMilli <= 0), 0),
+                COALESCE(AVG(p.profitPercentHundredths), 0.0)
+         FROM products p JOIN productAvailability a ON a.productId = p.id
+         WHERE p.status = 'active'",
         [],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
@@ -812,7 +818,7 @@ mod tests {
         connection.last_insert_rowid()
     }
 
-    /// Línea con su consumo FIFO (`cost` = costo por unidad del lote).
+    /// Línea entregada con su consumo FIFO (`cost` = costo por unidad del lote).
     fn insert_line(
         connection: &Connection,
         invoice_id: i64,
@@ -844,6 +850,21 @@ mod tests {
                 "INSERT INTO consumptions (invoiceLineId, quantityMilli, unitCostCents, createdAt)
                  VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![line_id, quantity_milli, cost, NOW],
+            )
+            .unwrap();
+        // spec-06 EN-04: lo vendido se entregó completo a ese mismo costo.
+        connection
+            .execute(
+                "INSERT INTO deliveries (invoiceLineId, quantityMilli, unitCostCents, deliveredAt, userName)
+                 SELECT ?1, ?2, ?3, ?4, 'tester' FROM invoices
+                 WHERE id = ?5 AND type IN ('V', 'S')",
+                rusqlite::params![line_id, quantity_milli, cost, NOW, invoice_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE invoiceLines SET deliveredMilli = quantityMilli WHERE id = ?1",
+                [line_id],
             )
             .unwrap();
     }

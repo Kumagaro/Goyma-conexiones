@@ -127,6 +127,7 @@ pub fn run() {
             commands::invoices::save_invoice_attachment,
             commands::invoices::download_invoice_attachment,
             commands::invoices::change_invoice_status,
+            commands::invoices::record_deliveries,
             commands::invoices::delete_invoice,
             commands::invoices::get_invoice_print_model,
             commands::invoices::export_invoice_pdf,

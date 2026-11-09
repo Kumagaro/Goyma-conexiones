@@ -60,6 +60,11 @@ export function downloadInvoiceAttachment(invoiceId, destinationPath) {
   return invoke("download_invoice_attachment", { invoiceId, destinationPath });
 }
 
+// spec-06 EN-02: entrega total o parcial de líneas de Venta o Servicio.
+export function recordDeliveries(input) {
+  return invoke("record_deliveries", { input });
+}
+
 export function changeInvoiceStatus(invoiceId, status, paymentMethod) {
   const args = { invoiceId, status };
   if (paymentMethod !== undefined) args.paymentMethod = paymentMethod;

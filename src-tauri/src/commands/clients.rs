@@ -583,6 +583,7 @@ fn client_invoice_history(
                 created_by_name,
             )| {
                 InvoiceListItem {
+                    delivery_status: None,
                     id,
                     number,
                     invoice_type,

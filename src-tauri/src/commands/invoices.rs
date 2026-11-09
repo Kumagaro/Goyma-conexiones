@@ -9,17 +9,18 @@ use crate::commands::products::purge_best_effort;
 use crate::db::connection::current_app_data_dir;
 use crate::errors::{append_error_log, log_error, map_db_error, AppError};
 use crate::inventory::{
-    consume_fifo, line_total_cost_cents, line_unit_cost_cents, next_arrival_order,
-    recalculate_product_cost, recalculate_product_quantity, resolve_line_unit, restore_consumption,
-    reverse_lots_of_invoice, validate_stock_limit, LineUnit,
+    consume_fifo, next_arrival_order, recalculate_product_cost, recalculate_product_quantity,
+    resolve_line_unit, restore_consumption, reverse_lots_of_invoice, validate_stock_limit,
+    LineUnit,
 };
 use crate::invoice_counter::next_invoice_number;
 use crate::models::invoice::{
     AssociatedInvoice, CreateEntryInvoiceInput, CreateGuaranteeInvoiceInput,
     CreateInstallationInvoiceInput, CreateLossInvoiceInput, CreateSaleInvoiceInput,
     CreateServiceInvoiceInput, InvoiceActionResult, InvoiceDetail, InvoiceFilters, InvoiceListItem,
-    UpdateEntryInvoiceInput, UpdateGuaranteeInvoiceInput, UpdateInstallationInvoiceInput,
-    UpdateOutgoingInvoiceLineInput, UpdateSaleInvoiceInput, UpdateServiceInvoiceInput,
+    RecordDeliveriesInput, UpdateEntryInvoiceInput, UpdateGuaranteeInvoiceInput,
+    UpdateInstallationInvoiceInput, UpdateOutgoingInvoiceLineInput, UpdateSaleInvoiceInput,
+    UpdateServiceInvoiceInput,
 };
 use crate::models::invoice_line::{EnteredUnit, InvoiceLineDetail};
 use crate::models::product::format_quantity_milli;
@@ -282,6 +283,87 @@ fn line_gross_cents(
     }
 }
 
+/// `spec-06` EN-02: Entregada, Entregada parcial o Sin entregar (solo
+/// Venta y Servicio).
+fn delivery_status_of(
+    connection: &Connection,
+    invoice_id: i64,
+    invoice_type: &str,
+) -> Result<Option<String>, AppError> {
+    if !matches!(invoice_type, "V" | "S") {
+        return Ok(None);
+    }
+    let (delivered, quantity): (i64, i64) = connection
+        .query_row(
+            "SELECT COALESCE(SUM(deliveredMilli), 0), COALESCE(SUM(quantityMilli), 0)
+             FROM invoiceLines WHERE invoiceId = ?1",
+            [invoice_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| map_db_error(error, "deliveryStatus", &[]))?;
+    let status = if delivered == 0 {
+        "pending"
+    } else if delivered >= quantity {
+        "delivered"
+    } else {
+        "partial"
+    };
+    Ok(Some(status.to_owned()))
+}
+
+/// Costo de una salida al costo vigente del producto (`spec-06` S-02):
+/// (costo por unidad, costo de la línea).
+fn current_cost_line(
+    connection: &Connection,
+    product_id: i64,
+    quantity_milli: i64,
+) -> Result<(i64, i64), AppError> {
+    let cost: i64 = connection
+        .query_row(
+            "SELECT costCents FROM products WHERE id = ?1",
+            [product_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| map_db_error(error, "currentCost", &[]))?;
+    let total =
+        crate::inventory::round_half_up(i128::from(quantity_milli) * i128::from(cost), 1_000)
+            as i64;
+    Ok((cost, total))
+}
+
+/// `spec-06` EN-01, S-14: Garantía e Insumos solo cubren lo ya entregado en
+/// la factura asociada, por producto.
+fn ensure_associated_within_delivered(
+    connection: &Connection,
+    invoice_id: i64,
+    associated_invoice_id: i64,
+) -> Result<(), AppError> {
+    let over: Option<(String, i64)> = connection
+        .query_row(
+            "SELECT l.productName, COALESCE((SELECT SUM(a.deliveredMilli) FROM invoiceLines a
+                     WHERE a.invoiceId = ?2 AND a.productIdOriginal = l.productIdOriginal), 0)
+             FROM invoiceLines l WHERE l.invoiceId = ?1
+             GROUP BY l.productIdOriginal
+             HAVING SUM(l.quantityMilli) > COALESCE((SELECT SUM(a.deliveredMilli) FROM invoiceLines a
+                     WHERE a.invoiceId = ?2 AND a.productIdOriginal = l.productIdOriginal), 0)
+             LIMIT 1",
+            params![invoice_id, associated_invoice_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| map_db_error(error, "associatedDelivered", &[]))?;
+    if let Some((name, delivered)) = over {
+        return Err(validation_failed(
+            &format!(
+                "Solo se entregaron {} de «{name}» en la factura asociada",
+                format_quantity_milli(delivered)
+            ),
+            "associated invoice quantity above delivered",
+        ));
+    }
+    Ok(())
+}
+
 /// Nombre, apellidos, carné y teléfono del contacto (`spec-06` CT-01: solo el
 /// nombre es obligatorio).
 type ContactSnapshot = (String, Option<String>, Option<String>, Option<String>);
@@ -311,6 +393,7 @@ fn remove_entry_invoice_line(
         .execute("DELETE FROM invoiceLines WHERE id = ?1", [row.id])
         .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
     recalculate_product_quantity(connection, product_id)?;
+    crate::inventory::ensure_stock_covers_reserved(connection, product_id)?;
     if let Some(arrival_order) = arrival_order {
         crate::inventory::shift_later_stock_before(
             connection,
@@ -390,6 +473,7 @@ pub fn list_invoices_inner(
             "reservas" => "reserved".to_owned(),
             _ => value,
         });
+    let delivery_filter = normalize_optional_filter(filters.delivery.as_deref());
     let phone_query = filters
         .search
         .as_deref()
@@ -546,6 +630,12 @@ pub fn list_invoices_inner(
         let (total_cents, product_count, created_by_name) =
             crate::search::invoice_list_stats(connection, id)
                 .map_err(|error| map_db_error(error, "listInvoices", &[]))?;
+        let delivery_status = delivery_status_of(connection, id, &invoice_type_value)?;
+        if let Some(expected) = delivery_filter.as_deref() {
+            if delivery_status.as_deref() != Some(expected) {
+                continue;
+            }
+        }
 
         items.push(InvoiceListItem {
             id,
@@ -566,6 +656,7 @@ pub fn list_invoices_inner(
             product_count,
             created_by_name,
             reserved_until,
+            delivery_status,
         });
     }
 
@@ -725,7 +816,7 @@ pub fn get_invoice_inner(
                         ) END AS consumedMilli,
                         il.enteredUnitId, il.enteredUnitName, il.enteredUnitAbbreviation,
                         il.enteredQuantityMilli, il.listPriceCents, il.grossCents, il.discountKind,
-                        il.discountValue, il.discountCents
+                        il.discountValue, il.discountCents, il.deliveredMilli
                  FROM invoiceLines il
                  LEFT JOIN products p ON p.id = il.productId
                  LEFT JOIN lots l ON l.invoiceLineId = il.id
@@ -772,6 +863,7 @@ pub fn get_invoice_inner(
                     discount_kind: row.get(19)?,
                     discount_value: row.get(20)?,
                     discount_cents: Some(row.get::<_, i64>(21)?).filter(|cents| *cents > 0),
+                    delivered_quantity: format_quantity_milli(row.get(22)?),
                 })
             })
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
@@ -1518,7 +1610,6 @@ fn create_client_outgoing_invoice_inner(
     op: &str,
     kind: &str,
     invoice_type: &str,
-    movement_type: &str,
     client_id: i64,
     invoice_date: &str,
     status: Option<&str>,
@@ -1657,12 +1748,15 @@ fn create_client_outgoing_invoice_inner(
         // parcial la informa `consume_fifo` con el disponible.
         let available_milli: i64 = connection
             .query_row(
-                "SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1",
+                "SELECT p.quantityMilli - COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli)
+                    FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId
+                    WHERE il.productId = p.id AND i.type IN ('V', 'S') AND i.status <> 'cancelled'), 0)
+                 FROM products p WHERE p.id = ?1",
                 [*product_id],
                 |row| row.get(0),
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
-        if available_milli == 0 {
+        if available_milli <= 0 {
             return Err(validation_failed(
                 &format!("El producto «{product_name}» está agotado"),
                 &format!("out of stock product used in {kind}"),
@@ -1688,6 +1782,7 @@ fn create_client_outgoing_invoice_inner(
         )?;
         let unit_price_cents = price.unit_price_cents;
         let subtotal_cents = price.subtotal_cents;
+        crate::inventory::ensure_available(connection, *product_id, quantity_milli, None)?;
         total_cents = total_cents.checked_add(subtotal_cents).ok_or_else(|| {
             AppError::new(
                 "validationFailed",
@@ -1806,7 +1901,7 @@ fn create_client_outgoing_invoice_inner(
                 categoryId, categoryName, costAtSaleCents, createdAt, updatedAt,
                 listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli)
              VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15,
-                ?16, ?17, ?18, ?19, ?20, ?9)",
+                ?16, ?17, ?18, ?19, ?20, 0)",
             params![
                 invoice_id,
                 position,
@@ -1831,41 +1926,9 @@ fn create_client_outgoing_invoice_inner(
             ],
         ).map_err(|error| map_db_error(error, op, &[]))?;
 
+        // spec-06 EN-01: queda apartado; el stock baja al entregar.
         let line_id = connection.last_insert_rowid();
         store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
-        // Descuenta por FIFO (LT-02); sin stock suficiente revierte todo.
-        consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
-
-        recalculate_product_quantity(connection, product_id)?;
-
-        let stock_after: i64 = connection
-            .query_row(
-                "SELECT quantityMilli FROM products WHERE id = ?1",
-                [product_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| map_db_error(error, op, &[]))?;
-        connection.execute(
-            "INSERT INTO productMovements (createdAt, productId, productIdOriginal, productName, type, quantityMilli,
-                stockAfterMilli, unitPriceCents, totalPriceCents, invoiceId, invoiceNumber, invoiceType, userId, userName)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-            params![
-                &timestamp,
-                product_id,
-                product_id,
-                product_name,
-                movement_type,
-                -quantity_milli,
-                stock_after,
-                unit_price_cents,
-                subtotal_cents,
-                invoice_id,
-                &number,
-                invoice_type,
-                _actor.id(),
-                _actor.username(),
-            ],
-        ).map_err(|error| map_db_error(error, op, &[]))?;
     }
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
@@ -1904,7 +1967,6 @@ pub fn create_sale_invoice_inner(
         "createSaleInvoice",
         "sale invoice",
         "V",
-        "saleOut",
         input.client_id,
         &input.invoice_date,
         input.status.as_deref(),
@@ -1939,7 +2001,6 @@ pub fn create_service_invoice_inner(
         "createServiceInvoice",
         "service invoice",
         "S",
-        "serviceOut",
         input.client_id,
         &input.invoice_date,
         input.status.as_deref(),
@@ -2108,12 +2169,15 @@ fn create_associated_outgoing_invoice_inner(
         }
         let available_milli: i64 = connection
             .query_row(
-                "SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1",
+                "SELECT p.quantityMilli - COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli)
+                    FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId
+                    WHERE il.productId = p.id AND i.type IN ('V', 'S') AND i.status <> 'cancelled'), 0)
+                 FROM products p WHERE p.id = ?1",
                 [*product_id],
                 |row| row.get(0),
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
-        if available_milli == 0 {
+        if available_milli <= 0 {
             return Err(validation_failed(
                 &format!("El producto «{product_name}» está agotado"),
                 &format!("out of stock product used in {op}"),
@@ -2199,9 +2263,10 @@ fn create_associated_outgoing_invoice_inner(
         let line_id = connection.last_insert_rowid();
         store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
         // Costo real de los lotes consumidos (LT-02, FS-04/FS-05).
-        let consumptions = consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
-        let line_total_cents = line_total_cost_cents(&consumptions);
-        let line_unit_cost_cents = line_unit_cost_cents(line_total_cents, quantity_milli);
+        crate::inventory::ensure_available(connection, product_id, quantity_milli, None)?;
+        consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
+        let (line_unit_cost_cents, line_total_cents) =
+            current_cost_line(connection, product_id, quantity_milli)?;
         total_cents = total_cents.checked_add(line_total_cents).ok_or_else(|| {
             AppError::new(
                 "validationFailed",
@@ -2216,7 +2281,7 @@ fn create_associated_outgoing_invoice_inner(
             ));
         }
         connection.execute(
-            "UPDATE invoiceLines SET unitPriceCents = ?1, subtotalCents = ?2, updatedAt = ?3 WHERE id = ?4",
+            "UPDATE invoiceLines SET unitPriceCents = ?1, costAtSaleCents = ?1, subtotalCents = ?2, updatedAt = ?3 WHERE id = ?4",
             params![line_unit_cost_cents, line_total_cents, &timestamp, line_id],
         ).map_err(|error| map_db_error(error, op, &[]))?;
 
@@ -2251,6 +2316,8 @@ fn create_associated_outgoing_invoice_inner(
             ],
         ).map_err(|error| map_db_error(error, op, &[]))?;
     }
+
+    ensure_associated_within_delivered(connection, invoice_id, associated_invoice_id)?;
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
     crate::automation::evaluate_watches_best_effort(&transaction, now);
@@ -2333,6 +2400,19 @@ struct OutgoingInvoiceLineRow {
     unit_price_cents: i64,
     list_price_cents: Option<i64>,
     subtotal_cents: i64,
+    delivered_milli: i64,
+}
+
+/// `spec-06` EN-03: lo entregado no se quita ni se reduce al editar.
+fn below_delivered(product_name: &str, delivered_milli: i64) -> AppError {
+    AppError::new(
+        "belowDelivered",
+        &format!(
+            "No se puede quitar ni reducir «{product_name}» por debajo de lo ya entregado ({})",
+            format_quantity_milli(delivered_milli)
+        ),
+        "outgoing line below delivered quantity",
+    )
 }
 
 struct OutgoingUpdateMovement<'a> {
@@ -2505,7 +2585,6 @@ fn update_priced_outgoing_invoice_inner(
     now: DateTime<Utc>,
     op: &str,
     invoice_type: InvoiceType,
-    sale_movement: &str,
     invoice_id: i64,
     client_id: i64,
     invoice_date: &str,
@@ -2575,7 +2654,7 @@ fn update_priced_outgoing_invoice_inner(
         let mut statement = connection
             .prepare(
                 "SELECT id, position, productId, productIdOriginal, productName,
-                    quantityMilli, unitPriceCents, listPriceCents, subtotalCents
+                    quantityMilli, unitPriceCents, listPriceCents, subtotalCents, deliveredMilli
                  FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
@@ -2591,6 +2670,7 @@ fn update_priced_outgoing_invoice_inner(
                     unit_price_cents: row.get(6)?,
                     list_price_cents: row.get(7)?,
                     subtotal_cents: row.get(8)?,
+                    delivered_milli: row.get(9)?,
                 })
             })
             .map_err(|error| map_db_error(error, op, &[]))?
@@ -2680,6 +2760,9 @@ fn update_priced_outgoing_invoice_inner(
         if !remove {
             continue;
         }
+        if row.delivered_milli > 0 {
+            return Err(below_delivered(&row.product_name, row.delivered_milli));
+        }
         if row.product_id.is_some() {
             restore_outgoing_line_consumptions(
                 connection,
@@ -2708,38 +2791,6 @@ fn update_priced_outgoing_invoice_inner(
                 }
             }
         }
-    }
-
-    // Devolver en silencio lo consumido por las líneas que se conservan,
-    // para volver a descontar con el stock completo disponible.
-    for row in &current_lines {
-        if !occupied_positions.contains(&row.position) {
-            continue;
-        }
-        if row.product_id.is_none() {
-            continue;
-        }
-        let still_referenced = parsed_lines
-            .iter()
-            .any(|(line, _, _)| line.product_id_original == Some(row.product_id_original));
-        if !still_referenced {
-            continue;
-        }
-        restore_outgoing_line_consumptions(
-            connection,
-            &actor,
-            OutgoingLineRestoration {
-                invoice_id,
-                invoice_number: &invoice_number,
-                invoice_type: type_code,
-                line_id: row.id,
-                product_id_original: row.product_id_original,
-                product_name: &row.product_name,
-                record_reversal: false,
-                op,
-            },
-            now,
-        )?;
     }
 
     let mut invoice_total_cents = 0_i64;
@@ -2813,10 +2864,17 @@ fn update_priced_outgoing_invoice_inner(
                     &format!("discontinued {op} product was changed beyond reduction"),
                 ));
             }
-            // H-A4: sin cambio de cantidad no hay Ajuste; el precio emitido
-            // se conserva y solo se refresca el costo del momento.
-            consume_fifo(connection, row_product_id, quantity_milli, row.id, now)?;
-            recalculate_product_quantity(connection, row_product_id)?;
+            // spec-06 EN-01/EN-03: editar no mueve stock; lo entregado no se
+            // puede quitar y lo pendiente debe caber en lo disponible.
+            if quantity_milli < row.delivered_milli {
+                return Err(below_delivered(&row.product_name, row.delivered_milli));
+            }
+            crate::inventory::ensure_available(
+                connection,
+                row_product_id,
+                quantity_milli - row.delivered_milli,
+                Some(invoice_id),
+            )?;
             let current_cost_cents: i64 = connection
                 .query_row(
                     "SELECT costCents FROM products WHERE id = ?1",
@@ -2840,7 +2898,7 @@ fn update_priced_outgoing_invoice_inner(
                     "UPDATE invoiceLines SET quantityMilli = ?1, subtotalCents = ?2,
                         costAtSaleCents = ?3, updatedAt = ?4, unitPriceCents = ?6,
                         grossCents = ?7, discountKind = ?8, discountValue = ?9,
-                        discountCents = ?10, deliveredMilli = ?1,
+                        discountCents = ?10,
                         listPriceCents = COALESCE(listPriceCents, ?11)
                      WHERE id = ?5",
                     params![
@@ -2873,27 +2931,6 @@ fn update_priced_outgoing_invoice_inner(
                     "El total de la factura no puede superar $999.999.999,99",
                     &format!("{op} total exceeds legal bound"),
                 ));
-            }
-            let delta_milli = quantity_milli - row.quantity_milli;
-            if delta_milli != 0 {
-                insert_outgoing_update_movement(
-                    connection,
-                    &actor,
-                    OutgoingUpdateMovement {
-                        invoice_id,
-                        invoice_number: &invoice_number,
-                        invoice_type: type_code,
-                        product_id: row_product_id,
-                        product_id_original: row.product_id_original,
-                        product_name: &row.product_name,
-                        movement_type: "adjustment",
-                        // Con signo del stock (HP-01): subir la cantidad vendida saca stock.
-                        quantity_milli: -delta_milli,
-                        unit_price_cents: row.unit_price_cents,
-                    },
-                    now,
-                    op,
-                )?;
             }
             continue;
         }
@@ -2963,12 +3000,15 @@ fn update_priced_outgoing_invoice_inner(
         }
         let available_milli: i64 = connection
             .query_row(
-                "SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1",
+                "SELECT p.quantityMilli - COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli)
+                    FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId
+                    WHERE il.productId = p.id AND i.type IN ('V', 'S') AND i.status <> 'cancelled'), 0)
+                 FROM products p WHERE p.id = ?1",
                 [product_id],
                 |row| row.get(0),
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
-        if available_milli == 0 {
+        if available_milli <= 0 {
             return Err(validation_failed(
                 &format!("El producto «{product_name}» está agotado"),
                 &format!("out of stock product added to {op}"),
@@ -2986,6 +3026,12 @@ fn update_priced_outgoing_invoice_inner(
         )?;
         let unit_price_cents = price.unit_price_cents;
         let subtotal_cents = price.subtotal_cents;
+        crate::inventory::ensure_available(
+            connection,
+            product_id,
+            quantity_milli,
+            Some(invoice_id),
+        )?;
         invoice_total_cents = invoice_total_cents
             .checked_add(subtotal_cents)
             .ok_or_else(|| {
@@ -3020,7 +3066,7 @@ fn update_priced_outgoing_invoice_inner(
                     subtotalCents, categoryId, categoryName, costAtSaleCents, createdAt, updatedAt,
                     listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli)
                  VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15,
-                    ?16, ?17, ?18, ?19, ?20, ?9)",
+                    ?16, ?17, ?18, ?19, ?20, 0)",
                 params![
                     invoice_id,
                     position,
@@ -3047,25 +3093,7 @@ fn update_priced_outgoing_invoice_inner(
             .map_err(|error| map_db_error(error, op, &[]))?;
         let line_id = connection.last_insert_rowid();
         store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
-        consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
-        recalculate_product_quantity(connection, product_id)?;
-        insert_outgoing_update_movement(
-            connection,
-            &actor,
-            OutgoingUpdateMovement {
-                invoice_id,
-                invoice_number: &invoice_number,
-                invoice_type: type_code,
-                product_id,
-                product_id_original: product_id,
-                product_name: &product_name,
-                movement_type: sale_movement,
-                quantity_milli: -quantity_milli,
-                unit_price_cents,
-            },
-            now,
-            op,
-        )?;
+        let _ = unit_price_cents;
         occupied_positions.insert(position);
     }
 
@@ -3225,7 +3253,7 @@ fn update_costed_outgoing_invoice_inner(
         let mut statement = connection
             .prepare(
                 "SELECT id, position, productId, productIdOriginal, productName,
-                    quantityMilli, unitPriceCents, listPriceCents, subtotalCents
+                    quantityMilli, unitPriceCents, listPriceCents, subtotalCents, deliveredMilli
                  FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
@@ -3241,6 +3269,7 @@ fn update_costed_outgoing_invoice_inner(
                     unit_price_cents: row.get(6)?,
                     list_price_cents: row.get(7)?,
                     subtotal_cents: row.get(8)?,
+                    delivered_milli: row.get(9)?,
                 })
             })
             .map_err(|error| map_db_error(error, op, &[]))?
@@ -3456,14 +3485,16 @@ fn update_costed_outgoing_invoice_inner(
                     &format!("discontinued {op} product was changed beyond reduction"),
                 ));
             }
-            let fresh_consumptions =
-                consume_fifo(connection, row_product_id, quantity_milli, row.id, now)?;
+            // Lo restaurado arriba aún no está en la caché de stock.
             recalculate_product_quantity(connection, row_product_id)?;
-            let line_total_cents = line_total_cost_cents(&fresh_consumptions);
-            let line_unit_cost_cents = line_unit_cost_cents(line_total_cents, quantity_milli);
+            crate::inventory::ensure_available(connection, row_product_id, quantity_milli, None)?;
+            consume_fifo(connection, row_product_id, quantity_milli, row.id, now)?;
+            recalculate_product_quantity(connection, row_product_id)?;
+            let (line_unit_cost_cents, line_total_cents) =
+                current_cost_line(connection, row_product_id, quantity_milli)?;
             connection
                 .execute(
-                    "UPDATE invoiceLines SET quantityMilli = ?1, unitPriceCents = ?2, subtotalCents = ?3,
+                    "UPDATE invoiceLines SET quantityMilli = ?1, unitPriceCents = ?2, costAtSaleCents = ?2, subtotalCents = ?3,
                         updatedAt = ?4 WHERE id = ?5",
                     params![
                         quantity_milli,
@@ -3561,12 +3592,15 @@ fn update_costed_outgoing_invoice_inner(
         }
         let available_milli: i64 = connection
             .query_row(
-                "SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1",
+                "SELECT p.quantityMilli - COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli)
+                    FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId
+                    WHERE il.productId = p.id AND i.type IN ('V', 'S') AND i.status <> 'cancelled'), 0)
+                 FROM products p WHERE p.id = ?1",
                 [product_id],
                 |row| row.get(0),
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
-        if available_milli == 0 {
+        if available_milli <= 0 {
             return Err(validation_failed(
                 &format!("El producto «{product_name}» está agotado"),
                 &format!("out of stock product added to {op}"),
@@ -3607,9 +3641,11 @@ fn update_costed_outgoing_invoice_inner(
             .map_err(|error| map_db_error(error, op, &[]))?;
         let line_id = connection.last_insert_rowid();
         store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
-        let new_consumptions = consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
-        let new_total_cents = line_total_cost_cents(&new_consumptions);
-        let new_unit_cost_cents = line_unit_cost_cents(new_total_cents, quantity_milli);
+        recalculate_product_quantity(connection, product_id)?;
+        crate::inventory::ensure_available(connection, product_id, quantity_milli, None)?;
+        consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
+        let (new_unit_cost_cents, new_total_cents) =
+            current_cost_line(connection, product_id, quantity_milli)?;
         invoice_total_cents = invoice_total_cents
             .checked_add(new_total_cents)
             .ok_or_else(|| {
@@ -3626,7 +3662,7 @@ fn update_costed_outgoing_invoice_inner(
         }
         connection
             .execute(
-                "UPDATE invoiceLines SET unitPriceCents = ?1, subtotalCents = ?2, updatedAt = ?3 WHERE id = ?4",
+                "UPDATE invoiceLines SET unitPriceCents = ?1, costAtSaleCents = ?1, subtotalCents = ?2, updatedAt = ?3 WHERE id = ?4",
                 params![new_unit_cost_cents, new_total_cents, &timestamp, line_id],
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
@@ -3688,6 +3724,8 @@ fn update_costed_outgoing_invoice_inner(
     )
     .map_err(|error| map_db_error(error, op, &[]))?;
 
+    ensure_associated_within_delivered(connection, invoice_id, associated_invoice_id)?;
+
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
     crate::automation::evaluate_watches_best_effort(&transaction, now);
     transaction
@@ -3710,7 +3748,6 @@ pub fn update_sale_invoice_inner(
         now,
         "updateSaleInvoice",
         InvoiceType::Sale,
-        "saleOut",
         input.invoice_id,
         input.client_id,
         &input.invoice_date,
@@ -3743,7 +3780,6 @@ pub fn update_service_invoice_inner(
         now,
         "updateServiceInvoice",
         InvoiceType::Service,
-        "serviceOut",
         input.invoice_id,
         input.client_id,
         &input.invoice_date,
@@ -3904,12 +3940,15 @@ fn create_loss_invoice_tx(
     // perder, así que el estado no bloquea; sin stock ya se rechazó arriba.
     let available_milli: i64 = connection
         .query_row(
-            "SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1",
+            "SELECT p.quantityMilli - COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli)
+                    FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId
+                    WHERE il.productId = p.id AND i.type IN ('V', 'S') AND i.status <> 'cancelled'), 0)
+                 FROM products p WHERE p.id = ?1",
             [input.product_id],
             |row| row.get(0),
         )
         .map_err(|error| map_db_error(error, "createLossInvoice", &[]))?;
-    if available_milli == 0 {
+    if available_milli <= 0 {
         return Err(validation_failed(
             &format!("El producto «{product_name}» está agotado"),
             "out of stock product used in loss invoice",
@@ -3971,9 +4010,10 @@ fn create_loss_invoice_tx(
     let line_id = connection.last_insert_rowid();
     store_line_unit(connection, line_id, line_unit.as_ref(), "createLossInvoice")?;
     // El costo lo calcula el sistema con el consumo FIFO (LT-02, FP-01).
-    let consumptions = consume_fifo(connection, input.product_id, quantity_milli, line_id, now)?;
-    let line_total_cents = line_total_cost_cents(&consumptions);
-    let line_unit_cost_cents = line_unit_cost_cents(line_total_cents, quantity_milli);
+    crate::inventory::ensure_available(connection, input.product_id, quantity_milli, None)?;
+    consume_fifo(connection, input.product_id, quantity_milli, line_id, now)?;
+    let (line_unit_cost_cents, line_total_cents) =
+        current_cost_line(connection, input.product_id, quantity_milli)?;
     if line_total_cents > 99_999_999_999 {
         return Err(validation_failed(
             "El total de la factura no puede superar $999.999.999,99",
@@ -3981,7 +4021,7 @@ fn create_loss_invoice_tx(
         ));
     }
     connection.execute(
-        "UPDATE invoiceLines SET unitPriceCents = ?1, subtotalCents = ?2, updatedAt = ?3 WHERE id = ?4",
+        "UPDATE invoiceLines SET unitPriceCents = ?1, costAtSaleCents = ?1, subtotalCents = ?2, updatedAt = ?3 WHERE id = ?4",
         params![line_unit_cost_cents, line_total_cents, &timestamp, line_id],
     ).map_err(|error| map_db_error(error, "createLossInvoice", &[]))?;
 
@@ -4450,6 +4490,7 @@ pub fn update_entry_invoice_inner(
                 .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
             store_line_unit(connection, row.id, line_unit.as_ref(), "updateEntryInvoice")?;
             recalculate_product_quantity(connection, product_id)?;
+            crate::inventory::ensure_stock_covers_reserved(connection, product_id)?;
             if let Some(arrival_order) = crate::inventory::lot_arrival_order(connection, lot_id)? {
                 crate::inventory::shift_later_stock_before(
                     connection,
@@ -4660,6 +4701,8 @@ pub fn expire_reservations(connection: &Connection, now: DateTime<Utc>) -> Resul
         .prepare(
             "SELECT id, number, type, COALESCE(contactFullName, '') FROM invoices
              WHERE status = 'pending' AND reservedUntil IS NOT NULL AND reservedUntil < ?1
+               AND NOT EXISTS (SELECT 1 FROM invoiceLines il
+                               WHERE il.invoiceId = invoices.id AND il.deliveredMilli > 0)
              ORDER BY reservedUntil, id",
         )
         .and_then(|mut statement| {
@@ -5392,6 +5435,225 @@ pub fn update_installation_invoice(
     result
 }
 
+/// `spec-06` EN-02: entrega total o parcial de líneas de una Venta o un
+/// Servicio. Cada entrega descuenta por FIFO, guarda el costo vigente (EN-04)
+/// y registra su salida con la fecha de entrega.
+pub fn record_deliveries_inner(
+    connection: &mut Connection,
+    now: DateTime<Utc>,
+    input: RecordDeliveriesInput,
+) -> Result<InvoiceActionResult, AppError> {
+    let actor = require_session(connection, now)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+    let connection = &transaction;
+    let header: Option<(String, Option<String>, String)> = connection
+        .query_row(
+            "SELECT type, status, number FROM invoices WHERE id = ?1",
+            [input.invoice_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+    let Some((invoice_type, status, number)) = header else {
+        return Err(AppError::new(
+            "notFound",
+            "La factura ya no existe",
+            "invoice missing while recording deliveries",
+        ));
+    };
+    let movement_type = match invoice_type.as_str() {
+        "V" => "saleOut",
+        "S" => "serviceOut",
+        _ => {
+            return Err(validation_failed(
+                "Solo se entregan ventas y servicios",
+                "delivery on an invoice that is not a sale or service",
+            ))
+        }
+    };
+    if status.as_deref() == Some("cancelled") {
+        return Err(AppError::new(
+            "invalidState",
+            "Una factura cancelada no se entrega",
+            "delivery on a cancelled invoice",
+        ));
+    }
+    if input.deliveries.is_empty() {
+        return Err(validation_failed(
+            "Indica qué se entrega",
+            "empty delivery request",
+        ));
+    }
+    let timestamp = format_utc_timestamp(now);
+    for delivery in &input.deliveries {
+        let quantity_milli = parse_quantity_milli(&delivery.quantity).map_err(|error| {
+            AppError::new(
+                "validationFailed",
+                "La cantidad entregada no es válida",
+                &format!("invalid delivery quantity: {}", error.message),
+            )
+        })?;
+        type DeliveryLine = (i64, Option<i64>, i64, String, i64, i64, i64, i64);
+        let line: Option<DeliveryLine> = connection
+            .query_row(
+                "SELECT id, productId, productIdOriginal, productName, quantityMilli, deliveredMilli,
+                    unitPriceCents, subtotalCents
+                 FROM invoiceLines WHERE invoiceId = ?1 AND position = ?2",
+                params![input.invoice_id, delivery.position],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+        let Some((
+            line_id,
+            product_id,
+            product_id_original,
+            product_name,
+            line_milli,
+            delivered_milli,
+            unit_price_cents,
+            subtotal_cents,
+        )) = line
+        else {
+            return Err(AppError::new(
+                "notFound",
+                "La línea de la factura ya no existe",
+                "delivery line missing",
+            ));
+        };
+        let Some(product_id) = product_id else {
+            return Err(AppError::new(
+                "invalidState",
+                &format!("El producto «{product_name}» ya no existe"),
+                "delivery of a deleted product",
+            ));
+        };
+        let pending_milli = line_milli - delivered_milli;
+        if quantity_milli > pending_milli {
+            return Err(AppError::new(
+                "deliveryExceedsPending",
+                &format!(
+                    "Solo quedan {} de «{product_name}» por entregar",
+                    format_quantity_milli(pending_milli)
+                ),
+                "delivery above pending quantity",
+            ));
+        }
+        let unit_cost_cents: i64 = connection
+            .query_row(
+                "SELECT costCents FROM products WHERE id = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+        consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
+        connection
+            .execute(
+                "INSERT INTO deliveries (invoiceLineId, quantityMilli, unitCostCents, deliveredAt, userId, userName)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    line_id,
+                    quantity_milli,
+                    unit_cost_cents,
+                    &timestamp,
+                    actor.id(),
+                    actor.username()
+                ],
+            )
+            .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+        connection
+            .execute(
+                "UPDATE invoiceLines SET deliveredMilli = deliveredMilli + ?1, updatedAt = ?2 WHERE id = ?3",
+                params![quantity_milli, &timestamp, line_id],
+            )
+            .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+        recalculate_product_quantity(connection, product_id)?;
+        let stock_after: i64 = connection
+            .query_row(
+                "SELECT quantityMilli FROM products WHERE id = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+        // Importe de lo entregado, proporcional al neto de la línea.
+        let total_cents = crate::inventory::round_half_up(
+            i128::from(subtotal_cents) * i128::from(quantity_milli),
+            i128::from(line_milli),
+        ) as i64;
+        connection
+            .execute(
+                "INSERT INTO productMovements (createdAt, productId, productIdOriginal, productName, type, quantityMilli,
+                    stockAfterMilli, unitPriceCents, totalPriceCents, invoiceId, invoiceNumber, invoiceType, userId, userName)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                params![
+                    &timestamp,
+                    product_id,
+                    product_id_original,
+                    product_name,
+                    movement_type,
+                    -quantity_milli,
+                    stock_after,
+                    unit_price_cents,
+                    total_cents,
+                    input.invoice_id,
+                    &number,
+                    &invoice_type,
+                    actor.id(),
+                    actor.username(),
+                ],
+            )
+            .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+    }
+    // NT-02/NT-03 y EN-05 (N-14): avisos con el estado final (best-effort).
+    crate::automation::evaluate_watches_best_effort(&transaction, now);
+    transaction
+        .commit()
+        .map_err(|error| map_db_error(error, "recordDeliveries", &[]))?;
+    Ok(InvoiceActionResult {
+        invoice_id: input.invoice_id,
+        number,
+        expired_cleanup_warning: None,
+    })
+}
+
+#[tauri::command]
+pub fn record_deliveries(
+    state: tauri::State<'_, std::sync::Mutex<Connection>>,
+    input: RecordDeliveriesInput,
+) -> Result<InvoiceActionResult, AppError> {
+    let mut connection = crate::db::connection::lock_conn(&state);
+    let now = Utc::now();
+    let result = record_deliveries_inner(&mut connection, now, input);
+    if let Err(error) = &result {
+        if error.should_log() {
+            if let Some(app_data_dir) = current_app_data_dir() {
+                log_error(
+                    &connection,
+                    "invoices",
+                    "recordDeliveries",
+                    error,
+                    now,
+                    app_data_dir,
+                );
+            }
+        }
+    }
+    result
+}
+
 #[tauri::command]
 pub fn change_invoice_status(
     state: tauri::State<'_, std::sync::Mutex<Connection>>,
@@ -5732,8 +5994,9 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO invoiceLines (invoiceId, position, productId, productIdOriginal, productName,
-                    productNameNormalized, quantityMilli, unitPriceCents, subtotalCents, createdAt, updatedAt)
-                 VALUES (?1, 1, ?2, ?3, 'Producto de prueba', 'producto de prueba', 10_000, 100, 1_000, ?4, ?4)",
+                    productNameNormalized, quantityMilli, unitPriceCents, subtotalCents, createdAt, updatedAt,
+                    deliveredMilli)
+                 VALUES (?1, 1, ?2, ?3, 'Producto de prueba', 'producto de prueba', 10_000, 100, 1_000, ?4, ?4, 10_000)",
                 (invoice_id, product_id, product_id_original, timestamp),
             )
             .unwrap();
@@ -7212,6 +7475,7 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "100")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         assert_eq!(product_cost(&connection, product_id), 1_000);
         super::change_invoice_status_inner(
             &mut connection,
@@ -7222,12 +7486,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(product_cost(&connection, product_id), 1_000);
-        super::create_sale_invoice_inner(
+        let resale = super::create_sale_invoice_inner(
             &mut connection,
             now,
             sale_input(client_id, vec![sale_line(product_id, "100")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, resale.invoice_id);
 
         entry_of(&mut connection, now, supplier_id, product_id, "10", "20,00");
         assert_eq!(product_cost(&connection, product_id), 2_000);
@@ -7361,6 +7626,7 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, result.invoice_id);
         assert_eq!(result.number, "V-00001");
 
         // El precio de venta vigente: 1,20 redondeado hacia arriba al entero (PV-01).
@@ -7484,6 +7750,7 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "12")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, result.invoice_id);
         let consumptions: Vec<(i64, i64)> = connection
             .prepare(
                 "SELECT c.quantityMilli, c.unitCostCents FROM consumptions c
@@ -7922,78 +8189,6 @@ mod tests {
     }
 
     #[test]
-    fn create_sale_invoice_rolls_back_when_consumption_insert_fails() {
-        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
-        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
-            "saleatomic",
-            "12345678944",
-            "+5355559108",
-            "12345678945",
-            "+5355559109",
-            now,
-        );
-        let product_id = insert_stocked_product(
-            &mut connection,
-            now,
-            supplier_id,
-            "Azúcar atómica",
-            100,
-            0,
-            "10",
-            "1,00",
-        );
-        connection
-            .execute_batch(
-                "CREATE TRIGGER fail_sale_consumption BEFORE INSERT ON consumptions
-                 BEGIN SELECT RAISE(ABORT, 'forced consumption insertion failure'); END;",
-            )
-            .unwrap();
-
-        assert!(super::create_sale_invoice_inner(
-            &mut connection,
-            now,
-            sale_input(client_id, vec![sale_line(product_id, "2")], None),
-        )
-        .is_err());
-
-        // Solo queda lo de la entrada de abastecimiento: sin factura de
-        // venta, sin líneas ni consumos ni movimientos de venta.
-        for (table, expected) in [
-            ("invoices", 1),
-            ("invoiceLines", 1),
-            ("consumptions", 0),
-            ("productMovements", 1),
-        ] {
-            let count: i64 = connection
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
-            assert_eq!(
-                count, expected,
-                "la tabla {table} no debe tener restos de la venta"
-            );
-        }
-        // El lote de la entrada queda intacto y el contador no avanza.
-        let remaining: i64 = connection
-            .query_row(
-                "SELECT remainingMilli FROM lots WHERE productId = ?1",
-                [product_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(remaining, 10_000);
-        let next_number: i64 = connection
-            .query_row(
-                "SELECT nextNumber FROM invoiceCounters WHERE type = 'V'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(next_number, 1);
-    }
-
-    #[test]
     fn change_invoice_status_requires_session_and_allows_both_roles() {
         // Fila de la matriz de autorización que faltaba (§6).
         assert_requires_session(|connection, now| {
@@ -8001,6 +8196,21 @@ mod tests {
         });
         assert_allows_both_roles(|connection, now| {
             super::change_invoice_status_inner(connection, now, 1, "completed", None)
+        });
+    }
+
+    #[test]
+    fn record_deliveries_requires_session_and_allows_both_roles() {
+        // spec-06 EN-02: fila de la matriz de autorización.
+        let input = || crate::models::invoice::RecordDeliveriesInput {
+            invoice_id: 1,
+            deliveries: Vec::new(),
+        };
+        assert_requires_session(|connection, now| {
+            super::record_deliveries_inner(connection, now, input())
+        });
+        assert_allows_both_roles(|connection, now| {
+            super::record_deliveries_inner(connection, now, input())
         });
     }
 
@@ -8097,6 +8307,7 @@ mod tests {
             service_input(client_id, vec![service_line(product_id, "3")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, result.invoice_id);
         assert_eq!(result.number, "S-00001");
 
         // Tipo S vinculado al cliente, con la copia de sus datos.
@@ -8254,9 +8465,10 @@ mod tests {
         let sale = super::create_sale_invoice_inner(
             &mut connection,
             now,
-            sale_input(client_id, vec![sale_line(product_id, "1")], None),
+            sale_input(client_id, vec![sale_line(product_id, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
 
         let result = super::create_guarantee_invoice_inner(
             &mut connection,
@@ -8328,7 +8540,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(line, (2_000, 100, 200, None, None));
+        assert_eq!(line, (2_000, 100, 200, None, Some(100)));
 
         let movement: (String, i64, i64, i64, i64, Option<String>) = connection
             .query_row(
@@ -8352,7 +8564,7 @@ mod tests {
             (
                 "warrantyOut".to_owned(),
                 -2_000,
-                7_000,
+                6_000,
                 100,
                 200,
                 Some("GG-00001".to_owned())
@@ -8527,6 +8739,7 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "1")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         connection
             .execute_batch(
                 "CREATE TRIGGER fail_guarantee_consumption BEFORE INSERT ON consumptions
@@ -8650,9 +8863,10 @@ mod tests {
         let service = super::create_service_invoice_inner(
             &mut connection,
             now,
-            service_input(client_id, vec![service_line(product_id, "1")], None),
+            service_input(client_id, vec![service_line(product_id, "3")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, service.invoice_id);
 
         let result = super::create_installation_invoice_inner(
             &mut connection,
@@ -8728,7 +8942,7 @@ mod tests {
             (
                 "supplyOut".to_owned(),
                 -3_000,
-                6_000,
+                4_000,
                 200,
                 600,
                 Some("GI-00001".to_owned())
@@ -9195,10 +9409,10 @@ mod tests {
             sale_input(client_id, vec![line], None),
         )
         .unwrap();
-        // 2 × 15,00 = 30,00; −10 % = 27,00. Entregada mientras descuente al guardar.
+        // 2 × 15,00 = 30,00; −10 % = 27,00. Nace apartada, sin entregar (EN-01).
         assert_eq!(
             priced_line(&connection, sale.invoice_id),
-            (1_500, Some(1_200), Some(3_000), 300, 2_700, 2_000, 2_000)
+            (1_500, Some(1_200), Some(3_000), 300, 2_700, 0, 2_000)
         );
         let detail = super::get_invoice_inner(&mut connection, now, sale.invoice_id).unwrap();
         assert_eq!(detail.total_cents, 2_700);
@@ -9217,7 +9431,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             priced_line(&connection, sale.invoice_id),
-            (1_500, Some(1_200), Some(4_500), 500, 4_000, 3_000, 3_000)
+            (1_500, Some(1_200), Some(4_500), 500, 4_000, 0, 3_000)
         );
         let mut lower = update_outgoing_line(Some(product_id), Some(product_id), "3");
         lower.unit_price = Some("11".to_owned());
@@ -9297,6 +9511,551 @@ mod tests {
         let found =
             crate::commands::clients::search_clients_inner(&mut connection, now, "taller").unwrap();
         assert_eq!(found[0].full_name, "Taller");
+    }
+
+    /// spec-06 EN-02: entrega todo lo pendiente, como haría el usuario tras vender.
+    fn deliver_all(
+        connection: &mut rusqlite::Connection,
+        now: chrono::DateTime<Utc>,
+        invoice_id: i64,
+    ) {
+        let pending: Vec<(i64, i64)> = connection
+            .prepare(
+                "SELECT position, quantityMilli - deliveredMilli FROM invoiceLines
+                 WHERE invoiceId = ?1 AND productId IS NOT NULL AND quantityMilli > deliveredMilli",
+            )
+            .unwrap()
+            .query_map([invoice_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        if pending.is_empty() {
+            return;
+        }
+        super::record_deliveries_inner(
+            connection,
+            now,
+            crate::models::invoice::RecordDeliveriesInput {
+                invoice_id,
+                deliveries: pending
+                    .into_iter()
+                    .map(|(position, milli)| crate::models::invoice::DeliveryInput {
+                        position,
+                        quantity: crate::models::product::format_quantity_milli(milli),
+                    })
+                    .collect(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn stock_of(connection: &rusqlite::Connection, product_id: i64) -> i64 {
+        connection
+            .query_row(
+                "SELECT quantityMilli FROM products WHERE id = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn deliver(
+        connection: &mut rusqlite::Connection,
+        now: chrono::DateTime<Utc>,
+        invoice_id: i64,
+        quantity: &str,
+    ) -> Result<crate::models::invoice::InvoiceActionResult, crate::errors::AppError> {
+        super::record_deliveries_inner(
+            connection,
+            now,
+            crate::models::invoice::RecordDeliveriesInput {
+                invoice_id,
+                deliveries: vec![crate::models::invoice::DeliveryInput {
+                    position: 1,
+                    quantity: quantity.to_owned(),
+                }],
+            },
+        )
+    }
+
+    fn listed_status(
+        connection: &mut rusqlite::Connection,
+        now: chrono::DateTime<Utc>,
+        id: i64,
+    ) -> Option<String> {
+        super::list_invoices_inner(connection, now, InvoiceFilters::default())
+            .unwrap()
+            .into_iter()
+            .find(|item| item.id == id)
+            .unwrap()
+            .delivery_status
+    }
+
+    #[test]
+    fn editing_an_undelivered_sale_only_changes_what_is_reserved() {
+        // spec-06 EN-01/EN-03: editar no mueve stock ni deja movimientos; lo
+        // pendiente debe caber en lo disponible.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "editreserved",
+            "12345678972",
+            "+5355559172",
+            "12345678973",
+            "+5355559173",
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Cable",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let other = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Canaleta",
+            100,
+            0,
+            "5",
+            "1,00",
+        );
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "4")], None),
+        )
+        .unwrap();
+        let movements_before: i64 = connection
+            .query_row("SELECT COUNT(*) FROM productMovements", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(
+                sale.invoice_id,
+                client_id,
+                vec![
+                    update_outgoing_line(Some(product_id), Some(product_id), "7"),
+                    update_outgoing_line(None, Some(other), "2"),
+                ],
+            ),
+        )
+        .unwrap();
+        assert_eq!(stock_of(&connection, product_id), 10_000);
+        assert_eq!(
+            crate::inventory::available_milli(&connection, product_id, None).unwrap(),
+            3_000
+        );
+        assert_eq!(
+            crate::inventory::available_milli(&connection, other, None).unwrap(),
+            3_000
+        );
+        let movements_after: i64 = connection
+            .query_row("SELECT COUNT(*) FROM productMovements", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(movements_after, movements_before);
+
+        // Más de lo disponible (sin contar lo que ya aparta esta factura).
+        let error = super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(
+                sale.invoice_id,
+                client_id,
+                vec![update_outgoing_line(
+                    Some(product_id),
+                    Some(product_id),
+                    "11",
+                )],
+            ),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "stockInsuficiente");
+    }
+
+    #[test]
+    fn a_sale_reserves_and_each_delivery_lowers_the_stock() {
+        // spec-06 EN-01, EN-02, EN-03.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "deliveries",
+            "12345678966",
+            "+5355559166",
+            "12345678967",
+            "+5355559167",
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Panel",
+            1_000,
+            0,
+            "10",
+            "10,00",
+        );
+
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "4")], None),
+        )
+        .unwrap();
+        // Apartado: el stock no baja, pero nadie más se lleva esas 4.
+        assert_eq!(stock_of(&connection, product_id), 10_000);
+        assert_eq!(
+            crate::inventory::available_milli(&connection, product_id, None).unwrap(),
+            6_000
+        );
+        assert_eq!(
+            listed_status(&mut connection, now, sale.invoice_id).as_deref(),
+            Some("pending")
+        );
+        let error = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "7")], None),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "stockInsuficiente");
+
+        // Entrega parcial: baja el stock, guarda el costo y deja la salida.
+        deliver(&mut connection, now, sale.invoice_id, "3").unwrap();
+        assert_eq!(stock_of(&connection, product_id), 7_000);
+        assert_eq!(
+            listed_status(&mut connection, now, sale.invoice_id).as_deref(),
+            Some("partial")
+        );
+        let delivery: (i64, i64) = connection
+            .query_row(
+                "SELECT quantityMilli, unitCostCents FROM deliveries",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(delivery, (3_000, 1_000));
+        let movement: (String, i64) = connection
+            .query_row(
+                "SELECT type, quantityMilli FROM productMovements WHERE invoiceId = ?1",
+                [sale.invoice_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(movement, ("saleOut".to_owned(), -3_000));
+        assert_eq!(
+            deliver(&mut connection, now, sale.invoice_id, "2")
+                .unwrap_err()
+                .code,
+            "deliveryExceedsPending"
+        );
+
+        // No se reduce por debajo de lo entregado.
+        let error = super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(
+                sale.invoice_id,
+                client_id,
+                vec![update_outgoing_line(
+                    Some(product_id),
+                    Some(product_id),
+                    "2",
+                )],
+            ),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "belowDelivered");
+
+        deliver(&mut connection, now, sale.invoice_id, "1").unwrap();
+        assert_eq!(
+            listed_status(&mut connection, now, sale.invoice_id).as_deref(),
+            Some("delivered")
+        );
+
+        // Cancelar devuelve lo entregado y libera lo apartado.
+        super::change_invoice_status_inner(
+            &mut connection,
+            now,
+            sale.invoice_id,
+            "cancelled",
+            None,
+        )
+        .unwrap();
+        assert_eq!(stock_of(&connection, product_id), 10_000);
+        assert_eq!(
+            crate::inventory::available_milli(&connection, product_id, None).unwrap(),
+            10_000
+        );
+        assert_eq!(
+            deliver(&mut connection, now, sale.invoice_id, "1")
+                .unwrap_err()
+                .code,
+            "invalidState"
+        );
+    }
+
+    #[test]
+    fn entries_products_and_guarantees_respect_what_is_reserved() {
+        // spec-06 EN-01 (D-08), S-14.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "reservedrules",
+            "12345678968",
+            "+5355559168",
+            "12345678969",
+            "+5355559169",
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Cable",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let entry: i64 = connection
+            .query_row("SELECT id FROM invoices WHERE type = 'E'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "8")], None),
+        )
+        .unwrap();
+
+        let error =
+            super::change_invoice_status_inner(&mut connection, now, entry, "cancelled", None)
+                .unwrap_err();
+        assert_eq!(error.code, "stockBelowReserved");
+        assert_eq!(stock_of(&connection, product_id), 10_000);
+        let error = super::delete_invoice_inner(&mut connection, now, entry).unwrap_err();
+        assert_eq!(error.code, "stockBelowReserved");
+
+        let error =
+            crate::commands::products::delete_product_inner(&mut connection, now, product_id)
+                .unwrap_err();
+        assert_eq!(error.code, "productHasPendingDeliveries");
+
+        // Garantía: solo sobre lo entregado.
+        let line = |quantity: &str| crate::models::invoice::GuaranteeInvoiceLineInput {
+            product_id,
+            quantity: quantity.to_owned(),
+            unit_id: None,
+        };
+        let error = super::create_guarantee_invoice_inner(
+            &mut connection,
+            now,
+            guarantee_input(client_id, sale.invoice_id, vec![line("1")], None),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message,
+            "Solo se entregaron 0 de «Cable» en la factura asociada"
+        );
+        deliver(&mut connection, now, sale.invoice_id, "2").unwrap();
+        super::create_guarantee_invoice_inner(
+            &mut connection,
+            now,
+            guarantee_input(client_id, sale.invoice_id, vec![line("1")], None),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn fully_reserved_products_are_out_of_stock_and_kept_until_delivered() {
+        // spec-06 EN-01, EN-02: agotado por disponible, filtro de entrega,
+        // línea entregada intocable y purga que respeta lo apartado.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "fullyreserved",
+            "12345678974",
+            "+5355559174",
+            "12345678975",
+            "+5355559175",
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Batería",
+            100,
+            0,
+            "3",
+            "1,00",
+        );
+        let other = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Borne",
+            100,
+            0,
+            "5",
+            "1,00",
+        );
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(
+                client_id,
+                vec![sale_line(product_id, "3"), sale_line(other, "1")],
+                None,
+            ),
+        )
+        .unwrap();
+
+        let out_of_stock = crate::commands::products::list_products_inner(
+            &mut connection,
+            now,
+            now.date_naive(),
+            crate::models::product::ProductFilters {
+                stock: crate::models::product::StockFilter::OutOfStock,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            out_of_stock.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![product_id]
+        );
+        assert_eq!(stock_of(&connection, product_id), 3_000);
+
+        let filtered = |connection: &mut rusqlite::Connection, delivery: &str| -> Vec<i64> {
+            super::list_invoices_inner(
+                connection,
+                now,
+                InvoiceFilters {
+                    delivery: Some(delivery.to_owned()),
+                    ..InvoiceFilters::default()
+                },
+            )
+            .unwrap()
+            .into_iter()
+            .map(|item| item.id)
+            .collect()
+        };
+        assert_eq!(filtered(&mut connection, "pending"), vec![sale.invoice_id]);
+        assert!(filtered(&mut connection, "partial").is_empty());
+
+        // Descontinuado y vencido: la purga lo salta mientras tenga apartado,
+        // y aun así se puede entregar.
+        connection
+            .execute(
+                "UPDATE products SET status = 'discontinued', discontinuedAt = '2000-01-01T00:00:00Z'
+                 WHERE id = ?1",
+                [product_id],
+            )
+            .unwrap();
+        crate::commands::products::purge_expired_products(&connection, now).unwrap();
+        let exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE id = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1);
+        deliver(&mut connection, now, sale.invoice_id, "1").unwrap();
+        assert_eq!(filtered(&mut connection, "partial"), vec![sale.invoice_id]);
+
+        // Quitar la línea con algo entregado no se permite.
+        let error = super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(
+                sale.invoice_id,
+                client_id,
+                vec![update_outgoing_line(Some(other), Some(other), "1")],
+            ),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "belowDelivered");
+    }
+
+    #[test]
+    fn a_reservation_with_deliveries_does_not_expire_and_is_notified() {
+        // spec-06 EN-05.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "reservedelivery",
+            "12345678970",
+            "+5355559170",
+            "12345678971",
+            "+5355559171",
+            now,
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Inversor",
+            100,
+            0,
+            "10",
+            "1,00",
+        );
+        let mut input = sale_input(client_id, vec![sale_line(product_id, "4")], None);
+        input.reserved_until = Some("2026-10-06".to_owned());
+        let with_delivery = super::create_sale_invoice_inner(&mut connection, now, input).unwrap();
+        let mut input = sale_input(client_id, vec![sale_line(product_id, "1")], None);
+        input.reserved_until = Some("2026-10-06".to_owned());
+        let without = super::create_sale_invoice_inner(&mut connection, now, input).unwrap();
+
+        deliver(&mut connection, now, with_delivery.invoice_id, "1").unwrap();
+        let notices = notification_messages(&connection);
+        assert!(
+            notices
+                .iter()
+                .any(|message| message.contains("ya no se cancelará sola")),
+            "{notices:?}"
+        );
+
+        let later = Utc.with_ymd_and_hms(2026, 10, 8, 12, 0, 0).unwrap();
+        let cancelled = super::expire_reservations(&connection, later).unwrap();
+        assert_eq!(cancelled, 1);
+        let status = |id: i64| -> String {
+            connection
+                .query_row("SELECT status FROM invoices WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(status(without.invoice_id), "cancelled");
+        assert_eq!(status(with_delivery.invoice_id), "pending");
+        crate::automation::evaluate_watches(
+            &connection,
+            later,
+            crate::automation::Thresholds::default(),
+        )
+        .unwrap();
+        crate::automation::evaluate_watches(
+            &connection,
+            later,
+            crate::automation::Thresholds::default(),
+        )
+        .unwrap();
+        let expired: Vec<String> = notification_messages(&connection)
+            .into_iter()
+            .filter(|message| message.contains("venció con productos entregados"))
+            .collect();
+        assert_eq!(expired.len(), 1);
     }
 
     fn update_sale_input(
@@ -9418,100 +10177,6 @@ mod tests {
     }
 
     #[test]
-    fn update_sale_invoice_edits_pending_with_adjustment_reversal_and_new_sale() {
-        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
-        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
-            "updatesale",
-            "12345678980",
-            "+5355559136",
-            "12345678981",
-            "+5355559137",
-            now,
-        );
-        let (sale_id, product_a, product_b, _) =
-            insert_sale_for_update(&mut connection, now, supplier_id, client_id);
-        let product_c = insert_stocked_product(
-            &mut connection,
-            now,
-            supplier_id,
-            "Producto C",
-            100,
-            0,
-            "10",
-            "1,00",
-        );
-
-        // A: 2→3 (Ajuste −1), B: se quita (Reversión +1), C: nueva (Salida −1).
-        // Las líneas quitadas se procesan antes que las conservadas.
-        super::update_sale_invoice_inner(
-            &mut connection,
-            now,
-            update_sale_input(
-                sale_id,
-                client_id,
-                vec![
-                    update_outgoing_line(Some(product_a), Some(product_a), "3"),
-                    update_outgoing_line(None, Some(product_c), "1"),
-                ],
-            ),
-        )
-        .unwrap();
-
-        let movements: Vec<(String, i64)> = connection
-            .prepare(
-                "SELECT type, quantityMilli FROM productMovements
-                     WHERE invoiceId = ?1 ORDER BY id",
-            )
-            .unwrap()
-            .query_map([sale_id], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert_eq!(
-            movements,
-            vec![
-                ("saleOut".to_owned(), -2_000),
-                ("saleOut".to_owned(), -1_000),
-                ("reversal".to_owned(), 1_000),
-                ("adjustment".to_owned(), -1_000),
-                ("saleOut".to_owned(), -1_000),
-            ]
-        );
-
-        // La línea existente conserva el precio emitido.
-        let line_a: (i64, i64, i64) = connection
-            .query_row(
-                "SELECT quantityMilli, unitPriceCents, subtotalCents FROM invoiceLines
-                     WHERE invoiceId = ?1 AND productIdOriginal = ?2",
-                (sale_id, product_a),
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(line_a, (3_000, 100, 300));
-        let remaining_b: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM invoiceLines WHERE invoiceId = ?1 AND productIdOriginal = ?2",
-                (sale_id, product_b),
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(remaining_b, 0);
-
-        // Stock: A 7, B 10 (devuelto), C 9.
-        for (product_id, expected) in [(product_a, 7_000), (product_b, 10_000), (product_c, 9_000)]
-        {
-            let stock: i64 = connection
-                .query_row(
-                    "SELECT quantityMilli FROM products WHERE id = ?1",
-                    [product_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(stock, expected);
-        }
-    }
-
-    #[test]
     fn update_sale_invoice_rejects_completed_invoice() {
         let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
         let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
@@ -9542,68 +10207,6 @@ mod tests {
             error.message,
             "Solo se pueden editar las facturas que están Por Cobrar"
         );
-    }
-
-    #[test]
-    fn update_sale_invoice_rejects_insufficient_stock_after_edit() {
-        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
-        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
-            "updatesalestock",
-            "12345678984",
-            "+5355559140",
-            "12345678985",
-            "+5355559141",
-            now,
-        );
-        let product_id = insert_stocked_product(
-            &mut connection,
-            now,
-            supplier_id,
-            "Azúcar morena",
-            100,
-            0,
-            "10",
-            "1,00",
-        );
-        let sale = super::create_sale_invoice_inner(
-            &mut connection,
-            now,
-            sale_input(client_id, vec![sale_line(product_id, "8")], None),
-        )
-        .unwrap();
-
-        let error = super::update_sale_invoice_inner(
-            &mut connection,
-            now,
-            update_sale_input(
-                sale.invoice_id,
-                client_id,
-                vec![update_outgoing_line(
-                    Some(product_id),
-                    Some(product_id),
-                    "12",
-                )],
-            ),
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "stockInsuficiente");
-        // Nada se guarda: fecha, línea y stock intactos.
-        let date: String = connection
-            .query_row(
-                "SELECT invoiceDate FROM invoices WHERE id = ?1",
-                [sale.invoice_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(date, "2026-10-04");
-        let stock: i64 = connection
-            .query_row(
-                "SELECT quantityMilli FROM products WHERE id = ?1",
-                [product_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(stock, 2_000);
     }
 
     /// Invariante de caché: `quantityMilli` = suma de lo restante en los lotes
@@ -9793,6 +10396,8 @@ mod tests {
                 service_input(client_id, vec![service_line(product, "2")], None),
             )
         );
+        deliver_all(&mut connection, now, sale.invoice_id);
+        deliver_all(&mut connection, now, service.invoice_id);
         let guarantee = run!(
             "createGuaranteeInvoice",
             super::create_guarantee_invoice_inner(
@@ -10019,6 +10624,7 @@ mod tests {
             ),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         assert_cache_invariant(&connection, "createSaleInvoice");
 
         let service = super::create_service_invoice_inner(
@@ -10027,6 +10633,7 @@ mod tests {
             service_input(client_id, vec![service_line(product_b, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, service.invoice_id);
         assert_cache_invariant(&connection, "createServiceInvoice");
 
         let guarantee = super::create_guarantee_invoice_inner(
@@ -10066,7 +10673,10 @@ mod tests {
             update_sale_input(
                 sale.invoice_id,
                 client_id,
-                vec![update_outgoing_line(Some(product_a), Some(product_a), "9")],
+                vec![
+                    update_outgoing_line(Some(product_a), Some(product_a), "12,5"),
+                    update_outgoing_line(Some(product_b), Some(product_b), "1"),
+                ],
             ),
         )
         .unwrap();
@@ -10384,18 +10994,21 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         let service = super::create_service_invoice_inner(
             &mut connection,
             now,
             service_input(client_id, vec![service_line(product_id, "1")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, service.invoice_id);
         let cancelled = super::create_sale_invoice_inner(
             &mut connection,
             now,
             sale_input(client_id, vec![sale_line(product_id, "4")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, cancelled.invoice_id);
         super::change_invoice_status_inner(
             &mut connection,
             now,
@@ -10481,6 +11094,7 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "1")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, later.invoice_id);
         let later_subtotal = subtotal(&connection, later.invoice_id);
         assert_eq!(
             income(&mut connection, drinks),
@@ -10492,64 +11106,6 @@ mod tests {
         );
         // Queda 11 al mismo costo: 11 × 1,33.
         assert_eq!(stock_value(&mut connection), (1_463, 1_463));
-    }
-
-    #[test]
-    fn update_sale_invoice_twice_does_not_restore_consumptions_twice() {
-        // Cada edición devuelve los consumos de la anterior una sola vez:
-        // dos ediciones sin cambios dejan el stock y los consumos intactos.
-        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
-        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
-            "updatesaletwice",
-            "12345678990",
-            "+5355559146",
-            "12345678991",
-            "+5355559147",
-            now,
-        );
-        let product_id = insert_stocked_product(
-            &mut connection,
-            now,
-            supplier_id,
-            "Café doble",
-            100,
-            0,
-            "10",
-            "1,00",
-        );
-        let sale = super::create_sale_invoice_inner(
-            &mut connection,
-            now,
-            sale_input(client_id, vec![sale_line(product_id, "2")], None),
-        )
-        .unwrap();
-        for _ in 0..2 {
-            super::update_sale_invoice_inner(
-                &mut connection,
-                now,
-                update_sale_input(
-                    sale.invoice_id,
-                    client_id,
-                    vec![update_outgoing_line(
-                        Some(product_id),
-                        Some(product_id),
-                        "2",
-                    )],
-                ),
-            )
-            .unwrap();
-        }
-        let (stock, consumed): (i64, i64) = connection
-            .query_row(
-                "SELECT p.quantityMilli,
-                    (SELECT COALESCE(SUM(c.quantityMilli), 0) FROM consumptions c
-                     JOIN invoiceLines il ON il.id = c.invoiceLineId WHERE il.invoiceId = ?2)
-                 FROM products p WHERE p.id = ?1",
-                (product_id, sale.invoice_id),
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!((stock, consumed), (8_000, 2_000));
     }
 
     #[test]
@@ -10648,6 +11204,7 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "3")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         // Se elimina la compra que originó el lote consumido.
         let entry_id: i64 = connection
             .query_row(
@@ -10696,63 +11253,6 @@ mod tests {
     }
 
     #[test]
-    fn update_sale_invoice_rolls_back_when_movement_insert_fails() {
-        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
-        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
-            "updatesaleatomic",
-            "12345678990",
-            "+5355559146",
-            "12345678991",
-            "+5355559147",
-            now,
-        );
-        let (sale_id, product_a, _, _) =
-            insert_sale_for_update(&mut connection, now, supplier_id, client_id);
-        connection
-            .execute_batch(
-                "CREATE TRIGGER fail_update_movement BEFORE INSERT ON productMovements
-                     BEGIN SELECT RAISE(ABORT, 'forced movement insertion failure'); END;",
-            )
-            .unwrap();
-
-        assert!(super::update_sale_invoice_inner(
-            &mut connection,
-            now,
-            update_sale_input(
-                sale_id,
-                client_id,
-                vec![update_outgoing_line(Some(product_a), Some(product_a), "3",)],
-            ),
-        )
-        .is_err());
-
-        let date: String = connection
-            .query_row(
-                "SELECT invoiceDate FROM invoices WHERE id = ?1",
-                [sale_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(date, "2026-10-04");
-        let line_qty: i64 = connection
-            .query_row(
-                "SELECT quantityMilli FROM invoiceLines WHERE invoiceId = ?1",
-                [sale_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(line_qty, 2_000);
-        let stock: i64 = connection
-            .query_row(
-                "SELECT quantityMilli FROM products WHERE id = ?1",
-                [product_a],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(stock, 8_000);
-    }
-
-    #[test]
     fn update_outgoing_commands_refresh_updated_at_and_require_session() {
         let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
         let later = Utc.with_ymd_and_hms(2026, 10, 4, 13, 0, 0).unwrap();
@@ -10780,12 +11280,14 @@ mod tests {
             sale_input(client_id, vec![sale_line(product_id, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         let service = super::create_service_invoice_inner(
             &mut connection,
             now,
             service_input(client_id, vec![service_line(product_id, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, service.invoice_id);
         let guarantee = super::create_guarantee_invoice_inner(
             &mut connection,
             now,
@@ -11003,79 +11505,6 @@ mod tests {
     }
 
     #[test]
-    fn update_service_invoice_edits_pending_with_sale_and_adjustment() {
-        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
-        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
-            "updateservice",
-            "12345678998",
-            "+5355559154",
-            "12345678999",
-            "+5355559155",
-            now,
-        );
-        let product_id = insert_stocked_product(
-            &mut connection,
-            now,
-            supplier_id,
-            "Destornillador",
-            200,
-            5_000,
-            "10",
-            "2,00",
-        );
-        let service = super::create_service_invoice_inner(
-            &mut connection,
-            now,
-            service_input(client_id, vec![service_line(product_id, "2")], None),
-        )
-        .unwrap();
-
-        // 2→1 (Ajuste +1: vuelve una unidad al stock); el precio emitido (300) se conserva.
-        super::update_service_invoice_inner(
-            &mut connection,
-            now,
-            update_service_input(
-                service.invoice_id,
-                client_id,
-                vec![update_outgoing_line(
-                    Some(product_id),
-                    Some(product_id),
-                    "1",
-                )],
-            ),
-        )
-        .unwrap();
-
-        let movements: Vec<(String, i64, i64)> = connection
-            .prepare(
-                "SELECT type, quantityMilli, unitPriceCents FROM productMovements
-                     WHERE invoiceId = ?1 ORDER BY id",
-            )
-            .unwrap()
-            .query_map([service.invoice_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert_eq!(
-            movements,
-            vec![
-                ("serviceOut".to_owned(), -2_000, 300),
-                ("adjustment".to_owned(), 1_000, 300),
-            ]
-        );
-        let line: (i64, i64) = connection
-            .query_row(
-                "SELECT quantityMilli, unitPriceCents FROM invoiceLines WHERE invoiceId = ?1",
-                [service.invoice_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(line, (1_000, 300));
-    }
-
-    #[test]
     fn update_guarantee_invoice_edits_pending_recalculating_cost() {
         let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
         let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
@@ -11099,9 +11528,10 @@ mod tests {
         let sale = super::create_sale_invoice_inner(
             &mut connection,
             now,
-            sale_input(client_id, vec![sale_line(product_id, "1")], None),
+            sale_input(client_id, vec![sale_line(product_id, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         let guarantee = super::create_guarantee_invoice_inner(
             &mut connection,
             now,
@@ -11176,9 +11606,10 @@ mod tests {
         let service = super::create_service_invoice_inner(
             &mut connection,
             now,
-            service_input(client_id, vec![service_line(product_id, "1")], None),
+            service_input(client_id, vec![service_line(product_id, "2")], None),
         )
         .unwrap();
+        deliver_all(&mut connection, now, service.invoice_id);
         let installation = super::create_installation_invoice_inner(
             &mut connection,
             now,
@@ -13049,6 +13480,7 @@ mod tests {
             ),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         let stock = |connection: &rusqlite::Connection, product_id: i64| -> (i64, i64) {
             connection
                 .query_row(
@@ -13869,6 +14301,7 @@ mod tests {
             ),
         )
         .unwrap();
+        deliver_all(&mut connection, now, sale.invoice_id);
         let guarantee = super::create_guarantee_invoice_inner(
             &mut connection,
             now,
@@ -14130,14 +14563,19 @@ mod tests {
             reserved_until_of(&connection, sale).as_deref(),
             Some("2026-10-10")
         );
-        // La reserva consume stock como cualquier venta Por Cobrar.
-        assert_eq!(product_quantity(&connection, product_id), 18_000);
+        // spec-06 EN-01: la reserva aparta, no baja el stock hasta entregar.
+        assert_eq!(product_quantity(&connection, product_id), 20_000);
+        assert_eq!(
+            crate::inventory::available_milli(&connection, product_id, None).unwrap(),
+            18_000
+        );
 
         let mut service = service_input(client_id, vec![service_line(product_id, "1")], None);
         service.reserved_until = Some("2027-10-04".to_owned());
         let service_id = super::create_service_invoice_inner(&mut connection, now, service)
             .unwrap()
             .invoice_id;
+        deliver_all(&mut connection, now, service_id);
         assert_eq!(
             reserved_until_of(&connection, service_id).as_deref(),
             Some("2027-10-04")
@@ -14270,7 +14708,9 @@ mod tests {
 
         let product =
             crate::commands::products::get_product_inner(&mut connection, now, product_id).unwrap();
-        assert_eq!(product.product.reserved_quantity, "4,5");
+        // spec-06 EN-01: lo apartado es todo lo vendido sin entregar
+        // (reservas incluidas), no solo las reservas activas.
+        assert_eq!(product.product.reserved_quantity, "6,5");
         // El listado lleva la misma cantidad para su badge.
         let listed = crate::commands::products::list_products_inner(
             &mut connection,
@@ -14282,15 +14722,17 @@ mod tests {
         .into_iter()
         .find(|item| item.id == product_id)
         .unwrap();
-        assert_eq!(listed.reserved_quantity, "4,5");
+        assert_eq!(listed.reserved_quantity, "6,5");
+        let pending: Vec<(i64, &str)> = product
+            .reserved_invoices
+            .iter()
+            .map(|invoice| (invoice.id, invoice.quantity.as_str()))
+            .collect();
         assert_eq!(
-            product
-                .reserved_invoices
-                .iter()
-                .map(|invoice| (invoice.id, invoice.quantity.as_str()))
-                .collect::<Vec<_>>(),
-            vec![(second, "1,5"), (reserved, "3")]
+            &pending[..3],
+            &[(reserved, "3"), (second, "1,5"), (paid, "1")]
         );
+        assert_eq!(pending[3].1, "1");
     }
 
     #[test]
@@ -14312,7 +14754,8 @@ mod tests {
             "2",
             "2026-10-06",
         );
-        assert_eq!(product_quantity(&connection, product_id), 13_000);
+        // spec-06 EN-01: reservar aparta; el stock baja al entregar.
+        assert_eq!(product_quantity(&connection, product_id), 20_000);
 
         // El 6 de octubre (hora local) la del día 5 ya venció; la del 6 no.
         let later = Utc.with_ymd_and_hms(2026, 10, 6, 16, 0, 0).unwrap();
@@ -14332,8 +14775,8 @@ mod tests {
             reserved_until_of(&connection, expiring).as_deref(),
             Some("2026-10-05")
         );
-        // Los consumos vuelven a sus lotes y la caché sigue a los lotes.
-        assert_eq!(product_quantity(&connection, product_id), 18_000);
+        // Sin entregas no hubo consumos: el stock no cambia al vencer.
+        assert_eq!(product_quantity(&connection, product_id), 20_000);
         let lots: i64 = connection
             .query_row(
                 "SELECT COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1",
@@ -14341,16 +14784,15 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(lots, 18_000);
-
-        let reversal: (Option<i64>, String, i64) = connection
+        assert_eq!(lots, 20_000);
+        let reversals: i64 = connection
             .query_row(
-                "SELECT userId, userName, quantityMilli FROM productMovements WHERE type = 'reversal'",
+                "SELECT COUNT(*) FROM productMovements WHERE type = 'reversal'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(reversal, (None, "Sistema".to_owned(), 5_000));
+        assert_eq!(reversals, 0);
 
         let n06: (String, String, Option<i64>) = connection
             .query_row(
@@ -14588,6 +15030,7 @@ mod tests {
         )
         .unwrap()
         .invoice_id;
+        deliver_all(&mut fixture.connection, fixture.now, sale);
         assert_eq!(stock(&fixture.connection, fixture.product_id), 12_000);
         let detail = get_invoice_inner(&mut fixture.connection, fixture.now, sale).unwrap();
         let selling: i64 = fixture
@@ -14606,22 +15049,23 @@ mod tests {
         );
         assert_eq!(detail.lines[0].quantity, "12");
 
-        // Editar a 0,5 cajas deja 6 u vendidas; cancelar devuelve lo convertido.
+        // Editar a 1,5 cajas aparta 6 u más sin tocar el stock (EN-01);
+        // cancelar devuelve lo convertido.
         let mut update = update_sale_input(
             sale,
             fixture.client_id,
             vec![update_outgoing_line(
                 Some(fixture.product_id),
                 Some(fixture.product_id),
-                "0,5",
+                "1,5",
             )],
         );
         update.lines[0].unit_id = Some(fixture.box_id);
         super::update_sale_invoice_inner(&mut fixture.connection, fixture.now, update).unwrap();
-        assert_eq!(stock(&fixture.connection, fixture.product_id), 18_000);
+        assert_eq!(stock(&fixture.connection, fixture.product_id), 12_000);
         let edited = get_invoice_inner(&mut fixture.connection, fixture.now, sale).unwrap();
-        assert_eq!(edited.lines[0].entered.as_ref().unwrap().quantity, "0,5");
-        assert_eq!(edited.lines[0].quantity, "6");
+        assert_eq!(edited.lines[0].entered.as_ref().unwrap().quantity, "1,5");
+        assert_eq!(edited.lines[0].quantity, "18");
         change_invoice_status_inner(
             &mut fixture.connection,
             fixture.now,

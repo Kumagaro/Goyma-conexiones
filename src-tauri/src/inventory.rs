@@ -303,6 +303,92 @@ pub fn recalculate_product_quantity(
     Ok(())
 }
 
+/// Lo apartado (`spec-06` EN-01): lo vendido en Venta y Servicio no
+/// canceladas que aún no se entregó. `excluding_invoice` deja fuera una
+/// factura (la que se está editando).
+pub fn reserved_milli(
+    connection: &Connection,
+    product_id: i64,
+    excluding_invoice: Option<i64>,
+) -> Result<i64, AppError> {
+    connection
+        .query_row(
+            "SELECT COALESCE(SUM(il.quantityMilli - il.deliveredMilli), 0)
+             FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId
+             WHERE il.productId = ?1 AND i.type IN ('V', 'S') AND i.status <> 'cancelled'
+               AND i.id IS NOT ?2",
+            params![product_id, excluding_invoice],
+            |row| row.get(0),
+        )
+        .map_err(|_| internal_error("failed to read reserved quantity"))
+}
+
+/// Disponible = stock − apartado (`spec-06` EN-01).
+pub fn available_milli(
+    connection: &Connection,
+    product_id: i64,
+    excluding_invoice: Option<i64>,
+) -> Result<i64, AppError> {
+    let stock: i64 = connection
+        .query_row(
+            "SELECT quantityMilli FROM products WHERE id = ?1",
+            [product_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| internal_error("failed to read product stock"))?;
+    Ok(stock - reserved_milli(connection, product_id, excluding_invoice)?)
+}
+
+/// Rechaza una salida que tomaría más de lo disponible (EN-01: lo apartado
+/// no se puede vender ni sacar a otro cliente).
+pub fn ensure_available(
+    connection: &Connection,
+    product_id: i64,
+    needed_milli: i64,
+    excluding_invoice: Option<i64>,
+) -> Result<(), AppError> {
+    let available = available_milli(connection, product_id, excluding_invoice)?;
+    let product_name: String = connection
+        .query_row(
+            "SELECT name FROM products WHERE id = ?1",
+            [product_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| internal_error("failed to read product name"))?;
+    if needed_milli > available {
+        return Err(AppError::new(
+            "stockInsuficiente",
+            &format!(
+                "No hay stock suficiente de «{product_name}» (disponible: {})",
+                format_quantity_milli(available.max(0))
+            ),
+            "available stock is insufficient",
+        ));
+    }
+    Ok(())
+}
+
+/// Las entradas no pueden dejar el stock por debajo de lo apartado (D-08):
+/// se comprueba después de bajarlo, dentro de la misma transacción.
+pub fn ensure_stock_covers_reserved(
+    connection: &Connection,
+    product_id: i64,
+) -> Result<(), AppError> {
+    let available = available_milli(connection, product_id, None)?;
+    if available < 0 {
+        let reserved = reserved_milli(connection, product_id, None)?;
+        return Err(AppError::new(
+            "stockBelowReserved",
+            &format!(
+                "No se puede: {} unidades de este producto están vendidas y sin entregar",
+                format_quantity_milli(reserved)
+            ),
+            "entry change leaves stock below reserved",
+        ));
+    }
+    Ok(())
+}
+
 pub fn validate_stock_limit(
     connection: &Connection,
     product_id: i64,
@@ -452,6 +538,7 @@ pub fn reverse_lots_of_invoice(
             )
             .map_err(|_| internal_error("failed to reverse lot stock"))?;
         recalculate_product_quantity(connection, product_id)?;
+        ensure_stock_covers_reserved(connection, product_id)?;
         shift_later_stock_before(connection, product_id, arrival_order, -remaining_milli)?;
         replay_product_cost(connection, product_id, Some(invoice_id))?;
         let stock_after: i64 = connection

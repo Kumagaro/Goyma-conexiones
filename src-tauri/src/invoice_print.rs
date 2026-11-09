@@ -520,6 +520,7 @@ mod tests {
                 discount_kind: None,
                 discount_value: None,
                 discount_cents: None,
+                delivered_quantity: "0".into(),
                 position: 1,
                 product_id_original: 3,
                 product_name: "Cable UTP".into(),

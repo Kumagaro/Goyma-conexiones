@@ -25,6 +25,8 @@ pub struct ProductListItem {
     /// Cantidad reservada (RS-03): el badge del listado y el detalle. Desde la
     /// fase 3 de `spec-06` será todo lo apartado sin entregar.
     pub reserved_quantity: String,
+    /// Disponible = stock − apartado (`spec-06` EN-01).
+    pub available_quantity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -130,7 +132,8 @@ pub struct ReservedInvoice {
     pub id: i64,
     pub number: String,
     pub invoice_type: String,
-    pub reserved_until: String,
+    /// Solo si es una reserva (RS-01).
+    pub reserved_until: Option<String>,
     pub quantity: String,
 }
 
@@ -307,11 +310,12 @@ mod tests {
             is_low_stock: true,
             low_stock_threshold: Some("5".to_owned()),
             reserved_quantity: "0".to_owned(),
+            available_quantity: "1,25".to_owned(),
         };
         let item_json = serde_json::to_value(&item).unwrap();
         assert_eq!(
             item_json,
-            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "calculatedPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "lowStockThreshold": "5", "reservedQuantity": "0"})
+            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "calculatedPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "lowStockThreshold": "5", "reservedQuantity": "0", "availableQuantity": "1,25"})
         );
         assert!(item_json["quantity"].is_string());
         assert!(item_json["profitPercent"].is_string());
@@ -386,7 +390,7 @@ mod tests {
         let detail_json = serde_json::to_value(detail).unwrap();
         assert_eq!(
             detail_json,
-            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "calculatedPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "lowStockThreshold": "5", "reservedQuantity": "0", "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null, "reservedQuantity": "0", "reservedInvoices": []})
+            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "calculatedPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "lowStockThreshold": "5", "reservedQuantity": "0", "availableQuantity": "1,25", "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null, "reservedQuantity": "0", "reservedInvoices": []})
         );
         assert_eq!(detail_json["isDiscontinued"], true);
         assert_eq!(detail_json["discontinuedAt"], "2026-10-03T12:00:00Z");

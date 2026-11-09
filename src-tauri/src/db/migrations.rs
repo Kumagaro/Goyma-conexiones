@@ -20,6 +20,7 @@ pub const MIGRATIONS: &[(i64, Migration)] = &[
     (8, application_id_v8),
     (9, cost_base_and_threshold_v9),
     (10, invoices_and_contacts_v10),
+    (11, deliveries_v11),
 ];
 
 /// Migraciones que reconstruyen tablas (`plan-06` §2.1): SQLite no puede
@@ -559,6 +560,58 @@ fn invoices_and_contacts_v10(tx: &Transaction) -> rusqlite::Result<()> {
             ("deliveredMilli", &delivered),
         ],
     )
+}
+
+/// Migración 11 (`plan-06` §2.4): entregas con su costo. Las ventas ya
+/// entregadas reciben una entrega con su costo FIFO y la fecha de la factura;
+/// Insumos, Garantía y Pérdida guardan su costo FIFO. Así el costo de lo
+/// vendido tiene una sola fuente (D-07). Avisos N-14 y N-15 (EN-05).
+fn deliveries_v11(tx: &Transaction) -> rusqlite::Result<()> {
+    let delivered_at = CREATED_AT_CHECK.replace("createdAt", "deliveredAt");
+    // Costo FIFO de una línea: Σ consumos / cantidad, a la mitad hacia arriba.
+    let fifo = "(SELECT (2 * SUM(c.quantityMilli * c.unitCostCents) + SUM(c.quantityMilli)) / (2 * SUM(c.quantityMilli))
+                 FROM consumptions c WHERE c.invoiceLineId = invoiceLines.id)";
+    tx.execute_batch(&format!(
+        "CREATE TABLE deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoiceLineId INTEGER NOT NULL REFERENCES invoiceLines(id) ON DELETE CASCADE,
+            quantityMilli INTEGER NOT NULL CHECK (quantityMilli BETWEEN 1 AND 999999999),
+            unitCostCents INTEGER NOT NULL CHECK (unitCostCents BETWEEN 1 AND 99999999),
+            deliveredAt TEXT NOT NULL CHECK ({delivered_at}),
+            userId INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            userName TEXT NOT NULL CHECK (length(userName) BETWEEN 1 AND 50)
+        );
+        CREATE INDEX deliveriesLine ON deliveries (invoiceLineId);
+
+        INSERT INTO deliveries (invoiceLineId, quantityMilli, unitCostCents, deliveredAt, userName)
+            SELECT invoiceLines.id, invoiceLines.deliveredMilli,
+                   MAX(1, COALESCE({fifo}, invoiceLines.costAtSaleCents,
+                       (SELECT costCents FROM products WHERE products.id = invoiceLines.productId), 1)),
+                   i.invoiceDate || 'T12:00:00Z', i.createdByName
+            FROM invoiceLines JOIN invoices i ON i.id = invoiceLines.invoiceId
+            WHERE i.type IN ('V','S') AND invoiceLines.deliveredMilli > 0;
+
+        UPDATE invoiceLines SET costAtSaleCents = MAX(1, {fifo})
+            WHERE invoiceId IN (SELECT id FROM invoices WHERE type IN ('GG','GI','P'))
+              AND EXISTS (SELECT 1 FROM consumptions c WHERE c.invoiceLineId = invoiceLines.id);
+
+        CREATE TABLE notificationWatchesNew (
+            kind TEXT NOT NULL CHECK (kind IN ('N-02','N-03','N-04','N-05','N-07','N-10','N-11','N-14','N-15')),
+            entityKey TEXT NOT NULL CHECK (length(entityKey) BETWEEN 1 AND 40),
+            createdAt TEXT NOT NULL CHECK ({CREATED_AT_CHECK}),
+            PRIMARY KEY (kind, entityKey)
+        );
+        INSERT INTO notificationWatchesNew SELECT kind, entityKey, createdAt FROM notificationWatches;
+        DROP TABLE notificationWatches;
+        ALTER TABLE notificationWatchesNew RENAME TO notificationWatches;
+
+        -- EN-01: lo apartado y lo disponible de cada producto, en un solo sitio.
+        CREATE VIEW productAvailability AS
+            SELECT p.id AS productId,
+                   COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli) FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId WHERE il.productId = p.id AND i.type IN ('V','S') AND i.status <> 'cancelled'), 0) AS reservedMilli,
+                   p.quantityMilli - COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli) FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId WHERE il.productId = p.id AND i.type IN ('V','S') AND i.status <> 'cancelled'), 0) AS availableMilli
+            FROM products p;"
+    ))
 }
 
 #[cfg(test)]
@@ -1331,6 +1384,51 @@ mod tests {
             .execute(
                 "UPDATE invoiceLines SET grossCents = 200, discountKind = 'amount', discountValue = 50, discountCents = 50, subtotalCents = 150 WHERE invoiceId = ?1 AND position = 1",
                 [invoice],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn migration_11_records_past_deliveries_with_their_fifo_cost() {
+        let mut connection = version_9_with_data();
+        run_migrations(&mut connection).unwrap();
+
+        // La venta pendiente (línea 2) ya salió: una entrega con su costo FIFO.
+        let deliveries: Vec<(i64, i64, i64, String, String)> = connection
+            .prepare(
+                "SELECT invoiceLineId, quantityMilli, unitCostCents, deliveredAt, userName FROM deliveries",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            deliveries,
+            vec![(
+                2,
+                2000,
+                100,
+                "2026-11-01T12:00:00Z".to_owned(),
+                "ana".to_owned()
+            )]
+        );
+        // La garantía guarda su costo FIFO; ningún costo queda vacío.
+        let guarantee_cost: Option<i64> = connection
+            .query_row(
+                "SELECT costAtSaleCents FROM invoiceLines WHERE id = 4",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(guarantee_cost, Some(100));
+        // Los avisos nuevos se pueden vigilar.
+        connection
+            .execute(
+                "INSERT INTO notificationWatches (kind, entityKey, createdAt) VALUES ('N-15', 'invoice:2', '2026-11-02T10:00:00Z')",
+                [],
             )
             .unwrap();
     }

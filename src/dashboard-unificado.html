@@ -2219,7 +2219,7 @@
                     <span class="kpi-icon"
                       ><svg class="icon"><use href="#icon-calendar"></use></svg
                     ></span>
-                    <span class="txt">Reservado</span>
+                    <span class="txt">Vendido sin entregar</span>
                   </div>
                 </div>
                 <div class="kpi-sec-value" id="producto-ver-reservado"></div>
@@ -4008,6 +4008,15 @@
                   <option value="reserved">Reservas activas</option>
                 </select>
               </div>
+              <div class="field field-select-item">
+                <label for="factura-venta-filtro-entrega">Entrega</label>
+                <select id="factura-venta-filtro-entrega">
+                  <option value="">Todas</option>
+                  <option value="pending">Sin entregar</option>
+                  <option value="partial">Entregada parcial</option>
+                  <option value="delivered">Entregada</option>
+                </select>
+              </div>
               <div class="field">
                 <label for="factura-venta-desde">Fecha inicial</label>
                 <input type="date" id="factura-venta-desde" />
@@ -4028,6 +4037,7 @@
                   <th class="text-right">Total</th>
                   <th>Estado</th>
                   <th>Reservada hasta</th>
+                  <th>Entrega</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -4463,6 +4473,15 @@
                   <option value="reserved">Reservas activas</option>
                 </select>
               </div>
+              <div class="field field-select-item">
+                <label for="factura-servicios-filtro-entrega">Entrega</label>
+                <select id="factura-servicios-filtro-entrega">
+                  <option value="">Todas</option>
+                  <option value="pending">Sin entregar</option>
+                  <option value="partial">Entregada parcial</option>
+                  <option value="delivered">Entregada</option>
+                </select>
+              </div>
               <div class="field">
                 <label for="factura-servicios-desde">Fecha inicial</label>
                 <input type="date" id="factura-servicios-desde" />
@@ -4483,6 +4502,7 @@
                   <th class="text-right">Total</th>
                   <th>Estado</th>
                   <th>Reservada hasta</th>
+                  <th>Entrega</th>
                   <th>Acciones</th>
                 </tr>
               </thead>

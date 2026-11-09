@@ -27,6 +27,24 @@ pub struct InvoiceListItem {
     pub created_by_name: String,
     /// RS-03: fecha límite si es (o fue) una reserva.
     pub reserved_until: Option<String>,
+    /// `spec-06` EN-02: `delivered`, `partial` o `pending` (Venta y Servicio).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_status: Option<String>,
+}
+
+/// `spec-06` EN-02: cuánto se entrega de cada línea (por su posición).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DeliveryInput {
+    pub position: i64,
+    pub quantity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecordDeliveriesInput {
+    pub invoice_id: i64,
+    pub deliveries: Vec<DeliveryInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -85,6 +103,9 @@ pub struct InvoiceFilters {
     pub from_date: Option<String>,
     #[serde(default)]
     pub to_date: Option<String>,
+    /// `spec-06` EN-02: `delivered`, `partial` o `pending`.
+    #[serde(default)]
+    pub delivery: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -392,6 +413,7 @@ mod tests {
     #[test]
     fn invoice_list_dto_serializes_camel_case_and_optional_association() {
         let item = InvoiceListItem {
+            delivery_status: None,
             id: 2,
             number: "V-00001".to_owned(),
             invoice_type: "V".to_owned(),

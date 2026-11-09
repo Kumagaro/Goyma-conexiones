@@ -382,14 +382,15 @@ function renderProductList(items) {
     const main = document.createElement("span");
     main.className = "stock-main";
     const quantity = document.createElement("span");
-    quantity.textContent = product.quantity;
+    // spec-06 EN-01: lo disponible; lo apartado va en el badge.
+    quantity.textContent = product.availableQuantity ?? product.quantity;
     main.append(quantity);
     if (product.reservedQuantity && product.reservedQuantity !== "0") {
       const reserved = createBadge(
         `${product.reservedQuantity} reservado`,
         "tone-orange",
       );
-      reserved.title = "Cantidad reservada en facturas";
+      reserved.title = `Vendido sin entregar · ${product.quantity} en almacén`;
       main.append(reserved);
     }
     stockCell.append(main);
@@ -627,7 +628,9 @@ function renderReservations(detail) {
       const link = document.createElement("button");
       link.type = "button";
       link.className = "action-link";
-      link.textContent = `${invoice.number} · ${invoice.quantity} · hasta ${formatCalendarDate(invoice.reservedUntil)}`;
+      link.textContent = invoice.reservedUntil
+        ? `${invoice.number} · ${invoice.quantity} · hasta ${formatCalendarDate(invoice.reservedUntil)}`
+        : `${invoice.number} · ${invoice.quantity} sin entregar`;
       link.addEventListener("click", () =>
         window.irAFacturaDesdeGeneral?.(invoice.invoiceType, invoice.id),
       );

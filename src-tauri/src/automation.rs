@@ -12,7 +12,7 @@ use crate::commands::drafts::purge_old_drafts;
 use crate::commands::products::{purge_best_effort, remaining_product_days};
 use crate::db::connection::current_app_data_dir;
 use crate::db::notifications::{
-    notify, watch_enter, watch_leave, Audience, Entity, CRITICAL, WARNING,
+    notify, watch_enter, watch_leave, Audience, Entity, CRITICAL, INFO, WARNING,
 };
 use crate::errors::{log_error, map_db_error, AppError};
 use crate::models::product::format_quantity_milli;
@@ -140,9 +140,10 @@ fn evaluate_product_watches(
     );
     let rows: Vec<Row> = connection
         .prepare(
-            "SELECT p.id, p.name, p.quantityMilli, COALESCE(u.abbreviation, u.name),
+            "SELECT p.id, p.name, MAX(a.availableMilli, 0), COALESCE(u.abbreviation, u.name),
                     p.expiresOn, p.status, p.discontinuedAt, p.lowStockThresholdMilli
-             FROM products p LEFT JOIN units u ON u.id = p.unitId",
+             FROM products p JOIN productAvailability a ON a.productId = p.id
+             LEFT JOIN units u ON u.id = p.unitId",
         )?
         .query_map([], |row| {
             Ok((
@@ -226,11 +227,13 @@ fn evaluate_invoice_watches(
     today: NaiveDate,
     thresholds: Thresholds,
 ) -> rusqlite::Result<()> {
-    // (id, tipo, número, contacto, emisión, reservada hasta)
-    type Row = (i64, String, String, String, String, Option<String>);
+    // (id, tipo, número, contacto, emisión, reservada hasta, con entregas)
+    type Row = (i64, String, String, String, String, Option<String>, bool);
     let rows: Vec<Row> = connection
         .prepare(
-            "SELECT id, type, number, COALESCE(contactFullName, ''), invoiceDate, reservedUntil
+            "SELECT id, type, number, COALESCE(contactFullName, ''), invoiceDate, reservedUntil,
+                    EXISTS(SELECT 1 FROM invoiceLines il
+                           WHERE il.invoiceId = invoices.id AND il.deliveredMilli > 0)
              FROM invoices WHERE status = 'pending' AND type IN ('E','V','S')",
         )?
         .query_map([], |row| {
@@ -241,22 +244,49 @@ fn evaluate_invoice_watches(
                 row.get(3)?,
                 row.get(4)?,
                 row.get(5)?,
+                row.get(6)?,
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
 
     let parse = |date: &str| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok();
     let (mut reserved, mut stale) = (vec![], vec![]);
-    for (id, invoice_type, number, contact, invoice_date, reserved_until) in rows {
-        // N-05: a la reserva le quedan menos de 3 días y aún no vence.
+    let (mut delivered_reservations, mut expired_delivered) = (vec![], vec![]);
+    for (id, invoice_type, number, contact, invoice_date, reserved_until, has_deliveries) in rows {
         if let Some(limit) = reserved_until.as_deref().and_then(parse) {
             let days = (limit - today).num_days();
+            // N-05: a la reserva le quedan menos de 3 días y aún no vence.
             if (0..3).contains(&days) {
+                let note = if has_deliveries {
+                    " (no se cancelará: tiene productos entregados)"
+                } else {
+                    ""
+                };
                 reserved.push(Situation {
                     key: invoice_key(id),
                     priority: WARNING,
                     message: format!(
-                        "Reserva por vencerse: Factura # {number} - Cliente: {contact} - Días restantes: {days} días"
+                        "Reserva por vencerse: Factura # {number} - Cliente: {contact} - Días restantes: {days} días{note}"
+                    ),
+                    entity: Some(Entity::Invoice(id)),
+                });
+            }
+            if has_deliveries && days >= 0 {
+                delivered_reservations.push(Situation {
+                    key: invoice_key(id),
+                    priority: INFO,
+                    message: format!(
+                        "La reserva {number} tiene productos entregados: ya no se cancelará sola"
+                    ),
+                    entity: Some(Entity::Invoice(id)),
+                });
+            }
+            if has_deliveries && days < 0 {
+                expired_delivered.push(Situation {
+                    key: invoice_key(id),
+                    priority: WARNING,
+                    message: format!(
+                        "La reserva {number} venció con productos entregados y sigue por cobrar"
                     ),
                     entity: Some(Entity::Invoice(id)),
                 });
@@ -283,6 +313,8 @@ fn evaluate_invoice_watches(
         }
     }
     sync_watches(connection, "N-05", reserved, now)?;
+    sync_watches(connection, "N-14", delivered_reservations, now)?;
+    sync_watches(connection, "N-15", expired_delivered, now)?;
     sync_watches(connection, "N-10", stale, now)
 }
 

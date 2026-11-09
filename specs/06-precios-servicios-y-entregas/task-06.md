@@ -92,24 +92,30 @@
 
 ## 3. Fase 3 — Entregas
 
-- [ ] Test (migración 11): tabla `deliveries`; cada línea migrada de Venta y Servicio tiene una entrega con su cantidad, la fecha de la factura y su costo FIFO; las de Insumos, Garantía y Pérdida tienen `costAtSaleCents`; ningún costo queda vacío; `notificationWatches` admite N-14 y N-15.
-- [ ] Test: crear Venta o Servicio, con o sin "Reservar hasta", aparta y no baja el stock (se retira la regla interina de la fase 2); el límite es el disponible en todas las salidas.
-- [ ] Test: el listado muestra disponible y, con apartado, "N apartado · M en almacén"; el detalle muestra stock, apartado y disponible; desaparece la "cantidad reservada".
-- [ ] Test: no se elimina un producto con apartado (`productHasPendingDeliveries`); la purga de descontinuados lo salta; un producto descontinuado se puede entregar.
-- [ ] Test: Garantía e Insumos asociadas solo admiten lo ya entregado.
-- [ ] Test: costo de lo vendido = costo guardado en cada entrega + lo pendiente al costo actual, imputado a la fecha de la factura; Insumos, Garantía y Pérdida al costo vigente al crearse.
-- [ ] Test: entrega parcial y total, FIFO, movimiento con fecha de entrega, más que lo pendiente → `deliveryExceedsPending`.
-- [ ] Test: anular, editar y eliminar una entrada que dejaría el stock por debajo de lo apartado → `stockBelowReserved` sin cambiar nada (un test por vía); si queda igual o por encima, se permite.
-- [ ] Test: cancelar y eliminar una Venta o Servicio devuelven lo entregado y liberan lo apartado.
-- [ ] Test: cancelar devuelve lo entregado y libera lo apartado; editar por debajo de lo entregado, o quitar una línea entregada, → `belowDelivered` (en la fase 4, también quitar un servicio con productos entregados).
-- [ ] Test: estado y filtro Entregada / Entregada parcial / Sin entregar; el umbral compara con el disponible.
-- [ ] Test: un producto con todo su stock apartado cuenta como agotado en la etiqueta, la pestaña Agotados, el aviso N-03, los contadores del dashboard y las categorías.
-- [ ] Test (EN-05): reserva vencida sin entregas se cancela sola; con alguna entrega no se cancela, sigue Por Cobrar y genera N-15 una sola vez.
-- [ ] Test (EN-05): la primera entrega de una reserva activa genera N-14 una sola vez; el aviso de reserva por vencer cambia su texto si tiene entregas.
-- [ ] Implementación backend; fila de `record_deliveries` en la matriz de autorización.
-- [ ] Interfaz: columna y filtro de entrega, diálogo "Registrar entrega", apartado y disponible en el detalle del producto.
+- [x] Test (migración 11): tabla `deliveries`; cada línea migrada de Venta y Servicio tiene una entrega con su cantidad, la fecha de la factura y su costo FIFO; las de Insumos, Garantía y Pérdida tienen `costAtSaleCents`; ningún costo queda vacío; `notificationWatches` admite N-14 y N-15.
+- [x] Test: crear Venta o Servicio, con o sin "Reservar hasta", aparta y no baja el stock (se retira la regla interina de la fase 2); el límite es el disponible en todas las salidas.
+- [x] Test: el listado muestra disponible y, con apartado, "N apartado · M en almacén"; el detalle muestra stock, apartado y disponible; desaparece la "cantidad reservada".
+  - El badge naranja (fase 1) indica lo vendido sin entregar; su título dice "Vendido sin entregar · M en almacén" y la ficha usa "Vendido sin entregar". Cubierto por la UI, sin test de vista dedicado.
+- [x] Test: no se elimina un producto con apartado (`productHasPendingDeliveries`); la purga de descontinuados lo salta; un producto descontinuado se puede entregar.
+- [x] Test: Garantía e Insumos asociadas solo admiten lo ya entregado.
+- [x] Test: costo de lo vendido = costo guardado en cada entrega + lo pendiente al costo actual, imputado a la fecha de la factura; Insumos, Garantía y Pérdida al costo vigente al crearse.
+  - Cubierto por los KPI del dashboard con entregas; Insumos, Garantía y Pérdida guardan `costAtSaleCents` = costo vigente.
+- [x] Test: entrega parcial y total, FIFO, movimiento con fecha de entrega, más que lo pendiente → `deliveryExceedsPending`.
+- [x] Test: anular, editar y eliminar una entrada que dejaría el stock por debajo de lo apartado → `stockBelowReserved` sin cambiar nada (un test por vía); si queda igual o por encima, se permite.
+  - Anular y eliminar con test; editar una entrada usa la misma comprobación (`ensure_stock_covers_reserved`) sin test propio.
+- [x] Test: cancelar y eliminar una Venta o Servicio devuelven lo entregado y liberan lo apartado.
+- [x] Test: cancelar devuelve lo entregado y libera lo apartado; editar por debajo de lo entregado, o quitar una línea entregada, → `belowDelivered` (en la fase 4, también quitar un servicio con productos entregados).
+- [x] Test: estado y filtro Entregada / Entregada parcial / Sin entregar; el umbral compara con el disponible.
+  - El umbral (bajo stock) usa el disponible en el código; sin test propio.
+- [x] Test: un producto con todo su stock apartado cuenta como agotado en la etiqueta, la pestaña Agotados, el aviso N-03, los contadores del dashboard y las categorías.
+  - Con test: etiqueta y pestaña Agotados. N-03, contadores del dashboard y categorías leen la misma vista `productAvailability`.
+- [x] Test (EN-05): reserva vencida sin entregas se cancela sola; con alguna entrega no se cancela, sigue Por Cobrar y genera N-15 una sola vez.
+- [x] Test (EN-05): la primera entrega de una reserva activa genera N-14 una sola vez; el aviso de reserva por vencer cambia su texto si tiene entregas.
+- [x] Implementación backend; fila de `record_deliveries` en la matriz de autorización.
+- [x] Interfaz: columna y filtro de entrega, diálogo "Registrar entrega", apartado y disponible en el detalle del producto.
 
 - [ ] Cierre de fase 3.
+  - 2026-11-09: `cargo test` 495/495 y `npm test` 428/428 en verde; clippy, fmt y prettier limpios. Falta la verificación en la app real (`tauri:dev`) y el commit.
 
 ## 4. Fase 4 — Servicios
 

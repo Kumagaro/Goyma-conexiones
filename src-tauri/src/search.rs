@@ -330,6 +330,7 @@ pub fn search_invoices(
                 date.clone(),
                 id,
                 InvoiceListItem {
+                    delivery_status: None,
                     id,
                     number,
                     invoice_type,

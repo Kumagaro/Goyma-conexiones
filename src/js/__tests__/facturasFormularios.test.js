@@ -35,6 +35,7 @@ vi.mock("../services/invoicesService.js", () => ({
   downloadInvoiceAttachment: vi.fn(),
   deleteInvoice: vi.fn(),
   changeInvoiceStatus: vi.fn(),
+  recordDeliveries: vi.fn(),
   getInvoicePrintModel: vi.fn(),
   exportInvoicePdf: vi.fn(),
 }));
@@ -687,7 +688,9 @@ describe("editar facturas (§7.3)", () => {
 
 describe("cambiar el estado desde el detalle (§7.3)", () => {
   const statusButtons = (t) => [
-    ...document.querySelectorAll(`#${t.view}-estado-acciones button`),
+    ...document.querySelectorAll(
+      `#${t.view}-estado-acciones button[data-status-target]`,
+    ),
   ];
 
   it.each(TYPES)("$name: ofrece solo las transiciones válidas", async (t) => {
@@ -779,6 +782,74 @@ describe("cambiar el estado desde el detalle (§7.3)", () => {
       expect(toastText()).toContain(
         "La transición de estado no es válida para este tipo de factura",
       ),
+    );
+  });
+});
+
+describe("registrar entregas (spec-06 EN-02)", () => {
+  it("entrega lo pendiente de cada línea y repinta el detalle", async () => {
+    const sale = {
+      ...PENDING_SALE,
+      lines: [
+        { ...PENDING_SALE.lines[0], quantity: "5", deliveredQuantity: "2" },
+        { ...PENDING_SALE.lines[1], quantity: "1", deliveredQuantity: "1" },
+      ],
+    };
+    invoices.getInvoice.mockResolvedValue(sale);
+    invoices.recordDeliveries.mockResolvedValue({
+      invoiceId: 1,
+      number: "V-00001",
+    });
+    await view.__testHooks.openSaleDetail(1);
+    expect(
+      document.getElementById("factura-venta-ver-productos").textContent,
+    ).toContain("Entregado: 2 de 5");
+    document
+      .querySelector("#factura-venta-estado-acciones [data-deliver]")
+      .click();
+    const dialog = await vi.waitFor(() => {
+      const found = document.querySelector('[role="dialog"]');
+      expect(found).not.toBeNull();
+      return found;
+    });
+    // Solo la línea con algo pendiente, con lo pendiente propuesto.
+    const input = dialog.querySelector('[name="p1"]');
+    expect(input.value).toBe("3");
+    expect(dialog.querySelector('[name="p2"]')).toBeNull();
+    input.value = "2";
+    dialog.querySelector('button[type="submit"]').click();
+    await vi.waitFor(() =>
+      expect(invoices.recordDeliveries).toHaveBeenCalledWith({
+        invoiceId: 1,
+        deliveries: [{ position: 1, quantity: "2" }],
+      }),
+    );
+  });
+
+  it("el listado filtra por entrega y la muestra en su columna", async () => {
+    invoices.listInvoices.mockResolvedValue([
+      {
+        id: 1,
+        number: "V-00001",
+        invoiceType: "V",
+        status: "pending",
+        totalCents: 100,
+        deliveryStatus: "partial",
+      },
+    ]);
+    setValue("factura-venta-filtro-entrega", "partial");
+    document
+      .getElementById("factura-venta-filtro-entrega")
+      .dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() =>
+      expect(invoices.listInvoices).toHaveBeenLastCalledWith(
+        expect.objectContaining({ delivery: "partial" }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("facturas-venta-body").textContent,
+      ).toContain("Entregada parcial"),
     );
   });
 });

@@ -330,7 +330,7 @@ pub fn get_category_inner(
 
     let mut statement = connection
         .prepare(
-            "SELECT id, name, quantityMilli, status
+            "SELECT id, name, quantityMilli - COALESCE((SELECT reservedMilli FROM productAvailability WHERE productId = products.id), 0), status
              FROM products
              WHERE categoryId = ?1 AND (status <> 'discontinued' OR discontinuedAt > ?2)
              ORDER BY id ASC",
@@ -346,7 +346,7 @@ pub fn get_category_inner(
             Ok(ProductBrief {
                 id: product_id,
                 name: product_name,
-                is_out_of_stock: quantity_milli == 0,
+                is_out_of_stock: quantity_milli <= 0,
                 is_discontinued: status == "discontinued",
             })
         })

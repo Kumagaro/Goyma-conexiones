@@ -203,3 +203,7 @@ Cada uno con su fila en la matriz de autorización (`Agents.md` §3).
 - **D-06 — `subtotalCents` es el neto:** cambiar su significado una vez en el esquema es más seguro que adaptar las 13 consultas que lo leen.
 - **D-07 — Entregas migradas con su costo FIFO:** el costo de lo vendido tiene una sola fuente (`deliveries`) sin valores vacíos. Que el histórico no cambie es una consecuencia, no un objetivo (`spec-06`, datos anteriores).
 - **D-08 — El stock nunca baja de lo apartado:** lo apartado no consume lotes, así que las vías que reducen stock sin pasar por el disponible (entradas) lo comprueban explícitamente.
+- **D-09 — Vista `productAvailability`:** apartado y disponible salen de una sola vista (migración 11) que leen productos, categorías, dashboard, avisos y purga; así "agotado" no puede divergir entre pantallas.
+- **D-10 — Entrega por posición de línea:** `record_deliveries` recibe `{ position, quantity }`, porque desde D-02 un producto puede repetirse en la factura.
+- **D-11 — Insumos, Garantía y Pérdida al costo vigente:** salen de los lotes al crearse (FIFO) pero su costo guardado es el `costCents` actual del producto (S-02), igual que el de las entregas.
+- **D-12 — Entregas sin fila en el registro de actividad:** el `CHECK` de `activityLog` no admite una acción de entrega; queda el movimiento del producto (con usuario y fecha) y la tabla `deliveries`. Si hace falta, se añade en una migración posterior.
