@@ -38,7 +38,6 @@ fn read_settings(connection: &Connection) -> Result<Settings, AppError> {
             .map_err(|error| map_db_error(error, "getSettings", &[]))
     };
     Ok(Settings {
-        low_stock_threshold: thresholds.low_stock_units,
         stale_invoice_days: thresholds.stale_invoice_days,
         backup_reminder_days: read("backupReminderDays")?
             .and_then(|value| value.parse().ok())
@@ -64,12 +63,6 @@ pub fn update_settings_inner(
     let actor = require_session(connection, now)?;
     for (value, min, max, message) in [
         (
-            input.low_stock_threshold,
-            1,
-            9_999,
-            "El umbral de stock bajo debe ser un número entero de 1 a 9999",
-        ),
-        (
             input.stale_invoice_days,
             1,
             365,
@@ -91,7 +84,6 @@ pub fn update_settings_inner(
         .map_err(|error| map_db_error(error, "updateSettings", &[]))?;
     let timestamp = format_utc_timestamp(now);
     for (key, value) in [
-        ("lowStockThreshold", input.low_stock_threshold),
         ("staleInvoiceDays", input.stale_invoice_days),
         ("backupReminderDays", input.backup_reminder_days),
     ] {
@@ -750,7 +742,7 @@ mod tests {
     use crate::models::settings::{UpdateSettingsInput, UserPreferences};
     use crate::test_utils::{
         assert_allows_both_roles, assert_requires_session, create_test_session, create_test_user,
-        insert_product_fixture, setup_test_db,
+        setup_test_db,
     };
 
     fn now() -> DateTime<Utc> {
@@ -771,57 +763,35 @@ mod tests {
         id
     }
 
-    fn settings(low: i64, stale: i64, backup: i64) -> UpdateSettingsInput {
+    fn settings(stale: i64, backup: i64) -> UpdateSettingsInput {
         UpdateSettingsInput {
-            low_stock_threshold: low,
             stale_invoice_days: stale,
             backup_reminder_days: backup,
         }
     }
 
     #[test]
-    fn settings_have_defaults_validate_ranges_and_a_new_threshold_reevaluates_low_stock() {
+    fn settings_have_defaults_validate_ranges_and_save() {
         let mut connection = setup_test_db();
         login(&connection, "ajustes", "+5350000051", "12345678951");
-        let product = insert_product_fixture(
-            &connection,
-            "Café",
-            None,
-            None,
-            100,
-            0,
-            7_000,
-            "active",
-            None,
-            None,
-        );
 
         let defaults = get_settings_inner(&mut connection, now()).unwrap();
         assert_eq!(
             (
-                defaults.low_stock_threshold,
                 defaults.stale_invoice_days,
                 defaults.backup_reminder_days,
                 defaults.last_backup_at
             ),
-            (5, 30, 7, None)
+            (30, 7, None)
         );
 
         for (input, message) in [
             (
-                settings(0, 30, 7),
-                "El umbral de stock bajo debe ser un número entero de 1 a 9999",
-            ),
-            (
-                settings(10_000, 30, 7),
-                "El umbral de stock bajo debe ser un número entero de 1 a 9999",
-            ),
-            (
-                settings(5, 366, 7),
+                settings(366, 7),
                 "Los días de factura pendiente antigua deben estar entre 1 y 365",
             ),
             (
-                settings(5, 30, 91),
+                settings(30, 91),
                 "Los días de respaldo pendiente deben estar entre 1 y 90",
             ),
         ] {
@@ -832,30 +802,11 @@ mod tests {
             );
         }
 
-        // 7 unidades no es stock bajo con 5; con 10 sí, y avisa (N-03).
-        let saved = update_settings_inner(&mut connection, now(), settings(10, 45, 14)).unwrap();
+        let saved = update_settings_inner(&mut connection, now(), settings(45, 14)).unwrap();
         assert_eq!(
-            (
-                saved.low_stock_threshold,
-                saved.stale_invoice_days,
-                saved.backup_reminder_days
-            ),
-            (10, 45, 14)
+            (saved.stale_invoice_days, saved.backup_reminder_days),
+            (45, 14)
         );
-        let message: String = connection
-            .query_row(
-                "SELECT message FROM notifications WHERE type = 'N-03'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            message,
-            "Producto con stock bajo: Café - Cantidad actual: 7"
-        );
-        let detail =
-            crate::commands::products::get_product_inner(&mut connection, now(), product).unwrap();
-        assert!(detail.product.is_low_stock);
         assert_eq!(
             crate::automation::thresholds(&connection).stale_invoice_days,
             45
@@ -1008,8 +959,8 @@ mod tests {
         };
         assert_requires_session(get_settings_inner);
         assert_allows_both_roles(get_settings_inner);
-        assert_requires_session(|c, n| update_settings_inner(c, n, settings(5, 30, 7)));
-        assert_allows_both_roles(|c, n| update_settings_inner(c, n, settings(5, 30, 7)));
+        assert_requires_session(|c, n| update_settings_inner(c, n, settings(30, 7)));
+        assert_allows_both_roles(|c, n| update_settings_inner(c, n, settings(30, 7)));
         assert_requires_session(get_user_preferences_inner);
         assert_allows_both_roles(get_user_preferences_inner);
         assert_requires_session(|c, n| update_user_preferences_inner(c, n, prefs()));

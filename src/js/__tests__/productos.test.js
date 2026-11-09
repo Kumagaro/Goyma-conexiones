@@ -100,6 +100,7 @@ describe("formulario de productos", () => {
         <div id="producto-precio-venta-feedback" role="status" hidden></div>
         <input id="producto-ganancia" type="text" inputmode="decimal" required />
         <input id="producto-stock" type="text" inputmode="decimal" required />
+        <input id="producto-umbral" type="text" inputmode="decimal" required />
         <select id="producto-caducidad-tipo">
           <option value="no-aplica">No aplica</option>
           <option value="fecha">Tiene fecha</option>
@@ -297,6 +298,7 @@ describe("formulario de productos", () => {
       costCents: 1_250,
       quantity: "2,5",
       profitPercent: "20,00",
+      lowStockThreshold: "5",
       expiresOn: "2026-10-10",
     });
     const costInput = document.getElementById("producto-precio-entrada");
@@ -347,6 +349,7 @@ describe("formulario de productos", () => {
       categoryId: 3,
       unitId: 8,
       profitPercent: "25,50",
+      lowStockThreshold: "5",
       expiresOn: "2026-10-10",
     });
     expect(updateInput).not.toHaveProperty("cost");
@@ -386,6 +389,9 @@ describe("formulario de productos", () => {
     cost.value = "12,50";
     quantity.value = "2,500";
     profit.value = "20,00";
+    // spec-06 UM-01: el umbral de pocas unidades es obligatorio.
+    expect(document.getElementById("producto-umbral").required).toBe(true);
+    document.getElementById("producto-umbral").value = "3";
     cost.dispatchEvent(new Event("input", { bubbles: true }));
     await vi.waitFor(() => {
       expect(productServiceMocks.previewSellingPrice).toHaveBeenCalledWith({
@@ -407,6 +413,7 @@ describe("formulario de productos", () => {
       cost: "12,50",
       quantity: "2,500",
       profitPercent: "20,00",
+      lowStockThreshold: "3",
       expiresOn: null,
     });
   });
@@ -444,6 +451,7 @@ describe("formulario de productos", () => {
     document.getElementById("producto-precio-entrada").value = "1,00";
     document.getElementById("producto-ganancia").value = "20,00";
     document.getElementById("producto-stock").value = "1";
+    document.getElementById("producto-umbral").value = "1";
     productServiceMocks.createProduct.mockRejectedValueOnce(
       new Error("Ya existe un producto con ese nombre"),
     );
@@ -460,6 +468,7 @@ describe("formulario de productos", () => {
       costCents: 100,
       quantity: "1",
       profitPercent: "20,00",
+      lowStockThreshold: "1",
     });
     productServiceMocks.updateProduct.mockRejectedValueOnce(
       new Error("El producto ya no existe"),
@@ -670,6 +679,42 @@ describe("listados y detalle de productos", () => {
     ).toBe(false);
     expect(document.getElementById("producto-search-bar").hidden).toBe(true);
     expect(document.querySelector(".search-bar").hidden).toBe(true);
+  });
+
+  it("spec-06: precio calculado más claro, badge naranja de reservado y Sin umbral", async () => {
+    productServiceMocks.listProducts.mockResolvedValue([
+      {
+        ...activeProducts[1],
+        sellingPriceCents: 1_900,
+        calculatedPriceCents: 1_837,
+        reservedQuantity: "2",
+        lowStockThreshold: null,
+      },
+      {
+        ...activeProducts[1],
+        id: 3,
+        name: "Sin reservas",
+        sellingPriceCents: 1_900,
+        calculatedPriceCents: 1_900,
+        reservedQuantity: "0",
+        lowStockThreshold: "5",
+      },
+    ]);
+    const view = await openProductsView();
+    await view.showProductoTab("list");
+
+    const [reserved, plain] = document.querySelectorAll("#productos-body tr");
+    const badge = [...reserved.querySelectorAll(".kpi-tag.tone-orange")].find(
+      (tag) => tag.textContent === "2 reservado",
+    );
+    expect(badge).toBeTruthy();
+    expect(reserved.querySelector(".price-calculated").textContent).toBe(
+      "18,37 USD",
+    );
+    expect(reserved.textContent).toContain("Sin umbral");
+    expect(plain.textContent).not.toContain("reservado");
+    expect(plain.querySelector("td:nth-child(5) .price-calculated")).toBeNull();
+    expect(plain.textContent).not.toContain("Sin umbral");
   });
 
   it("pinta solo productos del backend, badges, acciones y filtra por categoría/stock/caducidad", async () => {

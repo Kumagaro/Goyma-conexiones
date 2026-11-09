@@ -23,8 +23,6 @@ const WATCH_SAVEPOINT: &str = "notification_watches";
 /// Umbrales de los avisos (CF-04).
 #[derive(Clone, Copy, Debug)]
 pub struct Thresholds {
-    /// Stock bajo: 0 < cantidad < este número de unidades (N-03).
-    pub low_stock_units: i64,
     /// Factura pendiente antigua: más de estos días desde la emisión (N-10).
     pub stale_invoice_days: i64,
 }
@@ -32,7 +30,6 @@ pub struct Thresholds {
 impl Default for Thresholds {
     fn default() -> Self {
         Self {
-            low_stock_units: 5,
             stale_invoice_days: 30,
         }
     }
@@ -52,14 +49,8 @@ pub fn thresholds(connection: &Connection) -> Thresholds {
             .unwrap_or(default)
     };
     Thresholds {
-        low_stock_units: read("lowStockThreshold", defaults.low_stock_units),
         stale_invoice_days: read("staleInvoiceDays", defaults.stale_invoice_days),
     }
-}
-
-/// "Stock bajo" en milésimas: 0 < cantidad < este valor (P-12, CF-04).
-pub fn low_stock_milli(connection: &Connection) -> i64 {
-    thresholds(connection).low_stock_units.saturating_mul(1_000)
 }
 
 /// Una entidad que hoy está en la situación vigilada y el aviso que le toca.
@@ -120,7 +111,7 @@ pub fn evaluate_watches(
     thresholds: Thresholds,
 ) -> Result<(), AppError> {
     let today = today_local(now);
-    evaluate_product_watches(connection, now, today, thresholds)
+    evaluate_product_watches(connection, now, today)
         .and_then(|()| evaluate_invoice_watches(connection, now, today, thresholds))
         .map_err(|error| {
             AppError::new(
@@ -135,9 +126,8 @@ fn evaluate_product_watches(
     connection: &Connection,
     now: DateTime<Utc>,
     today: NaiveDate,
-    thresholds: Thresholds,
 ) -> rusqlite::Result<()> {
-    // (id, nombre, cantidad, unidad, caducidad, estado, descontinuado)
+    // (id, nombre, cantidad, unidad, caducidad, estado, descontinuado, umbral)
     type Row = (
         i64,
         String,
@@ -146,11 +136,12 @@ fn evaluate_product_watches(
         Option<String>,
         String,
         Option<String>,
+        Option<i64>,
     );
     let rows: Vec<Row> = connection
         .prepare(
             "SELECT p.id, p.name, p.quantityMilli, COALESCE(u.abbreviation, u.name),
-                    p.expiresOn, p.status, p.discontinuedAt
+                    p.expiresOn, p.status, p.discontinuedAt, p.lowStockThresholdMilli
              FROM products p LEFT JOIN units u ON u.id = p.unitId",
         )?
         .query_map([], |row| {
@@ -162,14 +153,14 @@ fn evaluate_product_watches(
                 row.get(4)?,
                 row.get(5)?,
                 row.get(6)?,
+                row.get(7)?,
             ))
         })?
         .collect::<rusqlite::Result<_>>()?;
 
-    let low_stock_milli = thresholds.low_stock_units.saturating_mul(1_000);
     let expiry_limit = today + Duration::days(29);
     let (mut out, mut low, mut expiring, mut purging) = (vec![], vec![], vec![], vec![]);
-    for (id, name, quantity, unit, expires_on, status, discontinued_at) in rows {
+    for (id, name, quantity, unit, expires_on, status, discontinued_at, threshold) in rows {
         if status == "discontinued" {
             // N-07: menos de 10 días para la eliminación automática (P-08).
             let remaining = discontinued_at
@@ -194,7 +185,7 @@ fn evaluate_product_watches(
                 message: format!("Producto agotado: {name}"),
                 entity: Some(Entity::Product(id)),
             });
-        } else if quantity < low_stock_milli {
+        } else if threshold.is_some_and(|threshold| quantity < threshold) {
             let amount = format_quantity_milli(quantity);
             let amount = match &unit {
                 Some(unit) => format!("{amount} {unit}"),
@@ -536,7 +527,7 @@ mod tests {
 
     fn product(connection: &Connection, name: &str, quantity_milli: i64) -> i64 {
         let unit = insert_unit_fixture(connection, &format!("Unidad {name}"), &format!("u{name}"));
-        insert_product_fixture(
+        let id = insert_product_fixture(
             connection,
             name,
             None,
@@ -547,7 +538,18 @@ mod tests {
             "active",
             None,
             None,
-        )
+        );
+        set_threshold(connection, id, 5_000);
+        id
+    }
+
+    fn set_threshold(connection: &Connection, product_id: i64, threshold_milli: i64) {
+        connection
+            .execute(
+                "UPDATE products SET lowStockThresholdMilli = ?1 WHERE id = ?2",
+                [threshold_milli, product_id],
+            )
+            .unwrap();
     }
 
     fn invoice(
@@ -655,18 +657,19 @@ mod tests {
             )
         );
 
-        // Con otro umbral, "Justo" (5) entra en stock bajo.
+        // Con su propio umbral más alto, "Justo" (5) entra en stock bajo; sin
+        // umbral, "Libre" (1) no avisa (spec-06 UM-01).
         let connection = setup_test_db();
-        product(&connection, "Justo", 5_000);
-        evaluate_watches(
-            &connection,
-            now(),
-            Thresholds {
-                low_stock_units: 10,
-                ..Thresholds::default()
-            },
-        )
-        .unwrap();
+        let justo = product(&connection, "Justo", 5_000);
+        set_threshold(&connection, justo, 10_000);
+        let libre = product(&connection, "Libre", 1_000);
+        connection
+            .execute(
+                "UPDATE products SET lowStockThresholdMilli = NULL WHERE id = ?1",
+                [libre],
+            )
+            .unwrap();
+        evaluate_watches(&connection, now(), Thresholds::default()).unwrap();
         assert_eq!(
             messages(&connection),
             vec!["Producto con stock bajo: Justo - Cantidad actual: 5 uJusto"]

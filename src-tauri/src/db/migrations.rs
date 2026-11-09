@@ -18,6 +18,7 @@ pub const MIGRATIONS: &[(i64, Migration)] = &[
     (6, drafts_v6),
     (7, activity_log_v7),
     (8, application_id_v8),
+    (9, cost_base_and_threshold_v9),
 ];
 
 /// Identifica una base de Goyma Conexiones ("GOYM" en ASCII) al restaurar
@@ -286,6 +287,24 @@ fn application_id_v8(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(&format!("PRAGMA application_id = {APPLICATION_ID};"))
 }
 
+/// Migración 9 (`plan-06` §2.2): costo promedio móvil desde un costo base y
+/// umbral de pocas unidades por producto. Los productos existentes conservan
+/// su costo (que pasa a ser el base) y quedan sin umbral hasta editarlos.
+fn cost_base_and_threshold_v9(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE products ADD COLUMN costBaseCents INTEGER
+            CHECK (costBaseCents IS NULL OR costBaseCents BETWEEN 1 AND 99999999);
+        ALTER TABLE products ADD COLUMN costBaseArrivalOrder INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE products ADD COLUMN lowStockThresholdMilli INTEGER
+            CHECK (lowStockThresholdMilli IS NULL OR lowStockThresholdMilli BETWEEN 1 AND 999999999);
+        ALTER TABLE lots ADD COLUMN stockBeforeMilli INTEGER
+            CHECK (stockBeforeMilli IS NULL OR stockBeforeMilli BETWEEN 0 AND 999999999);
+        UPDATE products SET costBaseCents = costCents,
+            costBaseArrivalOrder = COALESCE((SELECT MAX(arrivalOrder) FROM lots WHERE lots.productId = products.id), 0);
+        DELETE FROM settings WHERE key = 'lowStockThreshold';",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::{Connection, Transaction};
@@ -502,7 +521,6 @@ mod tests {
             seeded,
             vec![
                 ("backupReminderDays".into(), "7".into()),
-                ("lowStockThreshold".into(), "5".into()),
                 ("staleInvoiceDays".into(), "30".into()),
             ]
         );
@@ -705,6 +723,65 @@ mod tests {
             .unwrap();
         assert_eq!(user, None);
         assert_eq!(name, "Ana");
+    }
+
+    #[test]
+    fn migration_9_keeps_costs_as_the_base_and_leaves_thresholds_empty() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        create_schema(&connection).unwrap();
+        let first_eight: Vec<(i64, Migration)> = super::MIGRATIONS
+            .iter()
+            .copied()
+            .filter(|(version, _)| *version <= 8)
+            .collect();
+        run_migrations_with(&mut connection, &first_eight).unwrap();
+        connection
+            .execute(
+                "INSERT INTO products (name, nameNormalized, costCents, profitPercentHundredths, quantityMilli, createdAt, updatedAt)
+                 VALUES ('Cable', 'cable', 1250, 2000, 5000, '2026-11-01T10:00:00Z', '2026-11-01T10:00:00Z')",
+                [],
+            )
+            .unwrap();
+        let product_id = connection.last_insert_rowid();
+        connection
+            .execute(
+                "INSERT INTO lots (productId, origin, arrivalOrder, initialMilli, remainingMilli, unitCostCents, createdAt, updatedAt)
+                 VALUES (?1, 'initial', 3, 5000, 5000, 1000, '2026-11-01T10:00:00Z', '2026-11-01T10:00:00Z')",
+                [product_id],
+            )
+            .unwrap();
+
+        run_migrations(&mut connection).unwrap();
+
+        let migrated: (i64, Option<i64>, i64, Option<i64>) = connection
+            .query_row(
+                "SELECT costCents, costBaseCents, costBaseArrivalOrder, lowStockThresholdMilli FROM products WHERE id = ?1",
+                [product_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(migrated, (1250, Some(1250), 3, None));
+        let stock_before: Option<i64> = connection
+            .query_row("SELECT stockBeforeMilli FROM lots", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(stock_before, None);
+        let general_threshold: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM settings WHERE key = 'lowStockThreshold'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(general_threshold, 0);
+        assert!(connection
+            .execute(
+                "UPDATE products SET lowStockThresholdMilli = 0 WHERE id = ?1",
+                [product_id]
+            )
+            .is_err());
     }
 
     #[test]

@@ -306,7 +306,6 @@ describe("tasas de cambio", () => {
       get_user_preferences: { visibleCurrencies: [], pageSize: 20 },
       get_company_profile: {},
       get_settings: {
-        lowStockThreshold: 5,
         staleInvoiceDays: 30,
         backupReminderDays: 7,
       },

@@ -106,6 +106,7 @@ pub struct NewProductInput {
     pub unit_id: Option<i64>,
     pub cost: String,
     pub profit_percent: String,
+    pub low_stock_threshold: String,
     #[serde(default)]
     pub expires_on: Option<String>,
 }

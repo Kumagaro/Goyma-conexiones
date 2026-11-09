@@ -12,48 +12,49 @@
 
 - [x] Confirmar con el dueño los supuestos S-01 a S-17 de `spec-06` §8 y anotar las respuestas.
   - Confirmados tal como están (2026-11-08).
-- [ ] Línea base: `cargo test` (478), `npm test` (419), clippy, fmt y prettier en verde.
+- [x] Línea base: `cargo test` (478), `npm test` (419), clippy, fmt y prettier en verde.
 - [ ] Preparar una base de prueba 0.2.0 con datos en todas las tablas (fixture de Rust) para los tests de migración.
 
 ## 1. Fase 1 — Costo, precio, umbral y cuentas por cobrar
 
 ### 1.1 Migración 9 (`plan-06` §2.2)
 
-- [ ] Test: la migración 9 guarda el costo actual como costo base y el último `arrivalOrder`, añade `lots.stockBeforeMilli` en `NULL`, deja el umbral en `NULL`, quita `lowStockThreshold` de `settings` y no cambia ningún costo.
-- [ ] Implementación.
+- [x] Test: la migración 9 guarda el costo actual como costo base y el último `arrivalOrder`, añade `lots.stockBeforeMilli` en `NULL`, deja el umbral en `NULL`, quita `lowStockThreshold` de `settings` y no cambia ningún costo.
+- [x] Implementación.
 
 ### 1.2 Costo solo con entradas (CO-01)
 
-- [ ] Test: una venta, un servicio, insumos, garantía y pérdida, y la cancelación de cada una, no cambian el costo.
-- [ ] Test: los dos ejemplos de `spec-06` CO-01 (stock vendido → 20 USD; 50 + 50 → 15 USD).
-- [ ] Test: anular o eliminar una entrada ajusta el `stockBeforeMilli` de las posteriores y el costo vuelve al que tendría sin ella; editarla lo recalcula.
-- [ ] Test: producto nuevo con stock inicial 0 toma el costo de su primera entrada.
-- [ ] Implementación: `stockBeforeMilli` al registrar entradas, repaso de la fórmula y revisión de las **14** llamadas a `recalculate_product_cost` (11 en `invoices.rs`, 3 en `inventory.rs`): solo quedan las de entradas.
+- [x] Test: una venta, un servicio, insumos, garantía y pérdida, y la cancelación de cada una, no cambian el costo.
+- [x] Test: los dos ejemplos de `spec-06` CO-01 (stock vendido → 20 USD; 50 + 50 → 15 USD).
+- [x] Test: anular o eliminar una entrada ajusta el `stockBeforeMilli` de las posteriores y el costo vuelve al que tendría sin ella; editarla lo recalcula.
+- [x] Test: producto nuevo con stock inicial 0 toma el costo de su primera entrada.
+- [x] Implementación: `stockBeforeMilli` al registrar entradas, repaso de la fórmula y revisión de las **14** llamadas a `recalculate_product_cost` (11 en `invoices.rs`, 3 en `inventory.rs`): solo quedan las de entradas.
 
 ### 1.3 Precio redondeado (PV-01, PV-02)
 
-- [ ] Test: 18,37 → 19,00; 19,00 → 19,00; 0,01 → 1,00; DTO con precio de venta y calculado.
-- [ ] Implementación en `pricing.rs` y DTOs; actualizar los tests de precio existentes.
-- [ ] Interfaz: precio calculado en tono claro en listado, detalle y formulario (solo si difiere).
+- [x] Test: 18,37 → 19,00; 19,00 → 19,00; 0,01 → 1,00; DTO con precio de venta y calculado.
+- [x] Implementación en `pricing.rs` y DTOs; actualizar los tests de precio existentes.
+- [x] Interfaz: precio calculado en tono claro en listado, detalle y formulario (solo si difiere).
 
 ### 1.4 Valor del inventario al costo (VI-01)
 
-- [ ] Test: columna Valor Total, Resumen de Inventario y exportaciones usan stock × costo.
-- [ ] Implementación.
+- [x] Test: columna Valor Total, Resumen de Inventario y exportaciones usan stock × costo.
+- [x] Implementación.
 
 ### 1.5 Umbral por producto (UM-01)
 
-- [ ] Test: crear y editar exigen umbral; sin umbral no avisa; el aviso compara con el disponible (con apartado 0 en esta fase).
-- [ ] Test: importación CSV exige la columna; exportación la incluye.
-- [ ] Implementación backend; quitar el ajuste general de Configuración.
-- [ ] Interfaz: campo en el formulario, "Sin umbral" en el listado.
+- [x] Test: crear y editar exigen umbral; sin umbral no avisa; el aviso compara con el disponible (con apartado 0 en esta fase).
+- [x] Test: importación CSV exige la columna; exportación la incluye.
+- [x] Implementación backend; quitar el ajuste general de Configuración.
+- [x] Interfaz: campo en el formulario, "Sin umbral" en el listado.
 
 ### 1.6 Cuentas por cobrar (KP-01)
 
-- [ ] Test: total y cantidad de V y S Por Cobrar, incluidas reservas (en esta fase, solo líneas; los servicios se suman en la fase 4).
-- [ ] Implementación y tarjeta del dashboard.
+- [x] Test: total y cantidad de V y S Por Cobrar, incluidas reservas (en esta fase, solo líneas; los servicios se suman en la fase 4).
+- [x] Implementación y tarjeta del dashboard.
 
 - [ ] Cierre de fase 1.
+  - 2026-11-09: `cargo test` 482/482, `npm test` 420/420, clippy, fmt y prettier en verde. Añadido a pedido del dueño: badge naranja con la cantidad reservada junto al stock. Falta la verificación en la app real (`tauri:dev`) y el commit.
 
 ## 2. Fase 2 — Facturas y contactos
 

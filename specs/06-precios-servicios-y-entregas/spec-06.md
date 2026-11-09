@@ -129,7 +129,7 @@ Restaurar sigue permitido a ambos roles (`spec-04`), ahora con la contraseña de
 
 - **Dado** una factura de **Venta** o **Servicio**, **entonces** sus productos quedan **apartados**: no se descuenta el stock todavía, pero no se pueden vender a otro cliente.
 - El límite de cantidad de cualquier factura de salida es el **disponible** (stock − apartado), no el stock.
-- La columna **Disponible en Stock** del listado de productos muestra el **disponible** y, si hay algo apartado, debajo "N apartado · M en almacén", para que cuadre con el Valor Total (que usa el stock en almacén, S-07).
+- La columna **Disponible en Stock** del listado de productos muestra el **disponible** y, si hay algo apartado, al lado un **badge naranja** "N reservado" (pedido del dueño, 2026-11-08), con el stock en almacén en su texto de ayuda para que cuadre con el Valor Total (S-07). Hasta la fase 3 el badge cuenta las reservas activas; desde ella, todo lo apartado.
 - **El stock nunca baja de lo apartado.** Anular, editar o eliminar una factura de entrada se rechaza si dejaría el stock de un producto por debajo de su cantidad apartada: "No se puede: N unidades de este producto están vendidas y sin entregar". (Pérdida, Garantía e Insumos ya lo cumplen porque su límite es el disponible.)
 - **No se puede eliminar** un producto con cantidad apartada: "Tiene N unidades sin entregar en facturas". La purga automática de descontinuados lo salta hasta que se entregue o se cancele lo apartado. Un producto descontinuado sí se puede seguir entregando.
 - El detalle del producto muestra stock, apartado y disponible, con enlace a las facturas con productos sin entregar. Sustituye a la "cantidad reservada" de `spec-04` RS-03: lo reservado es parte de lo apartado.

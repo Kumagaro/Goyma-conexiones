@@ -566,7 +566,6 @@ mod tests {
             &mut connection,
             now,
             crate::models::settings::UpdateSettingsInput {
-                low_stock_threshold: 5,
                 stale_invoice_days: 30,
                 backup_reminder_days: 3,
             },
@@ -705,6 +704,14 @@ mod tests {
             old.execute_batch("DROP TABLE drafts;").unwrap();
             old.execute_batch("DROP TRIGGER activityLogNoDelete; DROP TRIGGER activityLogImmutable; DROP TABLE activityLog;")
                 .unwrap();
+            // Lo que añade la migración 9 tampoco existía en la versión 5.
+            old.execute_batch(
+                "ALTER TABLE products DROP COLUMN costBaseCents;
+                 ALTER TABLE products DROP COLUMN costBaseArrivalOrder;
+                 ALTER TABLE products DROP COLUMN lowStockThresholdMilli;
+                 ALTER TABLE lots DROP COLUMN stockBeforeMilli;",
+            )
+            .unwrap();
             old.pragma_update(None, "user_version", 5).unwrap();
         }
 

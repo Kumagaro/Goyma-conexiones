@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    pub low_stock_threshold: i64,
     pub stale_invoice_days: i64,
     pub backup_reminder_days: i64,
     pub last_backup_at: Option<String>,
@@ -13,7 +12,6 @@ pub struct Settings {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct UpdateSettingsInput {
-    pub low_stock_threshold: i64,
     pub stale_invoice_days: i64,
     pub backup_reminder_days: i64,
 }

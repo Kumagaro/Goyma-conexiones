@@ -273,10 +273,22 @@ fn remove_entry_invoice_line(
 
     let remaining_milli = row.lot_remaining_milli.unwrap_or(0);
     let unit_cost_cents = row.lot_unit_cost_cents.unwrap_or(row.unit_price_cents);
+    let arrival_order = match row.lot_id {
+        Some(lot_id) => crate::inventory::lot_arrival_order(connection, lot_id)?,
+        None => None,
+    };
     connection
         .execute("DELETE FROM invoiceLines WHERE id = ?1", [row.id])
         .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
     recalculate_product_quantity(connection, product_id)?;
+    if let Some(arrival_order) = arrival_order {
+        crate::inventory::shift_later_stock_before(
+            connection,
+            product_id,
+            arrival_order,
+            -remaining_milli,
+        )?;
+    }
     recalculate_product_cost(connection, product_id)?;
     insert_entry_update_movement(
         connection,
@@ -1167,6 +1179,16 @@ pub fn create_entry_invoice_inner(
                     &format!("invalid new product profit: {}", error.message),
                 )
             })?;
+            let low_stock_threshold_milli = crate::validators::parse_quantity_milli(
+                &new_product.low_stock_threshold,
+            )
+            .map_err(|error| {
+                AppError::new(
+                    "validationFailed",
+                    "El umbral de pocas unidades no es válido",
+                    &format!("invalid new product threshold: {}", error.message),
+                )
+            })?;
             let expires_on = new_product
                 .expires_on
                 .as_deref()
@@ -1233,10 +1255,12 @@ pub fn create_entry_invoice_inner(
             connection
                     .execute(
                         "INSERT INTO products (name, nameNormalized, description, categoryId, unitId, costCents,
-                            profitPercentHundredths, expiresOn, quantityMilli, status, discontinuedAt, createdAt, updatedAt)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 'active', NULL, ?9, ?9)",
+                            profitPercentHundredths, expiresOn, quantityMilli, status, discontinuedAt, createdAt, updatedAt,
+                            lowStockThresholdMilli)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, 'active', NULL, ?9, ?9, ?10)",
                         params![name, normalized_name, description, new_product.category_id, new_product.unit_id,
-                            product_cost_cents, profit_percent_hundredths, expires_on, timestamp],
+                            product_cost_cents, profit_percent_hundredths, expires_on, timestamp,
+                            low_stock_threshold_milli],
                     )
                     .map_err(|error| map_db_error(error, "createEntryInvoice", &[("products.nameNormalized", "Ya existe un producto con ese nombre")]))?;
             let product_id = connection.last_insert_rowid();
@@ -1387,8 +1411,8 @@ pub fn create_entry_invoice_inner(
             "createEntryInvoice",
         )?;
         connection.execute(
-            "INSERT INTO lots (productId, origin, invoiceLineId, arrivalOrder, initialMilli, remainingMilli, unitCostCents, createdAt, updatedAt)
-             VALUES (?1, 'entry', ?2, ?3, ?4, ?4, ?5, ?6, ?6)",
+            "INSERT INTO lots (productId, origin, invoiceLineId, arrivalOrder, initialMilli, remainingMilli, unitCostCents, stockBeforeMilli, createdAt, updatedAt)
+             VALUES (?1, 'entry', ?2, ?3, ?4, ?4, ?5, (SELECT quantityMilli FROM products WHERE id = ?1), ?6, ?6)",
             params![
                 product_id,
                 line_id,
@@ -1758,7 +1782,6 @@ fn create_client_outgoing_invoice_inner(
         consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
 
         recalculate_product_quantity(connection, product_id)?;
-        recalculate_product_cost(connection, product_id)?;
 
         let stock_after: i64 = connection
             .query_row(
@@ -2129,7 +2152,6 @@ fn create_associated_outgoing_invoice_inner(
         ).map_err(|error| map_db_error(error, op, &[]))?;
 
         recalculate_product_quantity(connection, product_id)?;
-        recalculate_product_cost(connection, product_id)?;
 
         let stock_after: i64 = connection
             .query_row(
@@ -2725,7 +2747,6 @@ fn update_priced_outgoing_invoice_inner(
             // se conserva y solo se refresca el costo del momento.
             consume_fifo(connection, row_product_id, quantity_milli, row.id, now)?;
             recalculate_product_quantity(connection, row_product_id)?;
-            recalculate_product_cost(connection, row_product_id)?;
             let current_cost_cents: i64 = connection
                 .query_row(
                     "SELECT costCents FROM products WHERE id = ?1",
@@ -2935,7 +2956,6 @@ fn update_priced_outgoing_invoice_inner(
         store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
         consume_fifo(connection, product_id, quantity_milli, line_id, now)?;
         recalculate_product_quantity(connection, product_id)?;
-        recalculate_product_cost(connection, product_id)?;
         insert_outgoing_update_movement(
             connection,
             &actor,
@@ -3344,7 +3364,6 @@ fn update_costed_outgoing_invoice_inner(
             let fresh_consumptions =
                 consume_fifo(connection, row_product_id, quantity_milli, row.id, now)?;
             recalculate_product_quantity(connection, row_product_id)?;
-            recalculate_product_cost(connection, row_product_id)?;
             let line_total_cents = line_total_cost_cents(&fresh_consumptions);
             let line_unit_cost_cents = line_unit_cost_cents(line_total_cents, quantity_milli);
             connection
@@ -3517,7 +3536,6 @@ fn update_costed_outgoing_invoice_inner(
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
         recalculate_product_quantity(connection, product_id)?;
-        recalculate_product_cost(connection, product_id)?;
         insert_outgoing_update_movement(
             connection,
             &actor,
@@ -3861,7 +3879,6 @@ fn create_loss_invoice_tx(
     ).map_err(|error| map_db_error(error, "createLossInvoice", &[]))?;
 
     recalculate_product_quantity(connection, input.product_id)?;
-    recalculate_product_cost(connection, input.product_id)?;
 
     let stock_after: i64 = connection
         .query_row(
@@ -4326,6 +4343,14 @@ pub fn update_entry_invoice_inner(
                 .map_err(|error| map_db_error(error, "updateEntryInvoice", &[]))?;
             store_line_unit(connection, row.id, line_unit.as_ref(), "updateEntryInvoice")?;
             recalculate_product_quantity(connection, product_id)?;
+            if let Some(arrival_order) = crate::inventory::lot_arrival_order(connection, lot_id)? {
+                crate::inventory::shift_later_stock_before(
+                    connection,
+                    product_id,
+                    arrival_order,
+                    delta_milli,
+                )?;
+            }
             recalculate_product_cost(connection, product_id)?;
             if delta_milli != 0 {
                 insert_entry_update_movement(
@@ -4436,8 +4461,8 @@ pub fn update_entry_invoice_inner(
             connection
                 .execute(
                     "INSERT INTO lots (productId, origin, invoiceLineId, arrivalOrder, initialMilli,
-                        remainingMilli, unitCostCents, createdAt, updatedAt)
-                     VALUES (?1, 'entry', ?2, ?3, ?4, ?4, ?5, ?6, ?6)",
+                        remainingMilli, unitCostCents, stockBeforeMilli, createdAt, updatedAt)
+                     VALUES (?1, 'entry', ?2, ?3, ?4, ?4, ?5, (SELECT quantityMilli FROM products WHERE id = ?1), ?6, ?6)",
                     params![
                         product_id,
                         line_id,
@@ -5661,6 +5686,7 @@ mod tests {
             unit_id: None,
             cost: "1,00".to_owned(),
             profit_percent: "20,00".to_owned(),
+            low_stock_threshold: "5".to_owned(),
             expires_on: None,
         }
     }
@@ -6366,6 +6392,7 @@ mod tests {
                     unit_id: None,
                     cost: "1,50".to_owned(),
                     profit_percent: "20,00".to_owned(),
+                    low_stock_threshold: "5".to_owned(),
                     expires_on: None,
                 }),
                 quantity: "3,000".to_owned(),
@@ -7000,6 +7027,186 @@ mod tests {
         product_id
     }
 
+    fn product_cost(connection: &rusqlite::Connection, product_id: i64) -> i64 {
+        connection
+            .query_row(
+                "SELECT costCents FROM products WHERE id = ?1",
+                [product_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn entry_of(
+        connection: &mut rusqlite::Connection,
+        now: chrono::DateTime<Utc>,
+        supplier_id: i64,
+        product_id: i64,
+        quantity: &str,
+        unit_cost: &str,
+    ) -> i64 {
+        super::create_entry_invoice_inner(
+            connection,
+            now,
+            entry_input(
+                supplier_id,
+                vec![entry_line(Some(product_id), None, quantity, unit_cost)],
+                None,
+            ),
+        )
+        .unwrap()
+        .invoice_id
+    }
+
+    #[test]
+    fn cost_moves_only_with_entries_using_the_stock_before_each_one() {
+        // spec-06 CO-01, primer ejemplo: 100 a 10 USD se venden todas y entran
+        // 10 a 20 USD → el costo es 20 USD. Vender y cancelar no lo mueve.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "costentries",
+            "12345678960",
+            "+5355559160",
+            "12345678961",
+            "+5355559161",
+            now,
+        );
+        let product_id = insert_product_fixture(
+            &connection,
+            "Panel",
+            None,
+            None,
+            1_000,
+            0,
+            0,
+            "active",
+            None,
+            None,
+        );
+        entry_of(
+            &mut connection,
+            now,
+            supplier_id,
+            product_id,
+            "100",
+            "10,00",
+        );
+        assert_eq!(product_cost(&connection, product_id), 1_000);
+
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "100")], None),
+        )
+        .unwrap();
+        assert_eq!(product_cost(&connection, product_id), 1_000);
+        super::change_invoice_status_inner(
+            &mut connection,
+            now,
+            sale.invoice_id,
+            "cancelled",
+            None,
+        )
+        .unwrap();
+        assert_eq!(product_cost(&connection, product_id), 1_000);
+        super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![sale_line(product_id, "100")], None),
+        )
+        .unwrap();
+
+        entry_of(&mut connection, now, supplier_id, product_id, "10", "20,00");
+        assert_eq!(product_cost(&connection, product_id), 2_000);
+    }
+
+    #[test]
+    fn cancelling_or_deleting_an_entry_recalculates_the_cost_without_it() {
+        // Segundo ejemplo de CO-01: 50 a 10 + 50 a 20 → 15 USD.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, supplier_id) = setup_entry_fixture("costcancel", now);
+        let product_id = insert_product_fixture(
+            &connection,
+            "Inversor",
+            None,
+            None,
+            1_000,
+            0,
+            0,
+            "active",
+            None,
+            None,
+        );
+        entry_of(&mut connection, now, supplier_id, product_id, "50", "10,00");
+        let second = entry_of(&mut connection, now, supplier_id, product_id, "50", "20,00");
+        assert_eq!(product_cost(&connection, product_id), 1_500);
+        // Llega una tercera con 100 en almacén: (100 × 15 + 100 × 30) / 200.
+        entry_of(
+            &mut connection,
+            now,
+            supplier_id,
+            product_id,
+            "100",
+            "30,00",
+        );
+        assert_eq!(product_cost(&connection, product_id), 2_250);
+
+        // Sin la segunda, la tercera llegó con 50: (50 × 10 + 100 × 30) / 150.
+        super::delete_invoice_inner(&mut connection, now, second).unwrap();
+        assert_eq!(product_cost(&connection, product_id), 2_333);
+
+        // Anular la primera deja solo la tercera, que llegó sin stock previo.
+        let first: i64 = connection
+            .query_row(
+                "SELECT id FROM invoices WHERE type = 'E' ORDER BY id LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        super::change_invoice_status_inner(&mut connection, now, first, "cancelled", None).unwrap();
+        assert_eq!(product_cost(&connection, product_id), 3_000);
+    }
+
+    #[test]
+    fn editing_an_entry_quantity_shifts_the_stock_before_the_later_ones() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, supplier_id) = setup_entry_fixture("costedit", now);
+        let product_id = insert_product_fixture(
+            &connection,
+            "Batería",
+            None,
+            None,
+            1_000,
+            0,
+            0,
+            "active",
+            None,
+            None,
+        );
+        let first = entry_of(&mut connection, now, supplier_id, product_id, "50", "10,00");
+        entry_of(&mut connection, now, supplier_id, product_id, "50", "20,00");
+        assert_eq!(product_cost(&connection, product_id), 1_500);
+
+        // La primera pasa a 150: la segunda llegó con 150 → (150 × 10 + 50 × 20) / 200.
+        super::update_entry_invoice_inner(
+            &mut connection,
+            now,
+            update_entry_input(
+                first,
+                supplier_id,
+                "2026-10-04",
+                vec![update_entry_line(
+                    Some(product_id),
+                    product_id,
+                    "150",
+                    "10,00",
+                )],
+            ),
+        )
+        .unwrap();
+        assert_eq!(product_cost(&connection, product_id), 1_250);
+    }
+
     #[test]
     fn create_sale_invoice_creates_valid_sale_with_fifo_and_movement() {
         let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
@@ -7043,7 +7250,7 @@ mod tests {
         .unwrap();
         assert_eq!(result.number, "V-00001");
 
-        // El precio de venta vigente: 100 * 12000 / 10000 = 120.
+        // El precio de venta vigente: 1,20 redondeado hacia arriba al entero (PV-01).
         let line: (i64, i64, i64, Option<i64>, Option<String>, Option<i64>) = connection
             .query_row(
                 "SELECT quantityMilli, unitPriceCents, subtotalCents, categoryId, categoryName, costAtSaleCents
@@ -7056,8 +7263,8 @@ mod tests {
             line,
             (
                 2_000,
-                120,
-                240,
+                200,
+                400,
                 Some(category_id),
                 Some("Bebidas".to_owned()),
                 Some(100)
@@ -7097,8 +7304,8 @@ mod tests {
                 "saleOut".to_owned(),
                 -2_000,
                 8_000,
-                120,
-                240,
+                200,
+                400,
                 Some("V-00001".to_owned())
             )
         );
@@ -7316,6 +7523,12 @@ mod tests {
             "10",
             "1,00",
         );
+        connection
+            .execute(
+                "UPDATE products SET lowStockThresholdMilli = 5000 WHERE id = ?1",
+                [product_id],
+            )
+            .unwrap();
         assert!(notification_messages(&connection).is_empty());
 
         // La venta deja 4: stock bajo (N-03).
@@ -9098,47 +9311,43 @@ mod tests {
         assert_eq!(stock, 2_000);
     }
 
-    /// Invariante de caché (plan-03 §3.2): `quantityMilli` = suma de lo restante
-    /// en los lotes y `costCents` = promedio ponderado de los lotes con
-    /// existencia. Con stock 0 el producto conserva su último costo, así que
-    /// ese caso no se puede comprobar contra los lotes.
+    /// Invariante de caché: `quantityMilli` = suma de lo restante en los lotes
+    /// y `costCents` = el promedio móvil de las entradas vigentes desde el
+    /// costo base (`spec-06` CO-01), que no cambia con ventas ni cancelaciones.
     fn assert_cache_invariant(connection: &rusqlite::Connection, step: &str) {
-        let rows: Vec<(i64, i64, i64, i64, i64)> = connection
+        let rows: Vec<(i64, i64, i64, i64)> = connection
             .prepare(
                 "SELECT p.id, p.quantityMilli, p.costCents,
-                    COALESCE(SUM(l.remainingMilli), 0),
-                    COALESCE(SUM(l.remainingMilli * l.unitCostCents), 0)
+                    COALESCE(SUM(l.remainingMilli), 0)
                  FROM products p
                  LEFT JOIN lots l ON l.productId = p.id AND l.remainingMilli > 0
                  GROUP BY p.id",
             )
             .unwrap()
             .query_map([], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        for (product_id, quantity, cost, remaining, weighted) in rows {
+        for (product_id, quantity, cost, remaining) in rows {
             assert_eq!(
                 quantity, remaining,
                 "{step}: quantityMilli del producto {product_id}"
             );
-            if remaining > 0 {
-                let expected =
-                    crate::inventory::round_half_up(i128::from(weighted), i128::from(remaining))
-                        as i64;
-                assert_eq!(
-                    cost, expected,
-                    "{step}: costCents del producto {product_id}"
-                );
-            }
+            // Recalcular desde cero debe dar el mismo costo que la caché.
+            crate::inventory::recalculate_product_cost(connection, product_id).unwrap();
+            let replayed: i64 = connection
+                .query_row(
+                    "SELECT costCents FROM products WHERE id = ?1",
+                    [product_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                cost, replayed,
+                "{step}: costCents del producto {product_id}"
+            );
         }
     }
 
@@ -9953,9 +10162,9 @@ mod tests {
             (expected_drinks, expected_drinks)
         );
         assert_eq!(income(&mut connection, dairy), (0, 0));
-        // Se consumieron 3 del primer lote (la cancelada devolvió sus 4):
-        // 7 × $1,00 + 5 × $2,00 = $17,00.
-        assert_eq!(stock_value(&mut connection), (1_700, 1_700));
+        // Quedan 12 (la cancelada devolvió sus 4) al costo promedio de las
+        // entradas, 1,33 (spec-06 VI-01): 12 × 1,33 = 15,96.
+        assert_eq!(stock_value(&mut connection), (1_596, 1_596));
 
         // El producto cambia de categoría: lo vendido sigue en "Bebidas".
         connection
@@ -9986,7 +10195,8 @@ mod tests {
             income(&mut connection, dairy),
             (later_subtotal, later_subtotal)
         );
-        assert_eq!(stock_value(&mut connection), (1_600, 1_600));
+        // Queda 11 al mismo costo: 11 × 1,33.
+        assert_eq!(stock_value(&mut connection), (1_463, 1_463));
     }
 
     #[test]
@@ -13765,7 +13975,19 @@ mod tests {
 
         let product =
             crate::commands::products::get_product_inner(&mut connection, now, product_id).unwrap();
-        assert_eq!(product.reserved_quantity, "4,5");
+        assert_eq!(product.product.reserved_quantity, "4,5");
+        // El listado lleva la misma cantidad para su badge.
+        let listed = crate::commands::products::list_products_inner(
+            &mut connection,
+            now,
+            now.date_naive(),
+            crate::models::product::ProductFilters::default(),
+        )
+        .unwrap()
+        .into_iter()
+        .find(|item| item.id == product_id)
+        .unwrap();
+        assert_eq!(listed.reserved_quantity, "4,5");
         assert_eq!(
             product
                 .reserved_invoices

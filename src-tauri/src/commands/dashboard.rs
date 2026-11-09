@@ -397,7 +397,9 @@ fn slow_movers(
     Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
-/// DB-07: reservas activas y las que vencen en los próximos 3 días.
+/// Cuentas por cobrar (`spec-06` KP-01): ventas y servicios Por Cobrar,
+/// reservas incluidas; la lista sigue mostrando las reservas que vencen en los
+/// próximos 3 días (DB-07).
 fn reservations_summary(
     connection: &Connection,
     today: NaiveDate,
@@ -405,7 +407,7 @@ fn reservations_summary(
     let (count, amount_cents): (i64, i64) = connection.query_row(
         "SELECT COUNT(DISTINCT i.id), COALESCE(SUM(il.subtotalCents), 0)
          FROM invoices i JOIN invoiceLines il ON il.invoiceId = i.id
-         WHERE i.status = 'pending' AND i.reservedUntil IS NOT NULL",
+         WHERE i.status = 'pending' AND i.type IN ('V', 'S')",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
@@ -597,15 +599,13 @@ fn build_dashboard_kpis(
     })
 }
 
-/// Valor del inventario: cantidad restante × costo de cada lote de los
-/// productos activos, con un redondeo por producto como "Valor Total" (SP-03).
+/// Valor del inventario: stock × costo de los productos activos, con un
+/// redondeo por producto como "Valor Total" (`spec-06` VI-01).
 fn inventory_value_cents(connection: &Connection) -> rusqlite::Result<i64> {
     connection
         .prepare(
-            "SELECT SUM(l.remainingMilli * l.unitCostCents)
-             FROM lots l JOIN products p ON p.id = l.productId
-             WHERE p.status = 'active'
-             GROUP BY l.productId",
+            "SELECT quantityMilli * costCents FROM products
+             WHERE status = 'active' AND quantityMilli > 0",
         )?
         .query_map([], |row| {
             Ok(round_half_up(i128::from(row.get::<_, i64>(0)?), 1_000) as i64)
@@ -1123,8 +1123,8 @@ mod tests {
         let mut connection = scenario();
 
         let result = kpis(&mut connection, period("month"));
-        // Cable 2 × 10,00 y Bomba 1,5 × 13,33 redondeado por producto.
-        assert_eq!(result.inventory_value.value, 4000);
+        // Stock × costo (spec-06 VI-01): Cable 2 × 10,00 y Bomba 1,5 × 20,00.
+        assert_eq!(result.inventory_value.value, 5000);
         assert_eq!(result.inventory_value.previous, None);
         assert!(result.inventory_value.trend.is_empty());
         assert_eq!(result.out_of_stock.value, 1);

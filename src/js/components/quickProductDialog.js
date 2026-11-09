@@ -29,7 +29,8 @@ export async function openQuickProductDialog({ initialName = "" }) {
     title: "Nuevo producto",
     draftKey: "quickProduct",
     submitText: "Agregar a la factura",
-    missingMessage: "Completa el nombre y el porcentaje de ganancia.",
+    missingMessage:
+      "Completa el nombre, el porcentaje de ganancia y el umbral de pocas unidades.",
     fields: [
       {
         name: "name",
@@ -67,6 +68,12 @@ export async function openQuickProductDialog({ initialName = "" }) {
         required: true,
         inputMode: "decimal",
       },
+      {
+        name: "lowStockThreshold",
+        label: "Umbral de pocas unidades",
+        required: true,
+        inputMode: "decimal",
+      },
     ],
     // El backend valida nombre, descripción y porcentaje al guardar la factura.
     onSubmit: (values) => ({
@@ -75,6 +82,7 @@ export async function openQuickProductDialog({ initialName = "" }) {
       categoryId: values.categoryId ? Number(values.categoryId) : undefined,
       unitId: values.unitId ? Number(values.unitId) : undefined,
       profitPercent: values.profitPercent,
+      lowStockThreshold: values.lowStockThreshold,
       unitAbbreviation: unitAbbreviations.get(values.unitId) ?? null,
     }),
   });

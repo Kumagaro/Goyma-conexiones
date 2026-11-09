@@ -13,7 +13,7 @@ use crate::models::product::{
     ProductDetail, ProductFilters, ProductListItem, ProductMatch, ReservedInvoice, StockFilter,
     UnitOption, UpdateProductInput, UpdateProductResult,
 };
-use crate::pricing::selling_price_cents;
+use crate::pricing::{calculated_price_cents, selling_price_cents};
 use crate::text::{clean_name, normalize_text, sort_spanish, spanish_sort_key};
 use crate::timestamps::{format_utc_timestamp, parse_utc_timestamp};
 use crate::validators::{
@@ -39,6 +39,8 @@ const PRODUCT_COST_RANGE_MESSAGE: &str =
     "El precio de entrada debe ser mayor que 0 y no superar 999.999,99";
 const PRODUCT_QUANTITY_RANGE_MESSAGE: &str =
     "La cantidad inicial debe ser mayor que 0 y no superar 999.999,999";
+const PRODUCT_THRESHOLD_RANGE_MESSAGE: &str =
+    "El umbral de pocas unidades debe ser mayor que 0 y no superar 999.999,999";
 const PRODUCT_PERCENT_RANGE_MESSAGE: &str =
     "El porcentaje de ganancia debe estar entre 0 y 1.000,00";
 const PRODUCT_DUPLICATE_MESSAGE: &str = "Ya existe un producto con ese nombre";
@@ -47,17 +49,49 @@ const INVALID_PRODUCT_INPUT_MESSAGE: &str = "Los datos enviados no son válidos"
 const PRODUCT_ACTIVATE_DUPLICATE_MESSAGE: &str =
     "No se puede activar: ya existe otro producto activo con ese nombre";
 
+/// Valor del inventario al costo: stock × costo (`spec-06` VI-01).
 fn product_stock_value_cents(connection: &Connection, product_id: i64) -> Result<i64, AppError> {
-    let value_cents: i64 = connection
+    let (quantity_milli, cost_cents): (i64, i64) = connection
         .query_row(
-            "SELECT COALESCE(SUM(remainingMilli * unitCostCents), 0)
-             FROM lots
-             WHERE productId = ?1 AND remainingMilli > 0",
+            "SELECT quantityMilli, costCents FROM products WHERE id = ?1",
+            [product_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| map_db_error(error, "productStockValue", &[]))?;
+    Ok(
+        crate::inventory::round_half_up(i128::from(quantity_milli) * i128::from(cost_cents), 1_000)
+            as i64,
+    )
+}
+
+/// Stock bajo con el umbral propio del producto (`spec-06` UM-01): sin
+/// umbral no avisa.
+fn is_low_stock(quantity_milli: i64, threshold_milli: Option<i64>) -> bool {
+    threshold_milli.is_some_and(|threshold| quantity_milli > 0 && quantity_milli < threshold)
+}
+
+/// Suma de sus líneas en reservas activas (RS-03).
+fn reserved_milli(connection: &Connection, product_id: i64) -> Result<i64, AppError> {
+    connection
+        .query_row(
+            "SELECT COALESCE(SUM(l.quantityMilli), 0)
+             FROM invoiceLines l JOIN invoices i ON i.id = l.invoiceId
+             WHERE l.productId = ?1 AND i.status = 'pending' AND i.reservedUntil IS NOT NULL",
             [product_id],
             |row| row.get(0),
         )
-        .map_err(|error| map_db_error(error, "productStockValue", &[]))?;
-    Ok(crate::inventory::round_half_up(i128::from(value_cents), 1_000) as i64)
+        .map_err(|error| map_db_error(error, "productReserved", &[]))
+}
+
+fn parse_low_stock_threshold(raw: &str) -> Result<i64, AppError> {
+    parse_quantity_milli(raw).map_err(|error| {
+        product_decimal_error(
+            error,
+            "El umbral de pocas unidades",
+            3,
+            PRODUCT_THRESHOLD_RANGE_MESSAGE,
+        )
+    })
 }
 const PRODUCT_ALREADY_DISCONTINUED_MESSAGE: &str = "El producto ya está descontinuado";
 const PRODUCT_ALREADY_ACTIVE_MESSAGE: &str = "El producto ya está activo";
@@ -79,6 +113,7 @@ type ProductDetailRow = (
     Option<String>,
     String,
     Option<String>,
+    Option<i64>,
 );
 type ProductUpdateRow = (i64, i64, Option<String>, String);
 
@@ -132,6 +167,7 @@ pub fn create_product_inner(
                 PRODUCT_PERCENT_RANGE_MESSAGE,
             )
         })?;
+    let low_stock_threshold_milli = parse_low_stock_threshold(&input.low_stock_threshold)?;
     let expires_on = input
         .expires_on
         .as_deref()
@@ -189,8 +225,8 @@ pub fn create_product_inner(
             "INSERT INTO products (
             name, nameNormalized, description, categoryId, unitId, costCents,
             profitPercentHundredths, expiresOn, quantityMilli, status, discontinuedAt,
-            createdAt, updatedAt
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active', NULL, ?10, ?10)",
+            createdAt, updatedAt, lowStockThresholdMilli
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active', NULL, ?10, ?10, ?11)",
             params![
                 name,
                 normalized_name,
@@ -201,7 +237,8 @@ pub fn create_product_inner(
                 profit_percent_hundredths,
                 expires_on,
                 quantity_milli,
-                timestamp
+                timestamp,
+                low_stock_threshold_milli
             ],
         )
         .map_err(|error| {
@@ -266,10 +303,13 @@ pub fn create_product_inner(
         cost_cents,
         valor_total_cents: product_stock_value_cents(&transaction, product_id)?,
         selling_price_cents: selling_price_cents(cost_cents, profit_percent_hundredths),
+        calculated_price_cents: calculated_price_cents(cost_cents, profit_percent_hundredths),
         profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
         expires_on,
         is_out_of_stock: false,
-        is_low_stock: quantity_milli < crate::automation::low_stock_milli(&transaction),
+        is_low_stock: is_low_stock(quantity_milli, Some(low_stock_threshold_milli)),
+        low_stock_threshold: Some(format_quantity_milli(low_stock_threshold_milli)),
+        reserved_quantity: format_quantity_milli(0),
     };
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
@@ -331,11 +371,11 @@ pub fn list_products_inner(
     let today_text = today.format("%Y-%m-%d").to_string();
     let expiring_through = (today + Duration::days(29)).format("%Y-%m-%d").to_string();
 
-    let low_stock_milli = crate::automation::low_stock_milli(connection);
     let mut statement = connection
         .prepare(
             "SELECT p.id, p.name, p.categoryId, c.name, p.unitId, u.name, u.abbreviation,
-                    p.quantityMilli, p.costCents, p.profitPercentHundredths, p.expiresOn
+                    p.quantityMilli, p.costCents, p.profitPercentHundredths, p.expiresOn,
+                    p.lowStockThresholdMilli
              FROM products p
              LEFT JOIN categories c ON c.id = p.categoryId
              LEFT JOIN units u ON u.id = p.unitId
@@ -347,8 +387,7 @@ pub fn list_products_inner(
                     ?4 = 'all'
                     OR (?4 = 'available' AND p.quantityMilli > 0)
                     OR (?4 = 'outOfStock' AND p.quantityMilli = 0)
-                    OR (?4 = 'low' AND p.quantityMilli > 0 AND p.quantityMilli <
-                        COALESCE((SELECT CAST(value AS INTEGER) * 1000 FROM settings WHERE key = 'lowStockThreshold'), 5000))
+                    OR (?4 = 'low' AND p.quantityMilli > 0 AND p.quantityMilli < p.lowStockThresholdMilli)
                )
                AND (
                     ?5 = 'all'
@@ -390,6 +429,9 @@ pub fn list_products_inner(
             .get(0)
             .map_err(|error| map_db_error(error, "listProducts", &[]))?;
         let valor_total_cents = product_stock_value_cents(connection, product_id)?;
+        let threshold_milli: Option<i64> = row
+            .get(11)
+            .map_err(|error| map_db_error(error, "listProducts", &[]))?;
 
         products.push(ProductListItem {
             id: product_id,
@@ -415,12 +457,15 @@ pub fn list_products_inner(
             cost_cents,
             valor_total_cents,
             selling_price_cents: selling_price_cents(cost_cents, profit_percent_hundredths),
+            calculated_price_cents: calculated_price_cents(cost_cents, profit_percent_hundredths),
             profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
             expires_on: row
                 .get(10)
                 .map_err(|error| map_db_error(error, "listProducts", &[]))?,
             is_out_of_stock: quantity_milli == 0,
-            is_low_stock: quantity_milli > 0 && quantity_milli < low_stock_milli,
+            is_low_stock: is_low_stock(quantity_milli, threshold_milli),
+            low_stock_threshold: threshold_milli.map(format_quantity_milli),
+            reserved_quantity: format_quantity_milli(reserved_milli(connection, product_id)?),
         });
     }
 
@@ -781,7 +826,7 @@ pub fn get_product_inner(
         .query_row(
             "SELECT p.id, p.name, p.categoryId, c.name, p.unitId, u.name, u.abbreviation,
                     p.quantityMilli, p.costCents, p.profitPercentHundredths, p.expiresOn,
-                    p.description, p.status, p.discontinuedAt
+                    p.description, p.status, p.discontinuedAt, p.lowStockThresholdMilli
              FROM products p
              LEFT JOIN categories c ON c.id = p.categoryId
              LEFT JOIN units u ON u.id = p.unitId
@@ -804,6 +849,7 @@ pub fn get_product_inner(
                     row.get(11)?,
                     row.get(12)?,
                     row.get(13)?,
+                    row.get(14)?,
                 ))
             },
         )
@@ -825,6 +871,7 @@ pub fn get_product_inner(
         description,
         status,
         discontinued_at,
+        threshold_milli,
     )) = product
     else {
         transaction
@@ -863,18 +910,19 @@ pub fn get_product_inner(
             cost_cents,
             valor_total_cents: product_stock_value_cents(&transaction, id)?,
             selling_price_cents: selling_price_cents(cost_cents, profit_percent_hundredths),
+            calculated_price_cents: calculated_price_cents(cost_cents, profit_percent_hundredths),
             profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
             expires_on,
             is_out_of_stock: quantity_milli == 0,
-            is_low_stock: quantity_milli > 0
-                && quantity_milli < crate::automation::low_stock_milli(&transaction),
+            is_low_stock: is_low_stock(quantity_milli, threshold_milli),
+            low_stock_threshold: threshold_milli.map(format_quantity_milli),
+            reserved_quantity: format_quantity_milli(reserved_milli),
         },
         description,
         is_discontinued,
         discontinued_at,
         remaining_days,
         expired_cleanup_warning,
-        reserved_quantity: format_quantity_milli(reserved_milli),
         reserved_invoices: reserved_invoices
             .into_iter()
             .map(|(invoice, _)| invoice)
@@ -1046,13 +1094,15 @@ pub fn update_product_inner(
             )
         })?;
 
+    let low_stock_threshold_milli = parse_low_stock_threshold(&input.low_stock_threshold)?;
+
     let timestamp = format_utc_timestamp(now);
     transaction
         .execute(
             "UPDATE products
              SET name = ?1, nameNormalized = ?2, description = ?3, categoryId = ?4,
                  unitId = ?5, profitPercentHundredths = ?6, expiresOn = ?7,
-                 updatedAt = ?8
+                 updatedAt = ?8, lowStockThresholdMilli = ?10
              WHERE id = ?9",
             params![
                 cleaned_name,
@@ -1063,7 +1113,8 @@ pub fn update_product_inner(
                 profit_percent_hundredths,
                 expires_on,
                 timestamp,
-                input.product_id
+                input.product_id,
+                low_stock_threshold_milli
             ],
         )
         .map_err(|error| {
@@ -1086,11 +1137,13 @@ pub fn update_product_inner(
         cost_cents,
         valor_total_cents: product_stock_value_cents(&transaction, input.product_id)?,
         selling_price_cents: selling_price_cents(cost_cents, profit_percent_hundredths),
+        calculated_price_cents: calculated_price_cents(cost_cents, profit_percent_hundredths),
         profit_percent: format_profit_percent_hundredths(profit_percent_hundredths),
         expires_on,
         is_out_of_stock: quantity_milli == 0,
-        is_low_stock: quantity_milli > 0
-            && quantity_milli < crate::automation::low_stock_milli(&transaction),
+        is_low_stock: is_low_stock(quantity_milli, Some(low_stock_threshold_milli)),
+        low_stock_threshold: Some(format_quantity_milli(low_stock_threshold_milli)),
+        reserved_quantity: format_quantity_milli(reserved_milli(&transaction, input.product_id)?),
     };
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
@@ -1411,6 +1464,7 @@ pub fn preview_selling_price_inner(
 
     Ok(PriceQuote {
         selling_price_cents: selling_price_cents(cost_cents, profit_percent_hundredths),
+        calculated_price_cents: calculated_price_cents(cost_cents, profit_percent_hundredths),
     })
 }
 
@@ -1684,6 +1738,7 @@ mod tests {
         profit_percent: &str,
     ) -> CreateProductInput {
         CreateProductInput {
+            low_stock_threshold: "5".into(),
             name: name.to_owned(),
             description: None,
             category_id: None,
@@ -1763,6 +1818,12 @@ mod tests {
             None,
             Some("2026-11-02"),
         );
+        connection
+            .execute(
+                "UPDATE products SET lowStockThresholdMilli = 5000 WHERE id = ?1",
+                [soon_id],
+            )
+            .unwrap();
         let outside_soon_id = insert_product_fixture(
             &connection,
             "Oso",
@@ -1800,6 +1861,10 @@ mod tests {
             None,
         );
 
+        // Todos con el mismo umbral (spec-06 UM-01: antes era el general de 5).
+        connection
+            .execute("UPDATE products SET lowStockThresholdMilli = 5000", [])
+            .unwrap();
         let all =
             list_products_inner(&mut connection, now, today, ProductFilters::default()).unwrap();
         assert_eq!(
@@ -2990,6 +3055,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id,
                 name: "  Café   actualizado  ".to_owned(),
                 description: Some("  Nuevo texto  ".to_owned()),
@@ -3006,7 +3072,8 @@ mod tests {
         assert_eq!(updated.product.unit_id, Some(unit_id));
         assert_eq!(updated.product.cost_cents, 1_250);
         assert_eq!(updated.product.quantity, "10,25");
-        assert_eq!(updated.product.selling_price_cents, 1_625);
+        // 12,50 × 1,30 = 16,25, redondeado hacia arriba al entero (PV-01).
+        assert_eq!(updated.product.selling_price_cents, 1_700);
         assert_eq!(updated.product.profit_percent, "30,00");
         assert_eq!(
             updated.product.expires_on.as_deref(),
@@ -3034,6 +3101,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id,
                 name: "Café actualizado".to_owned(),
                 description: None,
@@ -3062,6 +3130,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id,
                 name: "Café actualizado".to_owned(),
                 description: None,
@@ -3085,6 +3154,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: 999,
                 name: "Producto inexistente".to_owned(),
                 description: None,
@@ -3126,6 +3196,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: duplicated_name,
                 name: "Producto rival".to_owned(),
                 description: None,
@@ -3150,6 +3221,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: discontinued_id,
                 name: "Retirado".to_owned(),
                 description: None,
@@ -3185,6 +3257,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: expired_id,
                 name: "Con fecha vencida".to_owned(),
                 description: None,
@@ -3200,6 +3273,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: expired_id,
                 name: "Con fecha vencida".to_owned(),
                 description: None,
@@ -3219,6 +3293,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: expired_id,
                 name: "Con fecha vencida".to_owned(),
                 description: None,
@@ -3235,6 +3310,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: expired_id,
                 name: "Con fecha vencida".to_owned(),
                 description: None,
@@ -3256,6 +3332,7 @@ mod tests {
             &mut connection,
             now,
             UpdateProductInput {
+                low_stock_threshold: "5".into(),
                 product_id: expired_discontinued,
                 name: "Producto vencido".to_owned(),
                 description: None,
@@ -3278,6 +3355,7 @@ mod tests {
                 connection,
                 now,
                 UpdateProductInput {
+                    low_stock_threshold: "5".into(),
                     product_id: 1,
                     name: "Producto".to_owned(),
                     description: None,
@@ -3305,6 +3383,7 @@ mod tests {
                 connection,
                 now,
                 UpdateProductInput {
+                    low_stock_threshold: "5".into(),
                     product_id: existing,
                     name: "Producto valido".to_owned(),
                     description: None,

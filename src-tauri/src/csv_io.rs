@@ -42,8 +42,10 @@ const PRODUCT_HEADERS: &[&str] = &[
     "Costo",
     "% de Ganancia",
     "Cantidad",
+    "Umbral de Pocas Unidades",
     "Caducidad",
     "Precio de Venta",
+    "Precio Calculado",
     "Valor Total",
 ];
 const CATEGORY_HEADERS: &[&str] = &["Nombre", "Descripción", "Cantidad de Productos", "Ingresos"];
@@ -171,8 +173,10 @@ fn product_rows(
             money(item.cost_cents),
             item.profit_percent,
             item.quantity,
+            item.low_stock_threshold.unwrap_or_default(),
             item.expires_on.as_deref().map(date).unwrap_or_default(),
             money(item.selling_price_cents),
+            money(item.calculated_price_cents),
             money(item.valor_total_cents),
         ]);
     }
@@ -351,7 +355,13 @@ fn layout(kind: &str) -> Result<Layout, AppError> {
     let (known, required): (&[&str], &[&str]) = match kind {
         "products" => (
             PRODUCT_HEADERS,
-            &["Nombre", "Costo", "% de Ganancia", "Cantidad"],
+            &[
+                "Nombre",
+                "Costo",
+                "% de Ganancia",
+                "Cantidad",
+                "Umbral de Pocas Unidades",
+            ],
         ),
         "categories" => (CATEGORY_HEADERS, &["Nombre"]),
         "units" => (UNIT_HEADERS, &["Nombre", "Abreviatura"]),
@@ -482,6 +492,7 @@ fn import_product(
             unit_id: existing_unit.or(new_unit),
             cost: row.decimal("Costo"),
             quantity: row.decimal("Cantidad"),
+            low_stock_threshold: row.decimal("Umbral de Pocas Unidades"),
             profit_percent: row.decimal("% de Ganancia"),
             expires_on,
         },
@@ -764,6 +775,7 @@ mod tests {
 
     fn product_input(name: &str) -> CreateProductInput {
         CreateProductInput {
+            low_stock_threshold: "5".into(),
             name: name.to_owned(),
             description: Some("=SUMA(A1)".to_owned()),
             category_id: None,
@@ -809,7 +821,7 @@ mod tests {
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(
             lines[0],
-            "Nombre;Descripción;Categoría;Unidad;Costo;% de Ganancia;Cantidad;Caducidad;Precio de Venta;Valor Total"
+            "Nombre;Descripción;Categoría;Unidad;Costo;% de Ganancia;Cantidad;Umbral de Pocas Unidades;Caducidad;Precio de Venta;Precio Calculado;Valor Total"
         );
         assert_eq!(lines.len(), 3);
         let row = lines.iter().find(|line| line.starts_with("Cable")).unwrap();
@@ -965,9 +977,9 @@ mod tests {
     fn import_products_creates_what_is_missing_with_initial_lot_and_movement() {
         let (mut connection, now) = signed_in();
         let path = write_file(
-            "Nombre;Descripción;Categoría;Unidad;Costo;% de Ganancia;Cantidad;Caducidad\n\
-             Cable;Rojo;Eléctricos;Metro;10,50;50;2,5;05/03/2099\n\
-             Bomba;;Eléctricos;;20;10;1;\n",
+            "Nombre;Descripción;Categoría;Unidad;Costo;% de Ganancia;Cantidad;Umbral de Pocas Unidades;Caducidad\n\
+             Cable;Rojo;Eléctricos;Metro;10,50;50;2,5;1;05/03/2099\n\
+             Bomba;;Eléctricos;;20;10;1;2;\n",
         );
 
         let summary = import_csv_inner(&mut connection, now, "products", &path).unwrap();
@@ -1000,8 +1012,8 @@ mod tests {
     fn a_skipped_product_leaves_no_new_category_or_unit() {
         let (mut connection, now) = signed_in();
         let path = write_file(
-            "Nombre;Categoría;Unidad;Costo;% de Ganancia;Cantidad\n\
-             Cable;Nueva;Otra;no es costo;50;1\n",
+            "Nombre;Categoría;Unidad;Costo;% de Ganancia;Cantidad;Umbral de Pocas Unidades\n\
+             Cable;Nueva;Otra;no es costo;50;1;1\n",
         );
 
         let summary = import_csv_inner(&mut connection, now, "products", &path).unwrap();

@@ -440,7 +440,6 @@ mod tests {
             &mut connection,
             now,
             UpdateSettingsInput {
-                low_stock_threshold: 3,
                 stale_invoice_days: 10,
                 backup_reminder_days: 5,
             },

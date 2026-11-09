@@ -110,7 +110,6 @@ describe("Configuración con datos reales (spec-04 CF-01 a CF-04)", () => {
   beforeEach(() => {
     Object.values(settings).forEach((mock) => mock.mockReset());
     settings.getSettings.mockResolvedValue({
-      lowStockThreshold: 5,
       staleInvoiceDays: 30,
       backupReminderDays: 7,
       lastBackupAt: null,
@@ -174,7 +173,8 @@ describe("Configuración con datos reales (spec-04 CF-01 a CF-04)", () => {
     byId("th-fecha-historial-tasas").click();
     expect(historyRows()[0][2]).toBe("—");
 
-    expect(byId("config-umbral-stock").value).toBe("5");
+    // spec-06 UM-01: el umbral de pocas unidades es de cada producto.
+    expect(byId("config-umbral-stock")).toBeNull();
     expect(byId("config-umbral-respaldo").value).toBe("7");
     expect(byId("config-elementos-pagina").value).toBe("50");
     expect(window.establecerTamPagina).toHaveBeenCalledWith(50);
@@ -208,14 +208,13 @@ describe("Configuración con datos reales (spec-04 CF-01 a CF-04)", () => {
       }),
     );
 
-    byId("config-umbral-stock").value = "10";
+    byId("config-umbral-facturas").value = "45";
     byId("config-umbrales-form").dispatchEvent(
       new Event("submit", { cancelable: true }),
     );
     await vi.waitFor(() =>
       expect(settings.updateSettings).toHaveBeenCalledWith({
-        lowStockThreshold: 10,
-        staleInvoiceDays: 30,
+        staleInvoiceDays: 45,
         backupReminderDays: 7,
       }),
     );
@@ -235,19 +234,20 @@ describe("Configuración con datos reales (spec-04 CF-01 a CF-04)", () => {
   it("un rechazo del backend marca el campo y sale como toast", async () => {
     settings.updateSettings.mockRejectedValue({
       code: "validationFailed",
-      message: "El umbral de stock bajo debe ser un número entero de 1 a 9999",
+      message:
+        "Los días de factura pendiente antigua deben estar entre 1 y 365",
     });
     await openView();
-    byId("config-umbral-stock").value = "0";
+    byId("config-umbral-facturas").value = "0";
     byId("config-umbrales-form").dispatchEvent(
       new Event("submit", { cancelable: true }),
     );
     await vi.waitFor(() =>
-      expect(byId("config-umbral-stock").getAttribute("aria-invalid")).toBe(
+      expect(byId("config-umbral-facturas").getAttribute("aria-invalid")).toBe(
         "true",
       ),
     );
-    expect(toastText()).toContain("El umbral de stock bajo");
+    expect(toastText()).toContain("Los días de factura pendiente antigua");
   });
 
   it("guarda los datos de la empresa y quita el logo", async () => {

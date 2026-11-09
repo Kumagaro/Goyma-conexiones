@@ -615,6 +615,7 @@ function createInvoiceSubmodule(cfg) {
         categoryId: product.categoryId,
         unitId: product.unitId,
         profitPercent: product.profitPercent,
+        lowStockThreshold: product.lowStockThreshold,
       },
       productName: product.name,
       unitAbbreviation: product.unitAbbreviation,

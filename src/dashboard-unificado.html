@@ -1681,12 +1681,14 @@
               </div>
             </details>
             <article class="inventory-details" id="dash-reservas">
-              <h3 class="card-title">Reservas Activas</h3>
+              <h3 class="card-title">Cuentas por cobrar</h3>
               <div class="dash-reservas-resumen">
                 <div class="stock-count" id="dash-reservas-total">0</div>
                 <div class="dash-note" id="dash-reservas-monto"></div>
               </div>
-              <h4 class="card-subtitle">Vencen en los próximos 3 días</h4>
+              <h4 class="card-subtitle">
+                Reservas que vencen en los próximos 3 días
+              </h4>
               <div id="dash-reservas-lista"></div>
             </article>
           </section>
@@ -1912,6 +1914,11 @@
                     placeholder="—"
                     readonly
                   />
+                  <small
+                    id="producto-precio-calculado"
+                    class="price-calculated"
+                    hidden
+                  ></small>
                   <div
                     id="producto-precio-venta-feedback"
                     role="status"
@@ -1946,6 +1953,23 @@
                     aria-describedby="producto-decimal-ayuda"
                     required
                   />
+                </div>
+                <div class="field">
+                  <label for="producto-umbral"
+                    >Umbral de pocas unidades
+                    <span class="required">*</span></label
+                  >
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    id="producto-umbral"
+                    placeholder="5"
+                    aria-describedby="producto-umbral-ayuda"
+                    required
+                  />
+                  <small id="producto-umbral-ayuda">
+                    Avisa cuando lo disponible baje de esta cantidad.
+                  </small>
                 </div>
                 <div class="field">
                   <label>Caducidad</label>
@@ -2139,6 +2163,11 @@
                 <div class="kpi-hero-value">
                   <span class="kpi-cur">$</span
                   ><span id="producto-ver-precio-venta"></span>
+                  <span
+                    id="producto-ver-precio-calculado"
+                    class="price-calculated"
+                    hidden
+                  ></span>
                 </div>
               </div>
               <div class="kpi-hero tone-green">
@@ -6624,16 +6653,6 @@
               novalidate
             >
               <div class="field">
-                <label for="config-umbral-stock">Stock bajo (unidades)</label>
-                <input
-                  type="number"
-                  id="config-umbral-stock"
-                  min="1"
-                  max="9999"
-                  step="1"
-                />
-              </div>
-              <div class="field">
                 <label for="config-umbral-facturas"
                   >Días para una factura pendiente antigua</label
                 >
@@ -6658,8 +6677,7 @@
                 />
               </div>
               <p class="config-hint">
-                El umbral de stock bajo también cambia el filtro "Stock bajo"
-                del listado de productos.
+                El umbral de pocas unidades se define en cada producto.
               </p>
               <div class="form-actions">
                 <button type="submit" class="btn-primary">

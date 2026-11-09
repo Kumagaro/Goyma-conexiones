@@ -14,10 +14,17 @@ pub struct ProductListItem {
     pub cost_cents: i64,
     pub valor_total_cents: i64,
     pub selling_price_cents: i64,
+    /// Precio sin redondear, para mostrarlo al lado (`spec-06` PV-02).
+    pub calculated_price_cents: i64,
     pub profit_percent: String,
     pub expires_on: Option<String>,
     pub is_out_of_stock: bool,
     pub is_low_stock: bool,
+    /// Umbral de pocas unidades del producto; `None` = sin umbral (UM-01).
+    pub low_stock_threshold: Option<String>,
+    /// Cantidad reservada (RS-03): el badge del listado y el detalle. Desde la
+    /// fase 3 de `spec-06` será todo lo apartado sin entregar.
+    pub reserved_quantity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -111,8 +118,6 @@ pub struct ProductDetail {
     pub discontinued_at: Option<String>,
     pub remaining_days: Option<i64>,
     pub expired_cleanup_warning: Option<String>,
-    /// RS-03: suma de sus líneas en reservas activas.
-    pub reserved_quantity: String,
     pub reserved_invoices: Vec<ReservedInvoice>,
 }
 
@@ -131,6 +136,7 @@ pub struct ReservedInvoice {
 #[serde(rename_all = "camelCase")]
 pub struct PriceQuote {
     pub selling_price_cents: i64,
+    pub calculated_price_cents: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -196,6 +202,7 @@ pub struct CreateProductInput {
     pub unit_id: Option<i64>,
     pub cost: String,
     pub quantity: String,
+    pub low_stock_threshold: String,
     pub profit_percent: String,
     #[serde(default)]
     pub expires_on: Option<String>,
@@ -213,6 +220,7 @@ pub struct UpdateProductInput {
     #[serde(default)]
     pub unit_id: Option<i64>,
     pub profit_percent: String,
+    pub low_stock_threshold: String,
     #[serde(default)]
     pub expires_on: Option<String>,
 }
@@ -290,15 +298,18 @@ mod tests {
             cost_cents: 1250,
             valor_total_cents: 1563,
             selling_price_cents: 1500,
+            calculated_price_cents: 1500,
             profit_percent: "20,00".to_owned(),
             expires_on: None,
             is_out_of_stock: false,
             is_low_stock: true,
+            low_stock_threshold: Some("5".to_owned()),
+            reserved_quantity: "0".to_owned(),
         };
         let item_json = serde_json::to_value(&item).unwrap();
         assert_eq!(
             item_json,
-            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true})
+            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "calculatedPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "lowStockThreshold": "5", "reservedQuantity": "0"})
         );
         assert!(item_json["quantity"].is_string());
         assert!(item_json["profitPercent"].is_string());
@@ -368,13 +379,12 @@ mod tests {
             discontinued_at: Some("2026-10-03T12:00:00Z".to_owned()),
             remaining_days: Some(30),
             expired_cleanup_warning: None,
-            reserved_quantity: "0".to_owned(),
             reserved_invoices: vec![],
         };
         let detail_json = serde_json::to_value(detail).unwrap();
         assert_eq!(
             detail_json,
-            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null, "reservedQuantity": "0", "reservedInvoices": []})
+            json!({"id": 11, "name": "Café", "categoryId": null, "categoryName": null, "unitId": 2, "unitName": "Kilogramo", "unitAbbreviation": "kg", "quantity": "1,25", "costCents": 1250, "valorTotalCents": 1563, "sellingPriceCents": 1500, "calculatedPriceCents": 1500, "profitPercent": "20,00", "expiresOn": null, "isOutOfStock": false, "isLowStock": true, "lowStockThreshold": "5", "reservedQuantity": "0", "description": null, "isDiscontinued": true, "discontinuedAt": "2026-10-03T12:00:00Z", "remainingDays": 30, "expiredCleanupWarning": null, "reservedQuantity": "0", "reservedInvoices": []})
         );
         assert_eq!(detail_json["isDiscontinued"], true);
         assert_eq!(detail_json["discontinuedAt"], "2026-10-03T12:00:00Z");
@@ -387,7 +397,6 @@ mod tests {
             discontinued_at: None,
             remaining_days: None,
             expired_cleanup_warning: Some("aviso".to_owned()),
-            reserved_quantity: "0".to_owned(),
             reserved_invoices: vec![],
         };
         assert_eq!(
@@ -397,10 +406,11 @@ mod tests {
 
         let price_quote = PriceQuote {
             selling_price_cents: 1500,
+            calculated_price_cents: 1438,
         };
         assert_eq!(
             serde_json::to_value(price_quote).unwrap(),
-            json!({"sellingPriceCents": 1500})
+            json!({"sellingPriceCents": 1500, "calculatedPriceCents": 1438})
         );
 
         let dashboard = DashboardSummary {
@@ -469,6 +479,7 @@ mod tests {
             "name": "Café",
             "cost": "1,00",
             "quantity": "1",
+            "lowStockThreshold": "5",
             "profitPercent": "20,00"
         }))
         .unwrap();
@@ -490,6 +501,7 @@ mod tests {
         let update_input: super::UpdateProductInput = serde_json::from_value(json!({
             "productId": 1,
             "name": "Café",
+            "lowStockThreshold": "5",
             "profitPercent": "20,00"
         }))
         .unwrap();
@@ -499,6 +511,7 @@ mod tests {
             let mut input = json!({
                 "productId": 1,
                 "name": "Café",
+                "lowStockThreshold": "5",
                 "profitPercent": "20,00"
             });
             input[forbidden_field] = json!("1");

@@ -367,15 +367,40 @@ function renderProductList(items) {
         ? `${product.unitName}${product.unitAbbreviation ? ` (${product.unitAbbreviation})` : ""}`
         : "—",
     );
-    appendCell(row, formatMoney(product.sellingPriceCents), "right");
+    const priceCell = appendCell(
+      row,
+      formatMoney(product.sellingPriceCents),
+      "right",
+    );
+    appendCalculatedPrice(priceCell, product);
     appendCell(row, formatMoney(product.costCents), "right");
 
     const stockCell = document.createElement("td");
     stockCell.dataset.label = "Disponible en Stock";
     stockCell.className = "product-stock-cell";
+    // La cantidad y su badge naranja de reservado van siempre juntos.
+    const main = document.createElement("span");
+    main.className = "stock-main";
     const quantity = document.createElement("span");
     quantity.textContent = product.quantity;
-    stockCell.append(quantity);
+    main.append(quantity);
+    if (product.reservedQuantity && product.reservedQuantity !== "0") {
+      const reserved = createBadge(
+        `${product.reservedQuantity} reservado`,
+        "tone-orange",
+      );
+      reserved.title = "Cantidad reservada en facturas";
+      main.append(reserved);
+    }
+    stockCell.append(main);
+    if (product.lowStockThreshold == null) {
+      stockCell.append(
+        Object.assign(document.createElement("small"), {
+          className: "price-calculated",
+          textContent: " Sin umbral",
+        }),
+      );
+    }
     if (product.isOutOfStock)
       stockCell.append(createBadge("Agotado", "tone-red"));
     if (product.isLowStock)
@@ -669,6 +694,7 @@ function renderProductDetail(detail) {
   );
   setText("producto-ver-precio-entrada", formatMoney(detail.costCents));
   setText("producto-ver-precio-venta", formatMoney(detail.sellingPriceCents));
+  showCalculatedPrice("producto-ver-precio-calculado", detail);
   setText("producto-ver-valor-total", formatMoney(detail.valorTotalCents));
   setText("producto-ver-ganancia", detail.profitPercent ?? "—");
   setText("producto-ver-stock", detail.quantity ?? "—");
@@ -1008,6 +1034,8 @@ export function openProductForm(product = null) {
   );
   setValue("producto-ganancia", product?.profitPercent ?? "");
   setValue("producto-stock", product?.quantity ?? "");
+  setValue("producto-umbral", product?.lowStockThreshold ?? "");
+  showCalculatedPrice("producto-precio-calculado", editing ? product : null);
   // HP-04: al editar, el formulario muestra también sus facturas asociadas.
   const invoicesSection = document.getElementById(
     "producto-facturas-asociadas",
@@ -1105,7 +1133,7 @@ async function handleProductSubmit(event) {
   const cost = getValue("producto-precio-entrada");
   const quantity = getValue("producto-stock");
   const profitPercent = getValue("producto-ganancia");
-  const required = ["producto-nombre", "producto-ganancia"];
+  const required = ["producto-nombre", "producto-ganancia", "producto-umbral"];
   if (editingProductId === null) {
     required.push("producto-precio-entrada", "producto-stock");
   }
@@ -1123,6 +1151,7 @@ async function handleProductSubmit(event) {
     categoryId: categoryCombobox.getSelected()?.id ?? null,
     unitId: unitCombobox.getSelected()?.id ?? null,
     profitPercent,
+    lowStockThreshold: getValue("producto-umbral"),
     expiresOn:
       getValue("producto-caducidad-tipo") === "fecha"
         ? getValue("producto-caducidad-fecha") || null
@@ -1152,6 +1181,7 @@ async function handleProductSubmit(event) {
 
 // Campo al que se refiere cada rechazo de validación del backend (TO-01).
 const PRODUCT_FIELDS = [
+  [/umbral/i, "producto-umbral"],
   [/nombre/i, "producto-nombre"],
   [/descripción/i, "producto-descripcion"],
   [/ganancia|porcentaje/i, "producto-ganancia"],
@@ -1185,6 +1215,7 @@ async function updateSellingPricePreview(showError) {
     if (requestId !== previewRequestId) return null;
     const price = document.getElementById("producto-precio-venta");
     if (price) price.value = formatMoney(quote?.sellingPriceCents);
+    showCalculatedPrice("producto-precio-calculado", quote);
     setPricePreviewFeedback("");
     return quote;
   } catch (error) {
@@ -1203,7 +1234,36 @@ function clearSellingPricePreview() {
   previewRequestId += 1;
   const price = document.getElementById("producto-precio-venta");
   if (price) price.value = "";
+  showCalculatedPrice("producto-precio-calculado", null);
   setPricePreviewFeedback("");
+}
+
+// spec-06 PV-02: el precio sin redondear, más claro, solo si difiere.
+function calculatedText(prices) {
+  const calculated = prices?.calculatedPriceCents;
+  if (calculated == null || calculated === prices.sellingPriceCents) return "";
+  return formatMoney(calculated);
+}
+
+function showCalculatedPrice(id, prices) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.title = "Precio calculado, antes de redondear";
+  element.textContent = calculatedText(prices);
+  element.hidden = !element.textContent;
+}
+
+function appendCalculatedPrice(cell, prices) {
+  const text = calculatedText(prices);
+  if (!cell || !text) return;
+  cell.append(
+    document.createElement("br"),
+    Object.assign(document.createElement("small"), {
+      className: "price-calculated",
+      title: "Precio calculado, antes de redondear",
+      textContent: text,
+    }),
+  );
 }
 
 function updateExpiryVisibility() {

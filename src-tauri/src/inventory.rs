@@ -158,31 +158,80 @@ pub fn consume_fifo(
     Ok(consumed)
 }
 
+/// Costo promedio móvil (`spec-06` CO-01): parte del costo base y mezcla cada
+/// entrada vigente posterior con el stock que había justo antes de ella. Solo
+/// se llama desde las entradas: vender, perder o cancelar salidas no lo mueve.
 pub fn recalculate_product_cost(connection: &Connection, product_id: i64) -> Result<(), AppError> {
-    let current_cost: Option<i64> = connection
+    replay_product_cost(connection, product_id, None)
+}
+
+/// Igual que `recalculate_product_cost`, sin contar la entrada `excluded_invoice`
+/// (la que se está anulando o eliminando en esta misma transacción).
+fn replay_product_cost(
+    connection: &Connection,
+    product_id: i64,
+    excluded_invoice: Option<i64>,
+) -> Result<(), AppError> {
+    let product: Option<(Option<i64>, i64, i64)> = connection
         .query_row(
-            "SELECT costCents FROM products WHERE id = ?1",
+            "SELECT costBaseCents, costBaseArrivalOrder, costCents FROM products WHERE id = ?1",
             [product_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .map_err(|_| internal_error("failed to read product cost"))?;
-    let current_cost = current_cost.ok_or_else(|| {
+    let (base_cents, base_order, current_cost) = product.ok_or_else(|| {
         AppError::new(
             "notFound",
             "El producto ya no existe",
             "product missing during cost recalculation",
         )
     })?;
-    let (weighted_sum, total_quantity): (i64, i64) = connection.query_row(
-        "SELECT COALESCE(SUM(remainingMilli * unitCostCents), 0), COALESCE(SUM(remainingMilli), 0) FROM lots WHERE productId = ?1 AND remainingMilli > 0",
-        [product_id], |row| Ok((row.get(0)?, row.get(1)?)),
-    ).map_err(|_| internal_error("failed to calculate weighted lot cost"))?;
-    let cost = if total_quantity == 0 {
-        current_cost
-    } else {
-        round_half_up(i128::from(weighted_sum), i128::from(total_quantity)) as i64
+    // Sin costo base guardado (producto creado después de la migración 9), el
+    // punto de partida es el costo de su lote inicial.
+    let initial_cost: Option<i64> = match base_cents {
+        Some(_) => None,
+        None => connection
+            .query_row(
+                "SELECT unitCostCents FROM lots WHERE productId = ?1 AND origin = 'initial'",
+                [product_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| internal_error("failed to read initial lot cost"))?,
     };
+    let mut cost = base_cents.or(initial_cost).unwrap_or(current_cost);
+
+    let mut statement = connection
+        .prepare(
+            "SELECT COALESCE(l.stockBeforeMilli, 0), l.initialMilli, l.unitCostCents
+             FROM lots l
+             JOIN invoiceLines il ON il.id = l.invoiceLineId
+             JOIN invoices i ON i.id = il.invoiceId
+             WHERE l.productId = ?1 AND l.origin = 'entry' AND l.arrivalOrder > ?2
+               AND i.status <> 'cancelled' AND i.id IS NOT ?3
+             ORDER BY l.arrivalOrder",
+        )
+        .map_err(|_| internal_error("failed to query entries for cost"))?;
+    let entries = statement
+        .query_map(params![product_id, base_order, excluded_invoice], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|_| internal_error("failed to read entries for cost"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| internal_error("failed to collect entries for cost"))?;
+    for (stock_before, quantity, unit_cost) in entries {
+        let total = i128::from(stock_before) + i128::from(quantity);
+        if total > 0 {
+            let weighted = i128::from(stock_before) * i128::from(cost)
+                + i128::from(quantity) * i128::from(unit_cost);
+            cost = round_half_up(weighted, total) as i64;
+        }
+    }
     connection
         .execute(
             "UPDATE products SET costCents = ?1, updatedAt = ?2 WHERE id = ?3",
@@ -190,6 +239,41 @@ pub fn recalculate_product_cost(connection: &Connection, product_id: i64) -> Res
         )
         .map_err(|_| internal_error("failed to update product cost"))?;
     Ok(())
+}
+
+/// Cuando una entrada pierde `delta_milli` de stock (anular, eliminar o
+/// reducirla) o lo gana (aumentarla), las entradas posteriores del producto
+/// tenían ese stock de más o de menos antes de llegar (`plan-06` §3.1).
+pub fn shift_later_stock_before(
+    connection: &Connection,
+    product_id: i64,
+    after_arrival_order: i64,
+    delta_milli: i64,
+) -> Result<(), AppError> {
+    if delta_milli == 0 {
+        return Ok(());
+    }
+    connection
+        .execute(
+            "UPDATE lots SET stockBeforeMilli = MAX(0, stockBeforeMilli + ?3)
+             WHERE productId = ?1 AND origin = 'entry' AND arrivalOrder > ?2
+               AND stockBeforeMilli IS NOT NULL",
+            params![product_id, after_arrival_order, delta_milli],
+        )
+        .map_err(|_| internal_error("failed to shift stock before later entries"))?;
+    Ok(())
+}
+
+/// Orden de llegada de un lote, para desplazar las entradas posteriores.
+pub fn lot_arrival_order(connection: &Connection, lot_id: i64) -> Result<Option<i64>, AppError> {
+    connection
+        .query_row(
+            "SELECT arrivalOrder FROM lots WHERE id = ?1",
+            [lot_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| internal_error("failed to read lot arrival order"))
 }
 
 pub fn recalculate_product_quantity(
@@ -277,7 +361,6 @@ pub fn restore_consumption(
         ).map_err(|_| internal_error("failed to restore original lot"))?;
         if updated > 0 {
             recalculate_product_quantity(connection, product_id)?;
-            recalculate_product_cost(connection, product_id)?;
             return Ok(Restoration {
                 product_id: Some(product_id),
                 lot_id: Some(lot_id),
@@ -304,7 +387,6 @@ pub fn restore_consumption(
         connection.last_insert_rowid()
     };
     recalculate_product_quantity(connection, product_id)?;
-    recalculate_product_cost(connection, product_id)?;
     Ok(Restoration {
         product_id: Some(product_id),
         lot_id: Some(restored_lot_id),
@@ -320,7 +402,7 @@ pub fn reverse_lots_of_invoice(
     let mut statement = connection
         .prepare(
             "SELECT l.id, l.productId, l.remainingMilli, l.unitCostCents, il.productIdOriginal,
-                    p.name, i.number, i.type, i.createdByName
+                    p.name, i.number, i.type, i.createdByName, l.arrivalOrder
              FROM lots l
              JOIN invoiceLines il ON il.id = l.invoiceLineId
              JOIN invoices i ON i.id = il.invoiceId
@@ -341,6 +423,7 @@ pub fn reverse_lots_of_invoice(
                 row.get::<_, String>(6)?,
                 row.get::<_, String>(7)?,
                 row.get::<_, String>(8)?,
+                row.get::<_, i64>(9)?,
             ))
         })
         .map_err(|_| internal_error("failed to read invoice lots for reversal"))?
@@ -359,6 +442,7 @@ pub fn reverse_lots_of_invoice(
         invoice_number,
         invoice_type,
         created_by_name,
+        arrival_order,
     ) in lots
     {
         connection
@@ -368,7 +452,8 @@ pub fn reverse_lots_of_invoice(
             )
             .map_err(|_| internal_error("failed to reverse lot stock"))?;
         recalculate_product_quantity(connection, product_id)?;
-        recalculate_product_cost(connection, product_id)?;
+        shift_later_stock_before(connection, product_id, arrival_order, -remaining_milli)?;
+        replay_product_cost(connection, product_id, Some(invoice_id))?;
         let stock_after: i64 = connection
             .query_row(
                 "SELECT quantityMilli FROM products WHERE id = ?1",

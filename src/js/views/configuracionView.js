@@ -263,13 +263,11 @@ async function saveRates() {
 
 async function loadThresholds() {
   const settings = await getSettings();
-  byId("config-umbral-stock").value = String(settings.lowStockThreshold);
   byId("config-umbral-facturas").value = String(settings.staleInvoiceDays);
   byId("config-umbral-respaldo").value = String(settings.backupReminderDays);
 }
 
 const THRESHOLD_FIELDS = [
-  [/stock bajo/i, "config-umbral-stock"],
   [/factura pendiente/i, "config-umbral-facturas"],
   [/respaldo/i, "config-umbral-respaldo"],
 ];
@@ -280,7 +278,6 @@ async function saveThresholds(event) {
   clearFieldErrors(form);
   try {
     await updateSettings({
-      lowStockThreshold: Number(byId("config-umbral-stock").value),
       staleInvoiceDays: Number(byId("config-umbral-facturas").value),
       backupReminderDays: Number(byId("config-umbral-respaldo").value),
     });

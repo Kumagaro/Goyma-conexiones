@@ -982,6 +982,7 @@ describe("huecos de la revisión contra spec-03", () => {
     dialog().querySelector('[name="unitId"]').value = "3";
     dialog().querySelector('[name="categoryId"]').value = "2";
     dialog().querySelector('[name="profitPercent"]').value = "20";
+    dialog().querySelector('[name="lowStockThreshold"]').value = "4";
     dialog().querySelector('button[type="submit"]').click();
     await vi.waitFor(() => expect(dialog()).toBeNull());
 
@@ -1004,6 +1005,7 @@ describe("huecos de la revisión contra spec-03", () => {
           categoryId: 2,
           unitId: 3,
           profitPercent: "20",
+          lowStockThreshold: "4",
           cost: "5,00",
         },
         quantity: "2",
