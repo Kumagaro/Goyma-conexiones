@@ -50,7 +50,9 @@ pub fn search_contacts(
         .filter(|ch| !ch.is_whitespace() && *ch != '+')
         .collect::<String>();
     let phone_query = normalize_query(&phone_query);
-    let sql = format!("SELECT id, firstName, lastName, company, nationalId, phone FROM {table}");
+    let sql = format!(
+        "SELECT id, firstName, COALESCE(lastName, ''), company, COALESCE(nationalId, ''), COALESCE(phone, '') FROM {table}"
+    );
     let mut statement = connection
         .prepare(&sql)
         .map_err(|_| internal_error("failed to prepare contact search"))?;
@@ -70,7 +72,7 @@ pub fn search_contacts(
         .map_err(|_| internal_error("failed to collect contacts"))?;
     let mut matches = Vec::new();
     for (id, first_name, last_name, company, national_id, phone) in rows {
-        let full_name = format!("{first_name} {last_name}");
+        let full_name = crate::text::full_name(&first_name, Some(&last_name));
         let normalized_phone = phone
             .chars()
             .filter(|ch| !ch.is_whitespace() && *ch != '+')
@@ -225,6 +227,10 @@ pub fn search_products_for_invoice(
                     unit_abbreviation,
                     stock: format_quantity_milli(stock_milli),
                     selling_price_cents: selling_price_cents(cost_cents, profit_hundredths),
+                    calculated_price_cents: crate::pricing::calculated_price_cents(
+                        cost_cents,
+                        profit_hundredths,
+                    ),
                     is_out_of_stock: stock_milli == 0,
                     is_discontinued: status == "discontinued",
                 },

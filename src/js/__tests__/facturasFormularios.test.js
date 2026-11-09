@@ -350,6 +350,56 @@ describe.each(TYPES)("formulario de $name (§7.1)", (t) => {
     expect(Number.isNaN(input.lines[0].productId)).toBe(false);
   });
 
+  it("spec-06 PF: en venta y servicio el precio sube, no baja, y el descuento rebaja el total", async () => {
+    if (t.type !== "V" && t.type !== "S") return;
+    invoices[t.create].mockResolvedValue({
+      invoiceId: 32,
+      number: `${t.type}-00032`,
+      expiredCleanupWarning: null,
+    });
+    await chooseContact(t);
+    await chooseFromCombobox(t.productInput, "cable", "Cable UTP");
+    const quantity = lineInputs(linesBody(t), "quantity")[0];
+    quantity.value = "2";
+    quantity.dispatchEvent(new Event("input", { bubbles: true }));
+    const price = lineInputs(linesBody(t), "salePrice")[0];
+    expect(price.placeholder).toBe("2,50");
+
+    // Por debajo de la lista no se guarda.
+    price.value = "2,00";
+    price.dispatchEvent(new Event("input", { bubbles: true }));
+    setValue(`${t.field}-fecha-emision`, "2026-02-10");
+    submitForm(`${t.view}-form`);
+    expect(feedback(t)).toContain("no puede ser menor que 2,50 USD");
+    expect(invoices[t.create]).not.toHaveBeenCalled();
+
+    // Más caro y con 10 % de descuento: 2 × 3,00 = 6,00 − 0,60 = 5,40.
+    price.value = "3,00";
+    price.dispatchEvent(new Event("input", { bubbles: true }));
+    const kind = document.querySelector(
+      `#${linesBody(t)} [data-line-field="discountKind"]`,
+    );
+    kind.value = "percent";
+    kind.dispatchEvent(new Event("change", { bubbles: true }));
+    const discount = lineInputs(linesBody(t), "discountValue")[0];
+    discount.value = "10";
+    discount.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(document.getElementById(`${t.field}-total`).textContent).toBe(
+      "5,40 USD",
+    );
+    submitForm(`${t.view}-form`);
+    await vi.waitFor(() => expect(invoices[t.create]).toHaveBeenCalled());
+    expect(invoices[t.create].mock.calls[0][0].lines).toEqual([
+      {
+        productId: 7,
+        quantity: "2",
+        unitPrice: "3,00",
+        discountKind: "percent",
+        discountValue: "10",
+      },
+    ]);
+  });
+
   it("un error del backend se muestra en español sin perder lo tecleado", async () => {
     invoices[t.create].mockRejectedValue({
       code: "stockInsuficiente",
@@ -521,8 +571,11 @@ describe("editar facturas (§7.3)", () => {
       "#factura-venta-lineas-body .li-row",
     );
     expect(rows).toHaveLength(3);
-    // Precio emitido en las existentes; el eliminado no se puede cambiar.
-    expect(rows[0].textContent).toContain("10,00 USD");
+    // Precio emitido en las existentes (editable, spec-06 PF-01); el
+    // eliminado no se puede cambiar.
+    expect(rows[0].querySelector('[data-line-field="salePrice"]').value).toBe(
+      "10,00",
+    );
     expect(rows[1].textContent).toContain("(eliminado)");
     expect(rows[1].querySelector("input").disabled).toBe(true);
     expect(rows[2].textContent).toContain("(descontinuado)");

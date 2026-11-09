@@ -29,8 +29,11 @@ pub struct SupplierDetail {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SupplierInput {
     pub first_name: String,
+    #[serde(default)]
     pub last_name: String,
+    #[serde(default)]
     pub national_id: String,
+    #[serde(default)]
     pub phone: String,
     #[serde(default)]
     pub company: Option<String>,

@@ -32,7 +32,7 @@ pub fn list_suppliers_inner(
     require_session(connection, now)?;
 
     let mut statement = connection
-        .prepare("SELECT id, firstName, lastName, company, phone FROM suppliers ORDER BY id ASC")
+        .prepare("SELECT id, firstName, COALESCE(lastName, ''), company, COALESCE(phone, '') FROM suppliers ORDER BY id ASC")
         .map_err(|error| {
             AppError::new(
                 "internal",
@@ -74,7 +74,7 @@ pub fn list_suppliers_inner(
             id,
             SupplierListItem {
                 id,
-                full_name: format!("{first_name} {last_name}"),
+                full_name: crate::text::full_name(&first_name, Some(&last_name)),
                 company,
                 phone,
             },
@@ -172,9 +172,9 @@ pub fn create_supplier_inner(
     let id = connection.last_insert_rowid();
     Ok(SupplierListItem {
         id,
-        full_name: format!("{} {}", validated.first_name, validated.last_name),
+        full_name: crate::text::full_name(&validated.first_name, validated.last_name.as_deref()),
         company: validated.company,
-        phone: validated.phone,
+        phone: validated.phone.unwrap_or_default(),
     })
 }
 
@@ -295,9 +295,9 @@ pub fn update_supplier_inner(
 
     Ok(SupplierListItem {
         id: supplier_id,
-        full_name: format!("{} {}", validated.first_name, validated.last_name),
+        full_name: crate::text::full_name(&validated.first_name, validated.last_name.as_deref()),
         company: validated.company,
-        phone: validated.phone,
+        phone: validated.phone.unwrap_or_default(),
     })
 }
 
@@ -365,7 +365,7 @@ pub fn delete_supplier_inner(
         &Author::User(&actor),
         now,
         "supplier",
-        "SELECT firstName || ' ' || lastName FROM suppliers WHERE id = ?1",
+        "SELECT trim(firstName || ' ' || COALESCE(lastName, '')) FROM suppliers WHERE id = ?1",
         supplier_id,
     )
     .map_err(|error| map_db_error(error, "deleteSupplier", &[]))?;
@@ -434,7 +434,7 @@ pub fn get_supplier_detail_inner(
 
     let row: Option<SupplierDetailRow> = connection
         .query_row(
-            "SELECT firstName, lastName, nationalId, phone, company, position, email, address, createdAt
+            "SELECT firstName, COALESCE(lastName, ''), COALESCE(nationalId, ''), COALESCE(phone, ''), company, position, email, address, createdAt
              FROM suppliers WHERE id = ?1",
             [supplier_id],
             |row| {
@@ -477,7 +477,7 @@ pub fn get_supplier_detail_inner(
         id: supplier_id,
         first_name: first_name.clone(),
         last_name: last_name.clone(),
-        full_name: format!("{} {}", first_name, last_name),
+        full_name: crate::text::full_name(&first_name, Some(&last_name)),
         national_id,
         phone,
         company,

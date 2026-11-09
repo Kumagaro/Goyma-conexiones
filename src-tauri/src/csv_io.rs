@@ -365,14 +365,9 @@ fn layout(kind: &str) -> Result<Layout, AppError> {
         ),
         "categories" => (CATEGORY_HEADERS, &["Nombre"]),
         "units" => (UNIT_HEADERS, &["Nombre", "Abreviatura"]),
-        "clients" => (
-            CLIENT_HEADERS,
-            &["Nombre", "Apellidos", "Carnet de Identidad", "Teléfono"],
-        ),
-        "suppliers" => (
-            SUPPLIER_HEADERS,
-            &["Nombre", "Apellidos", "Carnet de Identidad", "Teléfono"],
-        ),
+        // spec-06 CT-01: solo el nombre es obligatorio.
+        "clients" => (CLIENT_HEADERS, &["Nombre"]),
+        "suppliers" => (SUPPLIER_HEADERS, &["Nombre"]),
         _ => {
             return Err(validation_failed(
                 "Este tipo de datos no se puede importar",

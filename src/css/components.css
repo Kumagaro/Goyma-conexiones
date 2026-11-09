@@ -847,3 +847,35 @@ details.inventory-details[open] > summary {
 #producto-list .stock-main {
   white-space: nowrap;
 }
+
+/* spec-06 PF: precio editable y descuento en las líneas de venta y servicio */
+.li-price {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.li-discount {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.li-discount select,
+.li-discount input {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.li-discount select {
+  flex: 0 0 auto;
+  width: auto;
+  padding-right: 28px;
+  background-position: right 8px center;
+  background-size: 14px;
+}
+
+.li-discount input {
+  min-width: 0;
+  flex: 1 1 60px;
+}

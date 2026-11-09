@@ -36,7 +36,11 @@ pub struct PrintLine {
     pub quantity: String,
     pub unit: String,
     pub unit_price_cents: i64,
+    /// Bruto de la línea; con descuento, el importe es este menos el descuento.
     pub subtotal_cents: i64,
+    /// spec-06 PF-02: se imprime en una fila propia debajo de la línea.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount_cents: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -117,7 +121,8 @@ pub fn build_invoice_document(
                 quantity: entered.quantity.clone(),
                 unit: entered.abbreviation.clone(),
                 unit_price_cents: entered.unit_price_cents,
-                subtotal_cents: line.subtotal_cents,
+                subtotal_cents: line.gross_cents.unwrap_or(line.subtotal_cents),
+                discount_cents: line.discount_cents,
             },
             None => PrintLine {
                 name: line.product_name.clone(),
@@ -128,7 +133,8 @@ pub fn build_invoice_document(
                     .or_else(|| line.unit_name.clone())
                     .unwrap_or_default(),
                 unit_price_cents: line.unit_price_cents,
-                subtotal_cents: line.subtotal_cents,
+                subtotal_cents: line.gross_cents.unwrap_or(line.subtotal_cents),
+                discount_cents: line.discount_cents,
             },
         })
         .collect();
@@ -399,6 +405,19 @@ pub fn invoice_pdf_bytes(
             pdf.text(cell, 9.5, COLUMN_X[index], false);
         }
         pdf.y -= ROW_HEIGHT;
+        if let Some(discount) = line.discount_cents {
+            if pdf.y - ROW_HEIGHT < MARGIN {
+                pdf.ensure_room(ROW_HEIGHT * 2.0);
+            }
+            pdf.text("   Descuento", 9.0, COLUMN_X[0], false);
+            pdf.text(
+                &format!("-{}", format_money(discount)),
+                9.0,
+                COLUMN_X[4],
+                false,
+            );
+            pdf.y -= ROW_HEIGHT;
+        }
     }
     pdf.y -= 2.0;
     pdf.ensure_room(8.0);
@@ -496,6 +515,11 @@ mod tests {
             updated_at: "2026-11-04T12:00:00Z".into(),
             reserved_until: (invoice_type == "V").then(|| "2026-11-10".into()),
             lines: vec![InvoiceLineDetail {
+                list_price_cents: None,
+                gross_cents: None,
+                discount_kind: None,
+                discount_value: None,
+                discount_cents: None,
                 position: 1,
                 product_id_original: 3,
                 product_name: "Cable UTP".into(),

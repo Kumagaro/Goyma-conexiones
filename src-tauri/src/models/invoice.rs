@@ -155,6 +155,14 @@ pub struct SaleInvoiceLineInput {
     /// CV-01: unidad elegida en la línea; sin ella, la del producto.
     #[serde(default)]
     pub unit_id: Option<i64>,
+    /// spec-06 PF-01/PF-02: precio por unidad (vacío = precio de lista) y
+    /// descuento de la línea (`percent` o `amount`).
+    #[serde(default)]
+    pub unit_price: Option<String>,
+    #[serde(default)]
+    pub discount_kind: Option<String>,
+    #[serde(default)]
+    pub discount_value: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -182,6 +190,14 @@ pub struct ServiceInvoiceLineInput {
     /// CV-01: unidad elegida en la línea; sin ella, la del producto.
     #[serde(default)]
     pub unit_id: Option<i64>,
+    /// spec-06 PF-01/PF-02: precio por unidad (vacío = precio de lista) y
+    /// descuento de la línea (`percent` o `amount`).
+    #[serde(default)]
+    pub unit_price: Option<String>,
+    #[serde(default)]
+    pub discount_kind: Option<String>,
+    #[serde(default)]
+    pub discount_value: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -271,6 +287,14 @@ pub struct UpdateOutgoingInvoiceLineInput {
     /// CV-01: unidad elegida en la línea; sin ella, la del producto.
     #[serde(default)]
     pub unit_id: Option<i64>,
+    /// spec-06 PF-01/PF-02: precio por unidad (vacío = precio de lista) y
+    /// descuento de la línea (`percent` o `amount`).
+    #[serde(default)]
+    pub unit_price: Option<String>,
+    #[serde(default)]
+    pub discount_kind: Option<String>,
+    #[serde(default)]
+    pub discount_value: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -413,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn create_sale_invoice_input_accepts_lines_and_rejects_unit_price() {
+    fn create_sale_invoice_input_accepts_lines_and_rejects_unknown_fields() {
         let valid = json!({
             "clientId": 1,
             "invoiceDate": "2026-10-04",
@@ -428,13 +452,13 @@ mod tests {
         let with_price = json!({
             "clientId": 1,
             "invoiceDate": "2026-10-04",
-            "lines": [{ "productId": 7, "quantity": "2", "unitPrice": "1,50" }]
+            "lines": [{ "productId": 7, "quantity": "2", "sellingPrice": "1,50" }]
         });
         assert!(serde_json::from_value::<CreateSaleInvoiceInput>(with_price).is_err());
     }
 
     #[test]
-    fn create_service_invoice_input_accepts_lines_and_rejects_unit_price() {
+    fn create_service_invoice_input_accepts_lines_and_rejects_unknown_fields() {
         let valid = json!({
             "clientId": 1,
             "invoiceDate": "2026-10-04",
@@ -448,9 +472,23 @@ mod tests {
         let with_price = json!({
             "clientId": 1,
             "invoiceDate": "2026-10-04",
-            "lines": [{ "productId": 7, "quantity": "2", "unitPrice": "1,50" }]
+            "lines": [{ "productId": 7, "quantity": "2", "sellingPrice": "1,50" }]
         });
         assert!(serde_json::from_value::<CreateServiceInvoiceInput>(with_price).is_err());
+    }
+
+    #[test]
+    fn sale_lines_accept_a_price_and_a_discount() {
+        let input: CreateSaleInvoiceInput = serde_json::from_value(json!({
+            "clientId": 1,
+            "invoiceDate": "2026-10-04",
+            "lines": [{ "productId": 7, "quantity": "2", "unitPrice": "15,00",
+                "discountKind": "percent", "discountValue": "10" }]
+        }))
+        .unwrap();
+        assert_eq!(input.lines[0].unit_price.as_deref(), Some("15,00"));
+        assert_eq!(input.lines[0].discount_kind.as_deref(), Some("percent"));
+        assert_eq!(input.lines[0].discount_value.as_deref(), Some("10"));
     }
 
     #[test]
@@ -520,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn update_sale_invoice_input_keeps_line_identity_without_prices() {
+    fn update_sale_invoice_input_keeps_line_identity_and_rejects_unknown_fields() {
         let valid = json!({
             "invoiceId": 1,
             "clientId": 2,
@@ -538,7 +576,7 @@ mod tests {
             "invoiceId": 1,
             "clientId": 2,
             "invoiceDate": "2026-10-04",
-            "lines": [{ "productIdOriginal": 7, "productId": 7, "quantity": "2", "unitPrice": "1,50" }]
+            "lines": [{ "productIdOriginal": 7, "productId": 7, "quantity": "2", "sellingPrice": "1,50" }]
         });
         assert!(serde_json::from_value::<UpdateSaleInvoiceInput>(with_price).is_err());
     }

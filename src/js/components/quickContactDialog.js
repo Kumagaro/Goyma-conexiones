@@ -32,7 +32,7 @@ export function openQuickContactDialog({ kind, initialText = "" }) {
     title: config.title,
     draftKey: config.draftKey,
     submitText: `Crear ${config.noun}`,
-    missingMessage: `Completa los campos obligatorios del ${config.noun}.`,
+    missingMessage: `Escribe el nombre del ${config.noun}.`,
     fields: [
       {
         name: "firstName",
@@ -43,19 +43,16 @@ export function openQuickContactDialog({ kind, initialText = "" }) {
       {
         name: "lastName",
         label: "Apellidos",
-        required: true,
         value: rest.join(" "),
       },
       {
         name: "nationalId",
         label: "Número de Carnet de Identidad",
-        required: true,
       },
       {
         name: "phone",
         label: "Número de Teléfono",
         type: "tel",
-        required: true,
       },
       { name: "company", label: "Empresa" },
       { name: "position", label: "Cargo" },

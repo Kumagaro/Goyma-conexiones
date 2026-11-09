@@ -80,7 +80,7 @@ function linesTable(model) {
     el(
       "tbody",
       {},
-      (model.lines ?? []).map((line) =>
+      (model.lines ?? []).flatMap((line) => [
         el(
           "tr",
           {},
@@ -90,7 +90,18 @@ function linesTable(model) {
           el("td", {}, formatMoney(line.unitPriceCents)),
           el("td", {}, formatMoney(line.subtotalCents)),
         ),
-      ),
+        // spec-06 PF-02: el descuento en su propia fila, restando.
+        ...(line.discountCents
+          ? [
+              el(
+                "tr",
+                { class: "print-discount" },
+                el("td", { colspan: "4" }, "Descuento"),
+                el("td", {}, `-${formatMoney(line.discountCents)}`),
+              ),
+            ]
+          : []),
+      ]),
     ),
   );
 }

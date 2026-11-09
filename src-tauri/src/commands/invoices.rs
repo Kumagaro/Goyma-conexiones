@@ -256,6 +256,36 @@ fn insert_entry_update_movement(
     Ok(())
 }
 
+/// Línea pedida de una Venta o un Servicio nuevo (`spec-06` PF).
+struct OutgoingLineInput {
+    product_id: i64,
+    quantity: String,
+    unit_id: Option<i64>,
+    unit_price: Option<String>,
+    discount_kind: Option<String>,
+    discount_value: Option<String>,
+}
+
+/// Bruto de una línea con un precio por unidad del producto; con otra unidad,
+/// el precio de lo escrito (CV-01).
+fn line_gross_cents(
+    line_unit: Option<&LineUnit>,
+    quantity_milli: i64,
+    unit_price_cents: i64,
+) -> i64 {
+    match line_unit {
+        Some(unit) => entered_subtotal_cents(unit, unit.per_entered_unit(unit_price_cents)),
+        None => crate::inventory::round_half_up(
+            i128::from(quantity_milli) * i128::from(unit_price_cents),
+            1_000,
+        ) as i64,
+    }
+}
+
+/// Nombre, apellidos, carné y teléfono del contacto (`spec-06` CT-01: solo el
+/// nombre es obligatorio).
+type ContactSnapshot = (String, Option<String>, Option<String>, Option<String>);
+
 fn remove_entry_invoice_line(
     connection: &Connection,
     actor: &Actor,
@@ -694,7 +724,8 @@ pub fn get_invoice_inner(
                             WHERE c.lotId = l.id AND (ci.status IS NULL OR ci.status <> 'cancelled')
                         ) END AS consumedMilli,
                         il.enteredUnitId, il.enteredUnitName, il.enteredUnitAbbreviation,
-                        il.enteredQuantityMilli
+                        il.enteredQuantityMilli, il.listPriceCents, il.grossCents, il.discountKind,
+                        il.discountValue, il.discountCents
                  FROM invoiceLines il
                  LEFT JOIN products p ON p.id = il.productId
                  LEFT JOIN lots l ON l.invoiceLineId = il.id
@@ -703,7 +734,9 @@ pub fn get_invoice_inner(
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
         let rows = statement
             .query_map([invoice_id], |row| {
-                let subtotal_cents: i64 = row.get(7)?;
+                // El precio por unidad escrita sale del bruto (antes del descuento).
+                let gross_cents: Option<i64> = row.get(18)?;
+                let subtotal_cents: i64 = gross_cents.unwrap_or(row.get(7)?);
                 let entered_milli: Option<i64> = row.get(16)?;
                 let entered = match (row.get::<_, Option<String>>(14)?, entered_milli) {
                     (Some(name), Some(milli)) if milli > 0 => Some(EnteredUnit {
@@ -734,6 +767,11 @@ pub fn get_invoice_inner(
                     product_status: row.get(10)?,
                     remaining_quantity: row.get::<_, Option<i64>>(11)?.map(format_quantity_milli),
                     consumed_quantity: row.get::<_, Option<i64>>(12)?.map(format_quantity_milli),
+                    list_price_cents: row.get(17)?,
+                    gross_cents,
+                    discount_kind: row.get(19)?,
+                    discount_value: row.get(20)?,
+                    discount_cents: Some(row.get::<_, i64>(21)?).filter(|cents| *cents > 0),
                 })
             })
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
@@ -1344,8 +1382,8 @@ pub fn create_entry_invoice_inner(
         "INSERT INTO invoices (type, number, invoiceDate, status, supplierId, contactFullName, contactFullNameNormalized,
             contactNationalId, contactPhone, notes, paymentMethod, paidAt, attachmentFileName,
             attachmentOriginalName, attachmentSizeBytes, attachmentUploadedAt, createdByUserId, createdByName, createdAt, updatedAt)
-         VALUES (?1, ?2, ?3, ?4, ?5, (SELECT firstName || ' ' || lastName FROM suppliers WHERE id = ?5),
-            (SELECT lower(firstName || ' ' || lastName) FROM suppliers WHERE id = ?5),
+         VALUES (?1, ?2, ?3, ?4, ?5, (SELECT trim(firstName || ' ' || COALESCE(lastName, '')) FROM suppliers WHERE id = ?5),
+            (SELECT lower(trim(firstName || ' ' || COALESCE(lastName, ''))) FROM suppliers WHERE id = ?5),
             (SELECT nationalId FROM suppliers WHERE id = ?5), (SELECT phone FROM suppliers WHERE id = ?5), ?6, ?7, ?8,
             ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
@@ -1486,7 +1524,7 @@ fn create_client_outgoing_invoice_inner(
     status: Option<&str>,
     notes: Option<&str>,
     payment_method: Option<&str>,
-    lines: &[(i64, String, Option<i64>)],
+    lines: &[OutgoingLineInput],
     reserved_until: Option<&str>,
 ) -> Result<InvoiceActionResult, AppError> {
     let _actor = require_session(connection, now)?;
@@ -1546,7 +1584,9 @@ fn create_client_outgoing_invoice_inner(
     let mut line_rows = Vec::new();
     let mut total_cents = 0_i64;
 
-    for (position, (product_id, quantity, line_unit_id)) in lines.iter().enumerate() {
+    for (position, line) in lines.iter().enumerate() {
+        let (product_id, quantity, line_unit_id) =
+            (&line.product_id, &line.quantity, &line.unit_id);
         if !seen_products.insert(*product_id) {
             return Err(validation_failed(
                 "El producto ya está en la factura",
@@ -1629,23 +1669,25 @@ fn create_client_outgoing_invoice_inner(
             ));
         }
 
-        // Precio de venta vigente al crear (spec-02 P-11); con otra unidad,
-        // precio vigente × factor y subtotal de lo escrito (CV-01).
-        let unit_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
+        // Precio de lista = precio de venta vigente (spec-02 P-11, spec-06
+        // PV-01); el pedido no baja de él y el descuento rebaja el importe
+        // (PF-01, PF-02). Con otra unidad, subtotal de lo escrito (CV-01).
+        let list_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
         let line_unit = resolve_line_unit(connection, *product_id, *line_unit_id, quantity_milli)?;
-        let (quantity_milli, subtotal_cents) = match &line_unit {
-            Some(unit) => (
-                unit.product_milli(),
-                entered_subtotal_cents(unit, unit.per_entered_unit(unit_price_cents)),
-            ),
-            None => (
-                quantity_milli,
-                crate::inventory::round_half_up(
-                    i128::from(quantity_milli) * i128::from(unit_price_cents),
-                    1_000,
-                ) as i64,
-            ),
-        };
+        let quantity_milli = line_unit
+            .as_ref()
+            .map_or(quantity_milli, LineUnit::product_milli);
+        let price = crate::pricing::price_line(
+            &product_name,
+            list_price_cents,
+            list_price_cents,
+            line.unit_price.as_deref(),
+            line.discount_kind.as_deref(),
+            line.discount_value.as_deref(),
+            |unit_price| line_gross_cents(line_unit.as_ref(), quantity_milli, unit_price),
+        )?;
+        let unit_price_cents = price.unit_price_cents;
+        let subtotal_cents = price.subtotal_cents;
         total_cents = total_cents.checked_add(subtotal_cents).ok_or_else(|| {
             AppError::new(
                 "validationFailed",
@@ -1676,6 +1718,8 @@ fn create_client_outgoing_invoice_inner(
             category_name,
             cost_cents,
             line_unit,
+            list_price_cents,
+            price,
         ));
     }
 
@@ -1714,8 +1758,8 @@ fn create_client_outgoing_invoice_inner(
         "INSERT INTO invoices (type, number, invoiceDate, status, clientId, contactFullName, contactFullNameNormalized,
             contactNationalId, contactPhone, notes, paymentMethod, paidAt, createdByUserId, createdByName, createdAt, updatedAt,
             reservedUntil)
-         VALUES (?1, ?2, ?3, ?4, ?5, (SELECT firstName || ' ' || lastName FROM clients WHERE id = ?5),
-            (SELECT lower(firstName || ' ' || lastName) FROM clients WHERE id = ?5),
+         VALUES (?1, ?2, ?3, ?4, ?5, (SELECT trim(firstName || ' ' || COALESCE(lastName, '')) FROM clients WHERE id = ?5),
+            (SELECT lower(trim(firstName || ' ' || COALESCE(lastName, ''))) FROM clients WHERE id = ?5),
             (SELECT nationalId FROM clients WHERE id = ?5), (SELECT phone FROM clients WHERE id = ?5), ?6, ?7, ?8,
             ?9, ?10, ?11, ?11, ?12)",
         params![
@@ -1750,13 +1794,19 @@ fn create_client_outgoing_invoice_inner(
         category_name,
         cost_at_sale_cents,
         line_unit,
+        list_price_cents,
+        price,
     ) in line_rows
     {
+        // Regla interina (plan-06 §2.3): mientras la venta descuente al
+        // guardar, la línea queda entregada.
         connection.execute(
             "INSERT INTO invoiceLines (invoiceId, position, productId, productIdOriginal, productName, productNameNormalized,
                 unitId, unitName, unitAbbreviation, quantityMilli, unitPriceCents, subtotalCents,
-                categoryId, categoryName, costAtSaleCents, createdAt, updatedAt)
-             VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+                categoryId, categoryName, costAtSaleCents, createdAt, updatedAt,
+                listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli)
+             VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15,
+                ?16, ?17, ?18, ?19, ?20, ?9)",
             params![
                 invoice_id,
                 position,
@@ -1773,6 +1823,11 @@ fn create_client_outgoing_invoice_inner(
                 category_name,
                 cost_at_sale_cents,
                 &timestamp,
+                list_price_cents,
+                price.gross_cents,
+                price.discount_kind,
+                price.discount_value,
+                price.discount_cents,
             ],
         ).map_err(|error| map_db_error(error, op, &[]))?;
 
@@ -1831,10 +1886,17 @@ pub fn create_sale_invoice_inner(
     now: DateTime<Utc>,
     input: CreateSaleInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
-    let lines: Vec<(i64, String, Option<i64>)> = input
+    let lines: Vec<OutgoingLineInput> = input
         .lines
         .iter()
-        .map(|line| (line.product_id, line.quantity.clone(), line.unit_id))
+        .map(|line| OutgoingLineInput {
+            product_id: line.product_id,
+            quantity: line.quantity.clone(),
+            unit_id: line.unit_id,
+            unit_price: line.unit_price.clone(),
+            discount_kind: line.discount_kind.clone(),
+            discount_value: line.discount_value.clone(),
+        })
         .collect();
     let result = create_client_outgoing_invoice_inner(
         connection,
@@ -1859,10 +1921,17 @@ pub fn create_service_invoice_inner(
     now: DateTime<Utc>,
     input: CreateServiceInvoiceInput,
 ) -> Result<InvoiceActionResult, AppError> {
-    let lines: Vec<(i64, String, Option<i64>)> = input
+    let lines: Vec<OutgoingLineInput> = input
         .lines
         .iter()
-        .map(|line| (line.product_id, line.quantity.clone(), line.unit_id))
+        .map(|line| OutgoingLineInput {
+            product_id: line.product_id,
+            quantity: line.quantity.clone(),
+            unit_id: line.unit_id,
+            unit_price: line.unit_price.clone(),
+            discount_kind: line.discount_kind.clone(),
+            discount_value: line.discount_value.clone(),
+        })
         .collect();
     let result = create_client_outgoing_invoice_inner(
         connection,
@@ -2076,8 +2145,8 @@ fn create_associated_outgoing_invoice_inner(
         "INSERT INTO invoices (type, number, invoiceDate, status, clientId, contactFullName, contactFullNameNormalized,
             contactNationalId, contactPhone, notes, associatedInvoiceId, associatedNumber, associatedType,
             createdByUserId, createdByName, createdAt, updatedAt)
-         VALUES (?1, ?2, ?3, ?4, ?5, (SELECT firstName || ' ' || lastName FROM clients WHERE id = ?5),
-            (SELECT lower(firstName || ' ' || lastName) FROM clients WHERE id = ?5),
+         VALUES (?1, ?2, ?3, ?4, ?5, (SELECT trim(firstName || ' ' || COALESCE(lastName, '')) FROM clients WHERE id = ?5),
+            (SELECT lower(trim(firstName || ' ' || COALESCE(lastName, ''))) FROM clients WHERE id = ?5),
             (SELECT nationalId FROM clients WHERE id = ?5), (SELECT phone FROM clients WHERE id = ?5), ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
         params![
@@ -2262,6 +2331,8 @@ struct OutgoingInvoiceLineRow {
     product_name: String,
     quantity_milli: i64,
     unit_price_cents: i64,
+    list_price_cents: Option<i64>,
+    subtotal_cents: i64,
 }
 
 struct OutgoingUpdateMovement<'a> {
@@ -2482,7 +2553,7 @@ fn update_priced_outgoing_invoice_inner(
         ));
     }
     let reserved_until = validate_reserved_until(reserved_until, invoice_date, &status)?;
-    let client: Option<(String, String, String, String)> = connection
+    let client: Option<ContactSnapshot> = connection
         .query_row(
             "SELECT firstName, lastName, nationalId, phone FROM clients WHERE id = ?1",
             [client_id],
@@ -2504,7 +2575,7 @@ fn update_priced_outgoing_invoice_inner(
         let mut statement = connection
             .prepare(
                 "SELECT id, position, productId, productIdOriginal, productName,
-                    quantityMilli, unitPriceCents
+                    quantityMilli, unitPriceCents, listPriceCents, subtotalCents
                  FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
@@ -2518,6 +2589,8 @@ fn update_priced_outgoing_invoice_inner(
                     product_name: row.get(4)?,
                     quantity_milli: row.get(5)?,
                     unit_price_cents: row.get(6)?,
+                    list_price_cents: row.get(7)?,
+                    subtotal_cents: row.get(8)?,
                 })
             })
             .map_err(|error| map_db_error(error, op, &[]))?
@@ -2696,10 +2769,7 @@ fn update_priced_outgoing_invoice_inner(
                     ));
                 }
                 invoice_total_cents = invoice_total_cents
-                    .checked_add(crate::inventory::round_half_up(
-                        i128::from(row.quantity_milli) * i128::from(row.unit_price_cents),
-                        1_000,
-                    ) as i64)
+                    .checked_add(row.subtotal_cents)
                     .ok_or_else(|| {
                         validation_failed(
                             "El total de la factura supera el rango permitido",
@@ -2754,25 +2824,37 @@ fn update_priced_outgoing_invoice_inner(
                     |db_row| db_row.get(0),
                 )
                 .map_err(|error| map_db_error(error, op, &[]))?;
-            let subtotal_cents = match &line_unit {
-                Some(unit) => {
-                    entered_subtotal_cents(unit, unit.per_entered_unit(row.unit_price_cents))
-                }
-                None => crate::inventory::round_half_up(
-                    i128::from(quantity_milli) * i128::from(row.unit_price_cents),
-                    1_000,
-                ) as i64,
-            };
+            let price = crate::pricing::price_line(
+                &row.product_name,
+                row.list_price_cents.unwrap_or(row.unit_price_cents),
+                row.unit_price_cents,
+                line.unit_price.as_deref(),
+                line.discount_kind.as_deref(),
+                line.discount_value.as_deref(),
+                |unit_price| line_gross_cents(line_unit.as_ref(), quantity_milli, unit_price),
+            )?;
+            let subtotal_cents = price.subtotal_cents;
+            // Regla interina (plan-06 §2.3): la línea queda entregada.
             connection
                 .execute(
                     "UPDATE invoiceLines SET quantityMilli = ?1, subtotalCents = ?2,
-                        costAtSaleCents = ?3, updatedAt = ?4 WHERE id = ?5",
+                        costAtSaleCents = ?3, updatedAt = ?4, unitPriceCents = ?6,
+                        grossCents = ?7, discountKind = ?8, discountValue = ?9,
+                        discountCents = ?10, deliveredMilli = ?1,
+                        listPriceCents = COALESCE(listPriceCents, ?11)
+                     WHERE id = ?5",
                     params![
                         quantity_milli,
                         subtotal_cents,
                         current_cost_cents,
                         timestamp,
                         row.id,
+                        price.unit_price_cents,
+                        price.gross_cents,
+                        price.discount_kind,
+                        price.discount_value,
+                        price.discount_cents,
+                        row.unit_price_cents,
                     ],
                 )
                 .map_err(|error| map_db_error(error, op, &[]))?;
@@ -2892,14 +2974,18 @@ fn update_priced_outgoing_invoice_inner(
                 &format!("out of stock product added to {op}"),
             ));
         }
-        let unit_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
-        let subtotal_cents = match &line_unit {
-            Some(unit) => entered_subtotal_cents(unit, unit.per_entered_unit(unit_price_cents)),
-            None => crate::inventory::round_half_up(
-                i128::from(quantity_milli) * i128::from(unit_price_cents),
-                1_000,
-            ) as i64,
-        };
+        let list_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
+        let price = crate::pricing::price_line(
+            &product_name,
+            list_price_cents,
+            list_price_cents,
+            line.unit_price.as_deref(),
+            line.discount_kind.as_deref(),
+            line.discount_value.as_deref(),
+            |unit_price| line_gross_cents(line_unit.as_ref(), quantity_milli, unit_price),
+        )?;
+        let unit_price_cents = price.unit_price_cents;
+        let subtotal_cents = price.subtotal_cents;
         invoice_total_cents = invoice_total_cents
             .checked_add(subtotal_cents)
             .ok_or_else(|| {
@@ -2931,8 +3017,10 @@ fn update_priced_outgoing_invoice_inner(
             .execute(
                 "INSERT INTO invoiceLines (invoiceId, position, productId, productIdOriginal, productName,
                     productNameNormalized, unitId, unitName, unitAbbreviation, quantityMilli, unitPriceCents,
-                    subtotalCents, categoryId, categoryName, costAtSaleCents, createdAt, updatedAt)
-                 VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+                    subtotalCents, categoryId, categoryName, costAtSaleCents, createdAt, updatedAt,
+                    listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli)
+                 VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15,
+                    ?16, ?17, ?18, ?19, ?20, ?9)",
                 params![
                     invoice_id,
                     position,
@@ -2949,6 +3037,11 @@ fn update_priced_outgoing_invoice_inner(
                     category_name,
                     cost_cents,
                     timestamp,
+                    list_price_cents,
+                    price.gross_cents,
+                    price.discount_kind,
+                    price.discount_value,
+                    price.discount_cents,
                 ],
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
@@ -2976,7 +3069,7 @@ fn update_priced_outgoing_invoice_inner(
         occupied_positions.insert(position);
     }
 
-    let full_name = format!("{client_first_name} {client_last_name}");
+    let full_name = crate::text::full_name(&client_first_name, client_last_name.as_deref());
     connection
         .execute(
             "UPDATE invoices SET clientId = ?1, invoiceDate = ?2, notes = ?3,
@@ -2989,7 +3082,10 @@ fn update_priced_outgoing_invoice_inner(
                 invoice_date,
                 notes,
                 full_name,
-                normalize_text(&format!("{client_first_name} {client_last_name}")),
+                normalize_text(&crate::text::full_name(
+                    &client_first_name,
+                    client_last_name.as_deref()
+                )),
                 client_national_id,
                 client_phone,
                 timestamp,
@@ -3081,7 +3177,7 @@ fn update_costed_outgoing_invoice_inner(
             &format!("{op} date is in the future"),
         ));
     }
-    let client: Option<(String, String, String, String)> = connection
+    let client: Option<ContactSnapshot> = connection
         .query_row(
             "SELECT firstName, lastName, nationalId, phone FROM clients WHERE id = ?1",
             [client_id],
@@ -3129,7 +3225,7 @@ fn update_costed_outgoing_invoice_inner(
         let mut statement = connection
             .prepare(
                 "SELECT id, position, productId, productIdOriginal, productName,
-                    quantityMilli, unitPriceCents
+                    quantityMilli, unitPriceCents, listPriceCents, subtotalCents
                  FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
@@ -3143,6 +3239,8 @@ fn update_costed_outgoing_invoice_inner(
                     product_name: row.get(4)?,
                     quantity_milli: row.get(5)?,
                     unit_price_cents: row.get(6)?,
+                    list_price_cents: row.get(7)?,
+                    subtotal_cents: row.get(8)?,
                 })
             })
             .map_err(|error| map_db_error(error, op, &[]))?
@@ -3315,10 +3413,7 @@ fn update_costed_outgoing_invoice_inner(
                     ));
                 }
                 invoice_total_cents = invoice_total_cents
-                    .checked_add(crate::inventory::round_half_up(
-                        i128::from(row.quantity_milli) * i128::from(row.unit_price_cents),
-                        1_000,
-                    ) as i64)
+                    .checked_add(row.subtotal_cents)
                     .ok_or_else(|| {
                         validation_failed(
                             "El total de la factura supera el rango permitido",
@@ -3556,7 +3651,7 @@ fn update_costed_outgoing_invoice_inner(
         occupied_positions.insert(position);
     }
 
-    let full_name = format!("{client_first_name} {client_last_name}");
+    let full_name = crate::text::full_name(&client_first_name, client_last_name.as_deref());
     connection
         .execute(
             "UPDATE invoices SET clientId = ?1, invoiceDate = ?2, notes = ?3,
@@ -3568,7 +3663,7 @@ fn update_costed_outgoing_invoice_inner(
                 invoice_date,
                 notes,
                 full_name,
-                normalize_text(&format!("{client_first_name} {client_last_name}")),
+                normalize_text(&crate::text::full_name(&client_first_name, client_last_name.as_deref())),
                 client_national_id,
                 client_phone,
                 associated_invoice_id,
@@ -3627,6 +3722,9 @@ pub fn update_sale_invoice_inner(
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
                 unit_id: line.unit_id,
+                unit_price: line.unit_price.clone(),
+                discount_kind: line.discount_kind.clone(),
+                discount_value: line.discount_value.clone(),
             })
             .collect::<Vec<_>>(),
         input.reserved_until.as_deref(),
@@ -3657,6 +3755,9 @@ pub fn update_service_invoice_inner(
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
                 unit_id: line.unit_id,
+                unit_price: line.unit_price.clone(),
+                discount_kind: line.discount_kind.clone(),
+                discount_value: line.discount_value.clone(),
             })
             .collect::<Vec<_>>(),
         input.reserved_until.as_deref(),
@@ -3690,6 +3791,9 @@ pub fn update_guarantee_invoice_inner(
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
                 unit_id: line.unit_id,
+                unit_price: line.unit_price.clone(),
+                discount_kind: line.discount_kind.clone(),
+                discount_value: line.discount_value.clone(),
             })
             .collect::<Vec<_>>(),
     );
@@ -3722,6 +3826,9 @@ pub fn update_installation_invoice_inner(
                 product_id: line.product_id,
                 quantity: line.quantity.clone(),
                 unit_id: line.unit_id,
+                unit_price: line.unit_price.clone(),
+                discount_kind: line.discount_kind.clone(),
+                discount_value: line.discount_value.clone(),
             })
             .collect::<Vec<_>>(),
     );
@@ -3964,7 +4071,7 @@ pub fn update_entry_invoice_inner(
             "updated entry invoice date is in the future",
         ));
     }
-    let supplier: Option<(String, String, String, String)> = connection
+    let supplier: Option<ContactSnapshot> = connection
         .query_row(
             "SELECT firstName, lastName, nationalId, phone FROM suppliers WHERE id = ?1",
             [input.supplier_id],
@@ -4495,7 +4602,7 @@ pub fn update_entry_invoice_inner(
     }
 
     let timestamp = format_utc_timestamp(now);
-    let full_name = format!("{supplier_first_name} {supplier_last_name}");
+    let full_name = crate::text::full_name(&supplier_first_name, supplier_last_name.as_deref());
     connection
         .execute(
             "UPDATE invoices SET supplierId = ?1, invoiceDate = ?2, notes = ?3,
@@ -4506,7 +4613,10 @@ pub fn update_entry_invoice_inner(
                 input.invoice_date,
                 notes,
                 full_name,
-                normalize_text(&format!("{supplier_first_name} {supplier_last_name}")),
+                normalize_text(&crate::text::full_name(
+                    &supplier_first_name,
+                    supplier_last_name.as_deref()
+                )),
                 supplier_national_id,
                 supplier_phone,
                 timestamp,
@@ -6962,6 +7072,9 @@ mod tests {
 
     fn sale_line(product_id: i64, quantity: &str) -> crate::models::invoice::SaleInvoiceLineInput {
         crate::models::invoice::SaleInvoiceLineInput {
+            unit_price: None,
+            discount_kind: None,
+            discount_value: None,
             unit_id: None,
             product_id,
             quantity: quantity.to_owned(),
@@ -7918,6 +8031,9 @@ mod tests {
         quantity: &str,
     ) -> crate::models::invoice::ServiceInvoiceLineInput {
         crate::models::invoice::ServiceInvoiceLineInput {
+            unit_price: None,
+            discount_kind: None,
+            discount_value: None,
             unit_id: None,
             product_id,
             quantity: quantity.to_owned(),
@@ -8997,11 +9113,190 @@ mod tests {
         quantity: &str,
     ) -> crate::models::invoice::UpdateOutgoingInvoiceLineInput {
         crate::models::invoice::UpdateOutgoingInvoiceLineInput {
+            unit_price: None,
+            discount_kind: None,
+            discount_value: None,
             unit_id: None,
             product_id_original: original,
             product_id: product,
             quantity: quantity.to_owned(),
         }
+    }
+
+    type PricedLine = (i64, Option<i64>, Option<i64>, i64, i64, i64, i64);
+
+    fn priced_line(connection: &rusqlite::Connection, invoice_id: i64) -> PricedLine {
+        connection
+            .query_row(
+                "SELECT unitPriceCents, listPriceCents, grossCents, discountCents, subtotalCents,
+                    deliveredMilli, quantityMilli
+                 FROM invoiceLines WHERE invoiceId = ?1",
+                [invoice_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn sale_lines_take_a_higher_price_and_a_discount_but_never_a_lower_price() {
+        // spec-06 PF-01, PF-02 y la regla interina de entregas (plan-06 §2.3).
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            "salepricing",
+            "12345678962",
+            "+5355559162",
+            "12345678963",
+            "+5355559163",
+            now,
+        );
+        // Costo 10,00 y 20 % → precio de lista 12,00.
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Panel",
+            1_000,
+            2_000,
+            "10",
+            "10,00",
+        );
+
+        let mut below = sale_line(product_id, "2");
+        below.unit_price = Some("11,99".to_owned());
+        let error = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![below], None),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "priceBelowList");
+        assert_eq!(
+            error.message,
+            "El precio de «Panel» no puede ser menor que 12,00 USD"
+        );
+
+        let mut line = sale_line(product_id, "2");
+        line.unit_price = Some("15,00".to_owned());
+        line.discount_kind = Some("percent".to_owned());
+        line.discount_value = Some("10".to_owned());
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client_id, vec![line], None),
+        )
+        .unwrap();
+        // 2 × 15,00 = 30,00; −10 % = 27,00. Entregada mientras descuente al guardar.
+        assert_eq!(
+            priced_line(&connection, sale.invoice_id),
+            (1_500, Some(1_200), Some(3_000), 300, 2_700, 2_000, 2_000)
+        );
+        let detail = super::get_invoice_inner(&mut connection, now, sale.invoice_id).unwrap();
+        assert_eq!(detail.total_cents, 2_700);
+        assert_eq!(detail.lines[0].discount_cents, Some(300));
+        assert_eq!(detail.lines[0].list_price_cents, Some(1_200));
+
+        // Al editar: sin precio se conserva el guardado; el mínimo es la lista guardada.
+        let mut kept = update_outgoing_line(Some(product_id), Some(product_id), "3");
+        kept.discount_kind = Some("amount".to_owned());
+        kept.discount_value = Some("5".to_owned());
+        super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(sale.invoice_id, client_id, vec![kept]),
+        )
+        .unwrap();
+        assert_eq!(
+            priced_line(&connection, sale.invoice_id),
+            (1_500, Some(1_200), Some(4_500), 500, 4_000, 3_000, 3_000)
+        );
+        let mut lower = update_outgoing_line(Some(product_id), Some(product_id), "3");
+        lower.unit_price = Some("11".to_owned());
+        let error = super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(sale.invoice_id, client_id, vec![lower]),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "priceBelowList");
+
+        // Un descuento mayor que el bruto no se guarda.
+        let mut too_much = update_outgoing_line(Some(product_id), Some(product_id), "1");
+        too_much.discount_kind = Some("amount".to_owned());
+        too_much.discount_value = Some("15,01".to_owned());
+        let error = super::update_sale_invoice_inner(
+            &mut connection,
+            now,
+            update_sale_input(sale.invoice_id, client_id, vec![too_much]),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "discountTooLarge");
+    }
+
+    #[test]
+    fn an_invoice_accepts_a_client_with_only_a_name() {
+        // spec-06 CT-01: sin apellidos, carné ni teléfono.
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, _, supplier_id) = setup_sale_fixture(
+            "onlyname",
+            "12345678964",
+            "+5355559164",
+            "12345678965",
+            "+5355559165",
+            now,
+        );
+        let client = crate::commands::clients::create_client_inner(
+            &mut connection,
+            now,
+            crate::models::client::ContactInput {
+                first_name: "Taller".to_owned(),
+                last_name: String::new(),
+                national_id: String::new(),
+                phone: String::new(),
+                company: None,
+                position: None,
+                email: None,
+                address: None,
+                invoice_info: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (client.full_name.as_str(), client.phone.as_str()),
+            ("Taller", "")
+        );
+        let product_id = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Cable",
+            100,
+            0,
+            "5",
+            "1,00",
+        );
+        let sale = super::create_sale_invoice_inner(
+            &mut connection,
+            now,
+            sale_input(client.id, vec![sale_line(product_id, "1")], None),
+        )
+        .unwrap();
+        let detail = super::get_invoice_inner(&mut connection, now, sale.invoice_id).unwrap();
+        assert_eq!(detail.contact_full_name.as_deref(), Some("Taller"));
+        assert_eq!(detail.contact_national_id, None);
+        assert_eq!(detail.contact_phone, None);
+        let found =
+            crate::commands::clients::search_clients_inner(&mut connection, now, "taller").unwrap();
+        assert_eq!(found[0].full_name, "Taller");
     }
 
     fn update_sale_input(

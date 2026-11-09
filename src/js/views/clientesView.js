@@ -269,15 +269,8 @@ async function handleClientSubmit() {
   };
 
   clearFieldErrors(form);
-  if (
-    !requireFields([
-      "cliente-nombres",
-      "cliente-apellidos",
-      "cliente-ci",
-      "cliente-telefono",
-    ])
-  ) {
-    notifyError(null, "Completa los campos obligatorios del cliente.");
+  if (!requireFields(["cliente-nombres"])) {
+    notifyError(null, "Escribe el nombre del cliente.");
     return;
   }
 

@@ -577,6 +577,10 @@ function createInvoiceSubmodule(cfg) {
       priceCents: Number.isSafeInteger(item?.sellingPriceCents)
         ? item.sellingPriceCents
         : null,
+      calculatedPriceCents: item?.calculatedPriceCents ?? null,
+      salePrice: "",
+      discountKind: "",
+      discountValue: "",
       productStatus: item?.isDiscontinued ? "discontinued" : "active",
       unitId: null,
       factor: 1,
@@ -640,10 +644,27 @@ function createInvoiceSubmodule(cfg) {
   const isDiscontinuedLine = (line) =>
     line.productIdOriginal != null && line.productStatus === "discontinued";
 
-  // CV-01: precio vigente × factor de la unidad elegida (total preliminar).
+  // spec-06 PF-01: el precio escrito; vacío, el de lista.
+  function salePriceCents(line) {
+    const typed = String(line.salePrice ?? "").trim();
+    if (!typed) return line.priceCents ?? null;
+    return parseDecimal(typed, 2);
+  }
+
+  // CV-01: precio × factor de la unidad elegida (total preliminar).
   function linePriceCents(line) {
-    if (line.priceCents == null) return null;
-    return Math.round(line.priceCents * (line.factor ?? 1));
+    const price = showsSalePrice ? salePriceCents(line) : line.priceCents;
+    if (price == null) return null;
+    return Math.round(price * (line.factor ?? 1));
+  }
+
+  // spec-06 PF-02: descuento en % (centésimas) o en importe.
+  function lineDiscountCents(line, grossCents) {
+    const value = parseDecimal(line.discountValue, 2);
+    if (!showsSalePrice || value == null || !line.discountKind) return 0;
+    return line.discountKind === "percent"
+      ? Math.round((grossCents * value) / 10000)
+      : value;
   }
 
   function lineSubtotalCents(line) {
@@ -654,7 +675,85 @@ function createInvoiceSubmodule(cfg) {
         ? linePriceCents(line)
         : null;
     if (quantityMilli == null || unitCents == null) return null;
-    return Math.round((quantityMilli * unitCents) / 1000);
+    const gross = Math.round((quantityMilli * unitCents) / 1000);
+    return Math.max(gross - lineDiscountCents(line, gross), 0);
+  }
+
+  function priceBelowList(line) {
+    const price = salePriceCents(line);
+    return (
+      showsSalePrice &&
+      price != null &&
+      line.priceCents != null &&
+      price < line.priceCents
+    );
+  }
+
+  /** Precio editable y descuento de una línea de Venta o Servicio. */
+  function salePriceControls(line, index, disabled) {
+    const wrap = document.createElement("div");
+    wrap.className = "li-price";
+    // Con otra unidad, el precio es el de esa unidad: solo se muestra.
+    if (line.unitId != null) {
+      const fixed = document.createElement("span");
+      fixed.className = "li-costo";
+      fixed.textContent = formatMoney(linePriceCents(line));
+      wrap.append(fixed);
+    } else {
+      const price = lineInput(line, index, "salePrice", "Precio", disabled);
+      price.placeholder = centsToText(line.priceCents);
+      price.addEventListener("blur", () => {
+        if (priceBelowList(lines[index])) {
+          setFieldError(
+            price,
+            `El precio no puede ser menor que ${formatMoney(line.priceCents)}`,
+          );
+        }
+      });
+      wrap.append(price);
+      const calculated = line.calculatedPriceCents;
+      if (calculated != null && calculated !== line.priceCents) {
+        const hint = document.createElement("small");
+        hint.className = "price-calculated";
+        hint.title = "Precio calculado, antes de redondear";
+        hint.textContent = formatMoney(calculated);
+        wrap.append(hint);
+      }
+    }
+    const discount = document.createElement("div");
+    discount.className = "li-discount";
+    const kind = document.createElement("select");
+    kind.dataset.lineField = "discountKind";
+    kind.disabled = disabled;
+    kind.setAttribute("aria-label", `Tipo de descuento de ${line.productName}`);
+    for (const [value, label] of [
+      ["", "Sin desc."],
+      ["percent", "% desc."],
+      ["amount", "USD desc."],
+    ]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      kind.append(option);
+    }
+    kind.value = line.discountKind ?? "";
+    const value = lineInput(
+      line,
+      index,
+      "discountValue",
+      "Descuento",
+      disabled || !kind.value,
+    );
+    value.placeholder = "0";
+    kind.addEventListener("change", () => {
+      lines[index].discountKind = kind.value;
+      if (!kind.value) lines[index].discountValue = "";
+      renderLines();
+      draft?.schedule();
+    });
+    discount.append(kind, value);
+    wrap.append(discount);
+    return wrap;
   }
 
   function lineInput(line, index, key, label, disabled) {
@@ -726,11 +825,11 @@ function createInvoiceSubmodule(cfg) {
             deleted || discontinued,
           ),
         );
+      } else if (showsSalePrice) {
+        price.append(salePriceControls(line, index, deleted));
       } else {
         price.className = "li-costo";
-        price.textContent = showsSalePrice
-          ? formatMoney(linePriceCents(line))
-          : "Al guardar";
+        price.textContent = "Al guardar";
       }
       const subtotal = document.createElement("div");
       subtotal.className = "li-subtotal";
@@ -1086,8 +1185,16 @@ function createInvoiceSubmodule(cfg) {
         quantity,
         originalQuantity: quantity,
         unitPrice: centsToText(entered?.unitPriceCents ?? line.unitPriceCents),
-        // Las líneas existentes conservan su precio emitido (FS-01).
-        priceCents: line.unitPriceCents ?? null,
+        // spec-06 PF-01 / S-03: el mínimo es el precio de lista guardado; el
+        // precio emitido se conserva (FS-01) y se puede subir.
+        priceCents: line.listPriceCents ?? line.unitPriceCents ?? null,
+        salePrice: showsSalePrice ? centsToText(line.unitPriceCents) : "",
+        originalSalePrice: showsSalePrice
+          ? centsToText(line.unitPriceCents)
+          : "",
+        discountKind: line.discountKind ?? "",
+        discountValue:
+          line.discountValue == null ? "" : centsToText(line.discountValue),
         productStatus: line.productStatus ?? null,
         unitId: entered?.unitId ?? null,
         factor: enteredMilli ? baseMilli / enteredMilli : 1,
@@ -1116,6 +1223,10 @@ function createInvoiceSubmodule(cfg) {
       return isEntry
         ? `Escribe la cantidad y el costo unitario de «${missing.productName}».`
         : `Escribe la cantidad de «${missing.productName}».`;
+    }
+    const cheaper = lines.find(priceBelowList);
+    if (cheaper) {
+      return `El precio de «${cheaper.productName}» no puede ser menor que ${formatMoney(cheaper.priceCents)}.`;
     }
     const raised = lines.find((line) => {
       if (!isDiscontinuedLine(line)) return false;
@@ -1173,6 +1284,17 @@ function createInvoiceSubmodule(cfg) {
       }
       item.quantity = String(line.quantity).trim();
       if (isEntry) item.unitPrice = String(line.unitPrice).trim();
+      if (showsSalePrice) {
+        // Solo si cambió: sin precio, el backend conserva el emitido.
+        const salePrice = String(line.salePrice ?? "").trim();
+        if (salePrice && salePrice !== line.originalSalePrice)
+          item.unitPrice = salePrice;
+        const discountValue = String(line.discountValue ?? "").trim();
+        if (line.discountKind && discountValue) {
+          item.discountKind = line.discountKind;
+          item.discountValue = discountValue;
+        }
+      }
       return item;
     });
     return input;

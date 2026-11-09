@@ -63,6 +63,24 @@ fn vacuum_into(connection: &Connection, destination: &Path) -> rusqlite::Result<
     Ok(())
 }
 
+/// Copia de la base antes de una migración que reconstruye tablas (`plan-06`
+/// §2.1, D-04). Su prefijo no se confunde con las automáticas ni con la previa
+/// a restaurar.
+pub fn copy_before_migration(
+    connection: &Connection,
+    app_data_dir: &Path,
+    version: i64,
+) -> std::io::Result<PathBuf> {
+    let directory = app_data_dir.join(BACKUP_DIR);
+    fs::create_dir_all(&directory)?;
+    let destination = directory.join(format!("goyma-antes-de-migrar-{version}.{EXTENSION}"));
+    // VACUUM INTO no sobrescribe: una copia anterior de la misma versión se
+    // reemplaza (la migración volvió a intentarse).
+    let _ = fs::remove_file(&destination);
+    vacuum_into(connection, &destination).map_err(std::io::Error::other)?;
+    Ok(destination)
+}
+
 /// Anota la copia en la misma transacción que su entrada del registro.
 fn note_backup(
     connection: &mut Connection,
@@ -698,21 +716,25 @@ mod tests {
     #[test]
     fn a_copy_of_an_older_version_is_migrated() {
         let (mut connection, dir, now) = signed_in();
-        let copy = make_copy(&mut connection, now);
+        let current = make_copy(&mut connection, now);
+        // Una copia real de la versión 5, con los usuarios de la base actual.
+        let copy = temp_dir().join("copia-v5.sqlite3");
+        let _ = fs::remove_file(&copy);
         {
-            let old = Connection::open(&copy).unwrap();
-            old.execute_batch("DROP TABLE drafts;").unwrap();
-            old.execute_batch("DROP TRIGGER activityLogNoDelete; DROP TRIGGER activityLogImmutable; DROP TABLE activityLog;")
+            let mut old = Connection::open(&copy).unwrap();
+            crate::db::schema::create_schema(&old).unwrap();
+            crate::db::migrations::migrate_up_to(&mut old, 5).unwrap();
+            old.pragma_update(None, "application_id", APPLICATION_ID)
                 .unwrap();
-            // Lo que añade la migración 9 tampoco existía en la versión 5.
-            old.execute_batch(
-                "ALTER TABLE products DROP COLUMN costBaseCents;
-                 ALTER TABLE products DROP COLUMN costBaseArrivalOrder;
-                 ALTER TABLE products DROP COLUMN lowStockThresholdMilli;
-                 ALTER TABLE lots DROP COLUMN stockBeforeMilli;",
+            old.execute(
+                "ATTACH DATABASE ?1 AS actual",
+                [current.to_string_lossy().into_owned()],
             )
             .unwrap();
-            old.pragma_update(None, "user_version", 5).unwrap();
+            old.execute_batch(
+                "INSERT INTO users SELECT * FROM actual.users; DETACH DATABASE actual;",
+            )
+            .unwrap();
         }
 
         restore(&mut connection, &dir, now, &copy, PASSWORD).unwrap();

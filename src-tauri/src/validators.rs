@@ -208,10 +208,10 @@ pub struct ContactInput<'a> {
 pub struct ValidatedContactInput {
     pub first_name: String,
     pub first_name_normalized: String,
-    pub last_name: String,
-    pub last_name_normalized: String,
-    pub national_id: String,
-    pub phone: String,
+    pub last_name: Option<String>,
+    pub last_name_normalized: Option<String>,
+    pub national_id: Option<String>,
+    pub phone: Option<String>,
     pub company: Option<String>,
     pub company_normalized: Option<String>,
     pub position: Option<String>,
@@ -240,16 +240,29 @@ fn validate_contact_input(
         "El nombre no puede tener más de 50 caracteres",
         "El nombre contiene caracteres no permitidos",
     )?;
-    let (last_name, last_name_normalized) = validate_name_with_messages(
-        input.last_name,
-        2,
-        50,
-        "Los apellidos deben tener al menos 2 caracteres",
-        "Los apellidos no pueden tener más de 50 caracteres",
-        "Los apellidos contienen caracteres no permitidos",
-    )?;
-    validate_national_id(input.national_id)?;
-    validate_phone(input.phone)?;
+    // spec-06 CT-01: solo el nombre es obligatorio; lo demás, si se escribe,
+    // conserva su formato.
+    let (last_name, last_name_normalized) = if input.last_name.trim().is_empty() {
+        (None, None)
+    } else {
+        let (last_name, normalized) = validate_name_with_messages(
+            input.last_name,
+            2,
+            50,
+            "Los apellidos deben tener al menos 2 caracteres",
+            "Los apellidos no pueden tener más de 50 caracteres",
+            "Los apellidos contienen caracteres no permitidos",
+        )?;
+        (Some(last_name), Some(normalized))
+    };
+    let national_id = Some(input.national_id.trim()).filter(|value| !value.is_empty());
+    if let Some(national_id) = national_id {
+        validate_national_id(national_id)?;
+    }
+    let phone = Some(input.phone.trim()).filter(|value| !value.is_empty());
+    if let Some(phone) = phone {
+        validate_phone(phone)?;
+    }
 
     let (company, company_normalized) =
         validate_optional_contact_text(input.company, 100, "La empresa")?;
@@ -267,8 +280,8 @@ fn validate_contact_input(
         first_name_normalized,
         last_name,
         last_name_normalized,
-        national_id: input.national_id.to_owned(),
-        phone: input.phone.to_owned(),
+        national_id: national_id.map(str::to_owned),
+        phone: phone.map(str::to_owned),
         company,
         company_normalized,
         position,
@@ -690,10 +703,40 @@ mod tests {
         let validated = validate_client_input(valid_input).unwrap();
         assert_eq!(validated.first_name, "Ana María");
         assert_eq!(validated.first_name_normalized, "ana maria");
-        assert_eq!(validated.last_name, "Pérez");
-        assert_eq!(validated.last_name_normalized, "perez");
-        assert_eq!(validated.national_id, "12345678901");
-        assert_eq!(validated.phone, "+5355551234");
+        assert_eq!(validated.last_name.as_deref(), Some("Pérez"));
+        assert_eq!(validated.last_name_normalized.as_deref(), Some("perez"));
+        assert_eq!(validated.national_id.as_deref(), Some("12345678901"));
+        assert_eq!(validated.phone.as_deref(), Some("+5355551234"));
+
+        // spec-06 CT-01: solo el nombre es obligatorio.
+        let only_name = validate_client_input(ContactInput {
+            first_name: "Taller",
+            last_name: " ",
+            national_id: "",
+            phone: "",
+            company: None,
+            position: None,
+            email: None,
+            address: None,
+            invoice_info: None,
+        })
+        .unwrap();
+        assert_eq!(
+            (only_name.last_name, only_name.national_id, only_name.phone),
+            (None, None, None)
+        );
+        assert!(validate_client_input(ContactInput {
+            first_name: "",
+            last_name: "",
+            national_id: "",
+            phone: "",
+            company: None,
+            position: None,
+            email: None,
+            address: None,
+            invoice_info: None,
+        })
+        .is_err());
         assert_eq!(validated.company.as_deref(), Some("Servicios Norte"));
         assert_eq!(
             validated.company_normalized.as_deref(),

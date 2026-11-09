@@ -413,7 +413,7 @@ describe("clientesView", () => {
 
     submit();
     expect(toastsOfType("error").at(-1).textContent).toContain(
-      "Completa los campos obligatorios del cliente.",
+      "Escribe el nombre del cliente.",
     );
     expect(document.getElementById("cliente-nombres-error").textContent).toBe(
       "Completa este campo",
@@ -448,5 +448,25 @@ describe("clientesView", () => {
       expect(toastsOfType("success").at(-1)?.textContent).toContain("creado."),
     );
     expect(document.querySelector("#cliente-form .form-feedback")).toBeNull();
+  });
+
+  it("spec-06 CT-01: un cliente con solo el nombre se guarda", async () => {
+    listClients.mockResolvedValue([]);
+    await initClientesView();
+    for (const id of ["cliente-apellidos", "cliente-ci", "cliente-telefono"]) {
+      expect(document.getElementById(id).required, id).toBe(false);
+    }
+    document.getElementById("cliente-nombres").value = "Taller";
+    createClient.mockResolvedValueOnce({ id: 13 });
+    document
+      .getElementById("cliente-form")
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(createClient).toHaveBeenCalled());
+    expect(createClient.mock.calls.at(-1)[0]).toMatchObject({
+      firstName: "Taller",
+      lastName: "",
+      nationalId: "",
+      phone: "",
+    });
   });
 });

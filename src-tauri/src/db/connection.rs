@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 use tauri::{Manager, State};
 
-use super::migrations::run_migrations;
+use super::migrations::{pending_rebuild, run_migrations};
 use super::schema::{clear_non_persistent_sessions, init_schema, purge_error_logs};
 use crate::attachments::sweep_orphans;
 use crate::errors::append_error_log;
@@ -38,6 +38,15 @@ pub fn initialize_database(app_data_dir: &Path, now: DateTime<Utc>) -> Result<Co
         append_error_log(app_data_dir, &error.to_string());
         "No se pudo abrir la base de datos".to_owned()
     })?;
+
+    // plan-06 §2.1: antes de reconstruir tablas, una copia de lo que había. Sin
+    // copia no se migra.
+    if let Ok(Some(version)) = pending_rebuild(&conn) {
+        crate::backup::copy_before_migration(&conn, app_data_dir, version).map_err(|error| {
+            append_error_log(app_data_dir, &format!("copy before migration: {error}"));
+            "No se pudo actualizar la base de datos. La aplicación no puede continuar".to_owned()
+        })?;
+    }
 
     // MG-01: la base llega a la última versión antes de usarse. Si no puede,
     // la aplicación no arranca a medias.
@@ -181,6 +190,29 @@ mod tests {
         let log = fs::read_to_string(app_data_dir.join("errors.log")).unwrap();
         assert!(log.contains("attachment sweep listing failed"));
         drop(connection);
+        fs::remove_dir_all(app_data_dir).unwrap();
+    }
+
+    #[test]
+    fn a_database_is_copied_before_a_migration_that_rebuilds_tables() {
+        let app_data_dir = unique_path();
+        {
+            let mut old = open_database(&app_data_dir).unwrap();
+            crate::db::schema::create_schema(&old).unwrap();
+            crate::db::migrations::migrate_up_to(&mut old, 9).unwrap();
+        }
+
+        let migrated = initialize_database(&app_data_dir, Utc::now()).unwrap();
+
+        assert!(crate::db::migrations::schema_version(&migrated).unwrap() >= 10);
+        let copy = Connection::open(
+            app_data_dir
+                .join("backups")
+                .join("goyma-antes-de-migrar-10.sqlite3"),
+        )
+        .unwrap();
+        assert_eq!(crate::db::migrations::schema_version(&copy).unwrap(), 9);
+        drop((migrated, copy));
         fs::remove_dir_all(app_data_dir).unwrap();
     }
 

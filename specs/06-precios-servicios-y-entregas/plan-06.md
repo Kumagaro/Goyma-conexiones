@@ -49,9 +49,9 @@ SQLite no puede quitar un `UNIQUE` ni un `CHECK` con `ALTER TABLE`: hay que crea
 - `invoiceLines`:
   - se quita `UNIQUE (invoiceId, productIdOriginal)`;
   - `listPriceCents INTEGER` (precio de lista, PF-01; `NULL` en Entrada, Pérdida, Garantía e Insumos);
-  - `grossCents INTEGER NOT NULL` (bruto = cantidad × precio, redondeado en Rust como hoy el subtotal);
+  - `grossCents INTEGER` (bruto = cantidad × precio): **vacío cuando no hay descuento**, así las demás salidas (entradas, pérdidas, garantías, insumos) no cambian sus `INSERT` (implementación, 2026-11-09);
   - `discountKind TEXT CHECK (discountKind IN ('percent','amount'))`, `discountValue INTEGER` (centésimas de % o céntimos), `discountCents INTEGER NOT NULL DEFAULT 0 CHECK (discountCents BETWEEN 0 AND grossCents)`;
-  - **`subtotalCents` pasa a ser el neto:** `CHECK (subtotalCents = grossCents - discountCents)`. Así los 13 archivos que lo leen (dashboard, clientes, proveedores, categorías, productos, búsqueda, CSV, inventario, impresión) cuentan ya el importe con descuento sin cambiar sus consultas; solo la impresión y el formulario muestran además bruto y descuento;
+  - **`subtotalCents` pasa a ser el neto:** `CHECK` de `discountCents`: sin bruto, descuento 0; con bruto, `discountCents BETWEEN 0 AND grossCents AND subtotalCents = grossCents - discountCents`. Así los 13 archivos que lo leen (dashboard, clientes, proveedores, categorías, productos, búsqueda, CSV, inventario, impresión) cuentan ya el importe con descuento sin cambiar sus consultas; solo la impresión y el formulario muestran además bruto y descuento;
   - `serviceLineId INTEGER REFERENCES invoiceServiceLines(id) ON DELETE CASCADE` (fase 4; se crea ya para reconstruir una sola vez);
   - `deliveredMilli INTEGER NOT NULL DEFAULT 0 CHECK (deliveredMilli BETWEEN 0 AND quantityMilli)` (fase 3, mismo motivo).
 - `services`, `serviceProducts` (§2.5) e `invoiceServiceLines` se crean **en esta migración**, vacías, porque `invoiceLines` referencia a `invoiceServiceLines` y esta a `services`.
@@ -105,7 +105,7 @@ para cada lote con origin = 'entry' y arrivalOrder > costBaseArrivalOrder, en or
 - Venta y Servicio: cada línea de producto recibe `unitPriceCents`, `discountKind` y `discountValue`. El backend fija `listPriceCents` (precio de venta actual al crear; el guardado al editar) y rechaza `unitPriceCents < listPriceCents` con `priceBelowList`.
 - `discountCents`: `percent` → bruto × valor / 10 000 (mitad hacia arriba); `amount` → valor. Mayor que el bruto → `discountTooLarge`. `subtotalCents` = bruto − descuento.
 - Total de la factura = Σ `subtotalCents` de todas sus líneas (sueltas y de servicios) + Σ `totalCents` de sus servicios. Las consultas que hoy suman `subtotalCents` por factura deben sumar también `invoiceServiceLines.totalCents` (dashboard, clientes, cuentas por cobrar, CSV): se listan en la fase 4 con un test cada una.
-- Impresión y PDF (`invoice_print.rs`) añaden las columnas Bruto y Descuento cuando alguna línea tiene descuento.
+- Impresión y PDF (`invoice_print.rs`, `printPreview.js`): la línea muestra el bruto y, debajo, una fila «Descuento» en negativo; el total es el neto (implementación, 2026-11-09).
 - Los movimientos de salida (`productMovements`) guardan el precio neto por unidad y el importe proporcional a la cantidad entregada.
 
 ### 3.4 Apartado y entregas (EN, `inventory.rs` + `commands/invoices.rs`)

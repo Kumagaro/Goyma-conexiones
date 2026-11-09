@@ -60,34 +60,35 @@
 
 ### 2.1 Reconstrucción segura (`plan-06` §2.1)
 
-- [ ] Test: el ejecutor desactiva `foreign_keys` para las migraciones que reconstruyen, comprueba `foreign_key_check`, lo reactiva aunque falle y hace la copia previa.
-- [ ] Implementación en `db/migrations.rs`.
+- [x] Test: el ejecutor desactiva `foreign_keys` para las migraciones que reconstruyen, comprueba `foreign_key_check`, lo reactiva aunque falle y hace la copia previa.
+- [x] Implementación en `db/migrations.rs`.
 
 ### 2.2 Migración 10 (`plan-06` §2.3)
 
-- [ ] Test: la base 0.2.0 migra con los mismos recuentos y sumas por tabla, lotes y consumos intactos, `grossCents` = `subtotalCents`, `listPriceCents` y `deliveredMilli` rellenados, tablas de servicios vacías y `foreign_key_check` vacío.
-- [ ] Test: tras migrar, un producto puede aparecer dos veces en una factura.
-- [ ] Test: la copia `goyma-antes-de-migrar-10.db` existe y se abre.
-- [ ] Test: restaurar un respaldo 0.2.0 con datos lo migra sin perder nada (`stage_restore`).
-- [ ] Implementación.
+- [x] Test: la base 0.2.0 migra con los mismos recuentos y sumas por tabla, lotes y consumos intactos, `grossCents` vacío (= subtotal, ver `plan-06` §2.3), `listPriceCents` y `deliveredMilli` rellenados, tablas de servicios vacías y `foreign_key_check` vacío.
+- [x] Test: tras migrar, un producto puede aparecer dos veces en una factura.
+- [x] Test: la copia `goyma-antes-de-migrar-10.db` existe y se abre.
+- [x] Test: restaurar un respaldo 0.2.0 con datos lo migra sin perder nada (`stage_restore`).
+- [x] Implementación.
 
 ### 2.3 Contactos (CT-01)
 
-- [ ] Test: cliente y proveedor con solo el nombre; formato y unicidad cuando hay carné o teléfono; factura con contacto sin carné ni teléfono; impresión sin esos datos.
-- [ ] Implementación backend.
-- [ ] Interfaz: formularios y alta rápida sin `required` salvo el nombre.
+- [x] Test: cliente y proveedor con solo el nombre; formato y unicidad cuando hay carné o teléfono; factura con contacto sin carné ni teléfono; impresión sin esos datos.
+- [x] Implementación backend.
+- [x] Interfaz: formularios y alta rápida sin `required` salvo el nombre.
 
 ### 2.4 Precio editable y descuentos (PF-01, PF-02)
 
-- [ ] Test: precio menor que el de lista → `priceBelowList`; igual o mayor se guarda; al editar el mínimo es el de lista guardado.
-- [ ] Test: descuento en % y en importe; mayor que el bruto → `discountTooLarge`; `subtotalCents` = neto; totales de línea y factura.
-- [ ] Test: con un descuento, los ingresos del dashboard, las estadísticas de cliente y categoría y la exportación usan el neto.
-- [ ] Test: solo Venta y Servicio; Insumos, Garantía y Pérdida sin cambios.
-- [ ] Test (regla interina, `plan-06` §2.3): crear o editar Venta y Servicio en esta fase guarda `deliveredMilli = quantityMilli`, y el disponible no baja dos veces.
-- [ ] Implementación backend, impresión y PDF.
-- [ ] Interfaz: precio editable con aviso al salir del campo, selector de descuento, precio calculado en la línea.
+- [x] Test: precio menor que el de lista → `priceBelowList`; igual o mayor se guarda; al editar el mínimo es el de lista guardado.
+- [x] Test: descuento en % y en importe; mayor que el bruto → `discountTooLarge`; `subtotalCents` = neto; totales de línea y factura.
+- [x] Test: con un descuento, los ingresos del dashboard, las estadísticas de cliente y categoría y la exportación usan el neto.
+- [x] Test: solo Venta y Servicio; Insumos, Garantía y Pérdida sin cambios.
+- [x] Test (regla interina, `plan-06` §2.3): crear o editar Venta y Servicio en esta fase guarda `deliveredMilli = quantityMilli`, y el disponible no baja dos veces.
+- [x] Implementación backend, impresión y PDF.
+- [x] Interfaz: precio editable con aviso al salir del campo, selector de descuento, precio calculado en la línea.
 
 - [ ] Cierre de fase 2.
+  - 2026-11-09: `cargo test` 494/494 y `npm test` 426/426 en verde, clippy, fmt y prettier limpios. La impresión muestra el descuento en una fila bajo la línea. Con una unidad convertida (CV-01) el precio de la línea solo se muestra; el descuento sí se puede aplicar. Falta la verificación en la app real (`tauri:dev`) y el commit.
 
 ## 3. Fase 3 — Entregas
 

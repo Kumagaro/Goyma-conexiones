@@ -467,15 +467,8 @@ async function handleSupplierSubmit() {
   };
 
   clearFieldErrors(form);
-  if (
-    !requireFields([
-      "proveedor-nombres",
-      "proveedor-apellidos",
-      "proveedor-ci",
-      "proveedor-telefono",
-    ])
-  ) {
-    notifyError(null, "Completa los campos obligatorios del proveedor.");
+  if (!requireFields(["proveedor-nombres"])) {
+    notifyError(null, "Escribe el nombre del proveedor.");
     return;
   }
 

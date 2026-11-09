@@ -251,7 +251,8 @@ fn period_totals(
 fn read_income_lines(connection: &Connection) -> rusqlite::Result<Vec<IncomeLine>> {
     connection
         .prepare(
-            "SELECT i.id, i.type, i.paidAt, i.contactNationalId, i.contactFullName,
+            "SELECT i.id, i.type, i.paidAt,
+                    COALESCE(i.contactNationalId, 'nombre:' || i.contactFullNameNormalized), i.contactFullName,
                     il.productIdOriginal, il.productName, il.quantityMilli, il.subtotalCents,
                     COALESCE((SELECT SUM(c.quantityMilli * c.unitCostCents) FROM consumptions c
                               WHERE c.invoiceLineId = il.id), 0)

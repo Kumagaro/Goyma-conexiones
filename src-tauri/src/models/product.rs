@@ -38,6 +38,8 @@ pub struct ProductMatch {
     /// Precio de venta vigente: solo sirve para el total preliminar del
     /// formulario; el backend recalcula el precio al guardar.
     pub selling_price_cents: i64,
+    /// Precio sin redondear, más claro en la línea (`spec-06` PV-02).
+    pub calculated_price_cents: i64,
     pub is_out_of_stock: bool,
     pub is_discontinued: bool,
 }

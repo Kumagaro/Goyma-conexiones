@@ -28,6 +28,18 @@ pub struct InvoiceLineDetail {
     /// siguen en la unidad del producto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entered: Option<EnteredUnit>,
+    /// spec-06 PF-01: precio de lista (mínimo al editar) en Venta y Servicio.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_price_cents: Option<i64>,
+    /// spec-06 PF-02: bruto y descuento cuando la línea tiene descuento.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gross_cents: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount_value: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount_cents: Option<i64>,
 }
 
 /// Unidad y cantidad escritas en la línea, y el precio por esa unidad.

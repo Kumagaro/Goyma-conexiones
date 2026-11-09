@@ -34,7 +34,7 @@ pub fn list_clients_inner(
     require_session(connection, now)?;
 
     let mut statement = connection
-        .prepare("SELECT id, firstName, lastName, company, phone FROM clients ORDER BY id ASC")
+        .prepare("SELECT id, firstName, COALESCE(lastName, ''), company, COALESCE(phone, '') FROM clients ORDER BY id ASC")
         .map_err(|error| {
             AppError::new(
                 "internal",
@@ -76,7 +76,7 @@ pub fn list_clients_inner(
             id,
             ContactListItem {
                 id,
-                full_name: format!("{first_name} {last_name}"),
+                full_name: crate::text::full_name(&first_name, Some(&last_name)),
                 company,
                 phone,
             },
@@ -174,9 +174,9 @@ pub fn create_client_inner(
     let id = connection.last_insert_rowid();
     Ok(ContactListItem {
         id,
-        full_name: format!("{} {}", validated.first_name, validated.last_name),
+        full_name: crate::text::full_name(&validated.first_name, validated.last_name.as_deref()),
         company: validated.company,
-        phone: validated.phone,
+        phone: validated.phone.unwrap_or_default(),
     })
 }
 
@@ -297,9 +297,9 @@ pub fn update_client_inner(
 
     Ok(ContactListItem {
         id: client_id,
-        full_name: format!("{} {}", validated.first_name, validated.last_name),
+        full_name: crate::text::full_name(&validated.first_name, validated.last_name.as_deref()),
         company: validated.company,
-        phone: validated.phone,
+        phone: validated.phone.unwrap_or_default(),
     })
 }
 
@@ -365,7 +365,7 @@ pub fn delete_client_inner(
         &Author::User(&actor),
         now,
         "client",
-        "SELECT firstName || ' ' || lastName FROM clients WHERE id = ?1",
+        "SELECT trim(firstName || ' ' || COALESCE(lastName, '')) FROM clients WHERE id = ?1",
         client_id,
     )
     .map_err(|error| map_db_error(error, "deleteClient", &[]))?;
@@ -434,7 +434,7 @@ pub fn get_client_detail_inner(
 
     let row: Option<ClientDetailRow> = connection
         .query_row(
-            "SELECT firstName, lastName, nationalId, phone, company, position, email, address, invoiceInfo, createdAt
+            "SELECT firstName, COALESCE(lastName, ''), COALESCE(nationalId, ''), COALESCE(phone, ''), company, position, email, address, invoiceInfo, createdAt
              FROM clients WHERE id = ?1",
             [client_id],
             |row| {
@@ -479,7 +479,7 @@ pub fn get_client_detail_inner(
         id: client_id,
         first_name: first_name.clone(),
         last_name: last_name.clone(),
-        full_name: format!("{} {}", first_name, last_name),
+        full_name: crate::text::full_name(&first_name, Some(&last_name)),
         national_id,
         phone,
         company,

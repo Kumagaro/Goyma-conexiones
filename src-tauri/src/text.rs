@@ -37,6 +37,14 @@ pub fn clean_description(raw: &str) -> Option<String> {
     }
 }
 
+/// Nombre y apellidos; sin apellidos, solo el nombre (`spec-06` CT-01).
+pub fn full_name(first_name: &str, last_name: Option<&str>) -> String {
+    match last_name.map(str::trim).filter(|last| !last.is_empty()) {
+        Some(last) => format!("{first_name} {last}"),
+        None => first_name.to_owned(),
+    }
+}
+
 pub fn normalize_text(value: &str) -> String {
     let lowered = value.to_lowercase();
     let mut normalized = String::with_capacity(lowered.len());
