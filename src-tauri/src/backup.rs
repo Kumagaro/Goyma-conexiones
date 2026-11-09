@@ -9,14 +9,14 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 
 use crate::activity::{record_activity, record_as, Entry};
-use crate::commands::auth::{require_session, Author};
+use crate::commands::auth::{hash_password, require_admin, require_session, Author};
 use crate::commands::settings::require_app_data_dir;
 use crate::db::connection::{current_app_data_dir, lock_conn, open_database};
 use crate::db::migrations::{
     latest_version, run_migrations, schema_version, APPLICATION_ID, BASE_VERSION,
 };
 use crate::errors::{log_error, map_db_error, AppError};
-use crate::models::backup::{BackupItem, RestoreResult};
+use crate::models::backup::{BackupItem, BackupPasswordStatus, RestoreResult};
 use crate::timestamps::{format_utc_timestamp, today_local};
 
 const BACKUP_DIR: &str = "backups";
@@ -246,22 +246,145 @@ fn validate_backup(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn verify_password(connection: &Connection, user_id: i64, password: &str) -> Result<(), AppError> {
-    let hash: String = connection
+fn password_matches(password: &str, hash: &str) -> bool {
+    password.len() <= 72 && bcrypt::verify(password, hash).unwrap_or(false)
+}
+
+fn user_password_hash(connection: &Connection, user_id: i64, op: &str) -> Result<String, AppError> {
+    connection
         .query_row(
             "SELECT passwordHash FROM users WHERE id = ?1",
             [user_id],
             |row| row.get(0),
         )
-        .map_err(|error| map_db_error(error, "restoreBackup", &[]))?;
-    if password.len() <= 72 && bcrypt::verify(password, &hash).unwrap_or(false) {
+        .map_err(|error| map_db_error(error, op, &[]))
+}
+
+/// Hash de la contraseña de respaldo de una base; ninguno si no se definió o
+/// si la base es anterior a la migración 12 y no tiene la tabla.
+fn backup_password_hash(connection: &Connection) -> Option<String> {
+    connection
+        .query_row(
+            "SELECT passwordHash FROM backupPassword WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+}
+
+/// RP-02, S-08: vale la contraseña guardada en el archivo que se restaura;
+/// si no tiene, la de respaldo del sistema y, si tampoco hay, la del usuario.
+fn verify_restore_password(
+    connection: &Connection,
+    user_id: i64,
+    source: &Path,
+    password: &str,
+) -> Result<(), AppError> {
+    let in_file = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .ok()
+        .and_then(|copy| backup_password_hash(&copy));
+    let hash = match in_file.or_else(|| backup_password_hash(connection)) {
+        Some(hash) => hash,
+        None => user_password_hash(connection, user_id, "restoreBackup")?,
+    };
+    if password_matches(password, &hash) {
         return Ok(());
     }
     Err(AppError::new(
-        "invalidCredentials",
-        "La contraseña no es correcta",
-        "wrong password confirming a restore",
+        "wrongBackupPassword",
+        "La contraseña de respaldo no es correcta",
+        "wrong backup password confirming a restore",
     ))
+}
+
+pub fn get_backup_password_status_inner(
+    connection: &mut Connection,
+    now: DateTime<Utc>,
+) -> Result<BackupPasswordStatus, AppError> {
+    require_session(connection, now)?;
+    let updated_at: Option<String> = connection
+        .query_row(
+            "SELECT updatedAt FROM backupPassword WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })
+        .map_err(|error| map_db_error(error, "getBackupPasswordStatus", &[]))?;
+    Ok(BackupPasswordStatus {
+        is_set: updated_at.is_some(),
+        updated_at,
+        can_change: require_admin(connection, now).is_ok(),
+    })
+}
+
+/// RP-01: solo el Administrador, siempre con su contraseña de usuario (S-09),
+/// así también la redefine si la olvidó.
+pub fn set_backup_password_inner(
+    connection: &mut Connection,
+    now: DateTime<Utc>,
+    user_password: &str,
+    new_password: &str,
+) -> Result<BackupPasswordStatus, AppError> {
+    let admin = require_admin(connection, now)?;
+    let hash = user_password_hash(connection, admin.id(), "setBackupPassword")?;
+    if !password_matches(user_password, &hash) {
+        return Err(AppError::new(
+            "invalidCredentials",
+            "Tu contraseña de usuario no es correcta",
+            "wrong user password setting the backup password",
+        ));
+    }
+    if new_password.chars().count() < 8 {
+        return Err(AppError::new(
+            "validationFailed",
+            "La contraseña de respaldo debe tener al menos 8 caracteres",
+            "backup password too short",
+        ));
+    }
+    let new_hash = hash_password(new_password).map_err(|_| {
+        AppError::new(
+            "validationFailed",
+            "La contraseña de respaldo no puede tener más de 72 caracteres",
+            "backup password too long for bcrypt",
+        )
+    })?;
+    let timestamp = format_utc_timestamp(now);
+    let transaction = connection
+        .transaction()
+        .map_err(|error| map_db_error(error, "setBackupPassword", &[]))?;
+    transaction
+        .execute(
+            "INSERT INTO backupPassword (id, passwordHash, updatedAt, updatedByUserId)
+             VALUES (1, ?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET passwordHash = excluded.passwordHash,
+                updatedAt = excluded.updatedAt, updatedByUserId = excluded.updatedByUserId",
+            rusqlite::params![new_hash, timestamp, admin.id()],
+        )
+        .map_err(|error| map_db_error(error, "setBackupPassword", &[]))?;
+    record_activity(
+        &transaction,
+        &Author::Admin(&admin),
+        now,
+        Entry {
+            action: "config",
+            entity_type: "backup",
+            label: "Contraseña de respaldo",
+            details: None,
+        },
+    )
+    .map_err(|error| map_db_error(error, "setBackupPassword", &[]))?;
+    transaction
+        .commit()
+        .map_err(|error| map_db_error(error, "setBackupPassword", &[]))?;
+    Ok(BackupPasswordStatus {
+        is_set: true,
+        updated_at: Some(timestamp),
+        can_change: true,
+    })
 }
 
 /// Deja la copia lista en un archivo aparte: si algo falla aquí, la base
@@ -323,7 +446,6 @@ pub fn restore_backup_inner(
     password: &str,
 ) -> Result<RestoreResult, AppError> {
     let actor = require_session(connection, now)?;
-    verify_password(connection, actor.id(), password)?;
 
     let directory = app_data_dir.join(BACKUP_DIR);
     let source = match (source_path, automatic_file_name) {
@@ -333,6 +455,7 @@ pub fn restore_backup_inner(
         _ => return Err(invalid_backup("restore source is not valid")),
     };
     validate_backup(&source)?;
+    verify_restore_password(connection, actor.id(), &source, password)?;
 
     fs::create_dir_all(&directory).map_err(|error| restore_failed(&error.kind().to_string()))?;
     let previous = directory.join(format!(
@@ -413,13 +536,37 @@ pub fn restore_backup(
     result
 }
 
+#[tauri::command]
+pub fn get_backup_password_status(
+    state: tauri::State<'_, std::sync::Mutex<Connection>>,
+) -> Result<BackupPasswordStatus, AppError> {
+    let mut connection = lock_conn(&state);
+    let now = Utc::now();
+    let result = get_backup_password_status_inner(&mut connection, now);
+    log_failure(&connection, "getBackupPasswordStatus", &result, now);
+    result
+}
+
+#[tauri::command]
+pub fn set_backup_password(
+    state: tauri::State<'_, std::sync::Mutex<Connection>>,
+    user_password: String,
+    new_password: String,
+) -> Result<BackupPasswordStatus, AppError> {
+    let mut connection = lock_conn(&state);
+    let now = Utc::now();
+    let result = set_backup_password_inner(&mut connection, now, &user_password, &new_password);
+    log_failure(&connection, "setBackupPassword", &result, now);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::connection::initialize_database;
     use crate::test_utils::{
-        assert_allows_both_roles, assert_requires_session, create_test_session, create_test_user,
-        insert_category_fixture,
+        assert_allows_both_roles, assert_requires_admin, assert_requires_session,
+        create_test_session, create_test_user, insert_category_fixture,
     };
     use chrono::Duration;
 
@@ -633,6 +780,151 @@ mod tests {
         assert!(items[0].size_bytes > 0);
     }
 
+    /// Administrador con sesión sobre una base real en disco.
+    fn admin_signed_in() -> (Connection, PathBuf, DateTime<Utc>) {
+        let dir = temp_dir();
+        let now = Utc::now();
+        let connection = initialize_database(&dir, now).unwrap();
+        let user_id = create_test_user(
+            &connection,
+            "backupadmin",
+            "administrador",
+            "+5350000061",
+            "12345678961",
+            PASSWORD,
+        );
+        create_test_session(&connection, user_id, false, now, now);
+        (connection, dir, now)
+    }
+
+    #[test]
+    fn migration_12_creates_a_single_row_backup_password_table() {
+        let (connection, _, _) = signed_in();
+        let error = connection
+            .execute(
+                "INSERT INTO backupPassword (id, passwordHash, updatedAt) VALUES (2, 'x', '2026-11-09T12:00:00Z')",
+                [],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("CHECK"), "{error}");
+    }
+
+    #[test]
+    fn only_the_admin_sets_the_backup_password_with_their_user_password() {
+        // spec-06 RP-01, S-09.
+        let (mut connection, _, now) = admin_signed_in();
+        let status = get_backup_password_status_inner(&mut connection, now).unwrap();
+        assert!(!status.is_set);
+        assert!(status.can_change);
+
+        let error = set_backup_password_inner(&mut connection, now, "Incorrecta1!", "Respaldo123")
+            .unwrap_err();
+        assert_eq!(error.code, "invalidCredentials");
+        let error = set_backup_password_inner(&mut connection, now, PASSWORD, "corta").unwrap_err();
+        assert_eq!(
+            error.message,
+            "La contraseña de respaldo debe tener al menos 8 caracteres"
+        );
+
+        let status =
+            set_backup_password_inner(&mut connection, now, PASSWORD, "Respaldo123").unwrap();
+        assert!(status.is_set);
+        // Cambiarla (o redefinirla si se olvidó) pide solo la de usuario.
+        set_backup_password_inner(&mut connection, now, PASSWORD, "OtraClave99").unwrap();
+        assert_eq!(count(&connection, "backupPassword"), 1);
+        assert!(
+            get_backup_password_status_inner(&mut connection, now)
+                .unwrap()
+                .is_set
+        );
+        assert_eq!(
+            activity(&connection, "config"),
+            vec![
+                (
+                    "backupadmin".to_owned(),
+                    "Contraseña de respaldo".to_owned()
+                ),
+                (
+                    "backupadmin".to_owned(),
+                    "Contraseña de respaldo".to_owned()
+                ),
+            ]
+        );
+
+        let (mut counter, _, now) = signed_in();
+        assert!(
+            !get_backup_password_status_inner(&mut counter, now)
+                .unwrap()
+                .can_change
+        );
+        let error =
+            set_backup_password_inner(&mut counter, now, PASSWORD, "Respaldo123").unwrap_err();
+        assert_eq!(error.code, "forbidden");
+    }
+
+    #[test]
+    fn a_restore_checks_the_password_saved_inside_the_file() {
+        // spec-06 RP-02: un respaldo pide la contraseña que tenía al hacerse.
+        let (mut connection, dir, now) = admin_signed_in();
+        set_backup_password_inner(&mut connection, now, PASSWORD, "Respaldo123").unwrap();
+        let copy = make_copy(&mut connection, now);
+        set_backup_password_inner(&mut connection, now, PASSWORD, "Nueva12345").unwrap();
+
+        for wrong in ["Nueva12345", PASSWORD] {
+            let error = restore(&mut connection, &dir, now, &copy, wrong).unwrap_err();
+            assert_eq!(error.code, "wrongBackupPassword");
+        }
+        restore(&mut connection, &dir, now, &copy, "Respaldo123").unwrap();
+
+        // Equipo nuevo, sin contraseña de respaldo propia: vale la del archivo.
+        let (mut fresh, fresh_dir, now) = signed_in();
+        let error = restore(&mut fresh, &fresh_dir, now, &copy, PASSWORD).unwrap_err();
+        assert_eq!(error.code, "wrongBackupPassword");
+        restore(&mut fresh, &fresh_dir, now, &copy, "Respaldo123").unwrap();
+    }
+
+    #[test]
+    fn a_backup_without_password_uses_the_system_one_or_the_user_one() {
+        // spec-06 S-08.
+        let (mut connection, dir, now) = admin_signed_in();
+        let old = make_copy(&mut connection, now);
+        set_backup_password_inner(&mut connection, now, PASSWORD, "Respaldo123").unwrap();
+        let error = restore(&mut connection, &dir, now, &old, PASSWORD).unwrap_err();
+        assert_eq!(error.code, "wrongBackupPassword");
+        restore(&mut connection, &dir, now, &old, "Respaldo123").unwrap();
+        // Tras restaurar la copia antigua el sistema ya no tiene contraseña de
+        // respaldo: vale la del usuario.
+        create_test_session(
+            &connection,
+            connection
+                .query_row(
+                    "SELECT id FROM users WHERE username = 'backupadmin'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap(),
+            false,
+            now,
+            now,
+        );
+        // Otro segundo: la copia previa lleva la hora en el nombre.
+        let later = now + Duration::seconds(1);
+        restore(&mut connection, &dir, later, &old, PASSWORD).unwrap();
+    }
+
+    #[test]
+    fn backup_password_commands_follow_the_authorization_matrix() {
+        assert_requires_session(|connection, now| {
+            get_backup_password_status_inner(connection, now)
+        });
+        assert_allows_both_roles(|connection, now| {
+            get_backup_password_status_inner(connection, now)
+        });
+        assert_requires_admin(|connection, now| {
+            set_backup_password_inner(connection, now, PASSWORD, "Respaldo123")
+        });
+    }
+
     #[test]
     fn restoring_with_a_wrong_password_touches_nothing() {
         let (mut connection, dir, now) = signed_in();
@@ -641,8 +933,8 @@ mod tests {
 
         let error = restore(&mut connection, &dir, now, &copy, "Incorrecta1!").unwrap_err();
 
-        assert_eq!(error.code, "invalidCredentials");
-        assert_eq!(error.message, "La contraseña no es correcta");
+        assert_eq!(error.code, "wrongBackupPassword");
+        assert_eq!(error.message, "La contraseña de respaldo no es correcta");
         assert_eq!(count(&connection, "categories"), 1);
         assert_eq!(count(&connection, "sessions"), 1);
     }

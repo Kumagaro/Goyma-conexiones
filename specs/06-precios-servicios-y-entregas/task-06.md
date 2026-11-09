@@ -134,13 +134,15 @@
 
 ## 5. Fase 5 — Contraseña de respaldo
 
-- [ ] Test (migración 12): tabla `backupPassword`.
-- [ ] Test: solo el Administrador la define, siempre con su contraseña de usuario; mínimo 8 caracteres.
-- [ ] Test: restaurar valida contra la contraseña dentro del archivo (también en una base vacía de equipo nuevo); contraseña incorrecta → `wrongBackupPassword`; respaldo anterior sin contraseña → la del sistema o la del usuario (S-08).
-- [ ] Implementación backend; filas en la matriz de autorización.
-- [ ] Interfaz: sección en Configuración > Respaldos y diálogo de restaurar.
+- [x] Test (migración 12): tabla `backupPassword`.
+- [x] Test: solo el Administrador la define, siempre con su contraseña de usuario; mínimo 8 caracteres.
+- [x] Test: restaurar valida contra la contraseña dentro del archivo (también en una base vacía de equipo nuevo); contraseña incorrecta → `wrongBackupPassword`; respaldo anterior sin contraseña → la del sistema o la del usuario (S-08).
+- [x] Implementación backend; filas en la matriz de autorización.
+- [x] Interfaz: sección en Configuración > Respaldos y diálogo de restaurar.
+  - Sección «Contraseña de Respaldo» en la pestaña Respaldo (el botón solo lo ve el Administrador) y el diálogo de restaurar pide «Contraseña de respaldo».
 
 - [ ] Cierre de fase 5.
+  - 2026-11-09: `cargo test` 508/508 y `npm test` 435/435 en verde; clippy, fmt y prettier limpios. Riesgo de RP-02 aceptado por el dueño (`plan-06` D-18). Falta la verificación en la app real (`tauri:dev`) y el commit.
 
 ## 6. Cierre de la spec
 

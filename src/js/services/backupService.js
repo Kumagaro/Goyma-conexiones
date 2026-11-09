@@ -11,3 +11,12 @@ export function listAutomaticBackups() {
 export function restoreBackup({ sourcePath, automaticFileName, password }) {
   return invoke("restore_backup", { sourcePath, automaticFileName, password });
 }
+
+// spec-06 RP-01: contraseña de respaldo.
+export function getBackupPasswordStatus() {
+  return invoke("get_backup_password_status");
+}
+
+export function setBackupPassword(userPassword, newPassword) {
+  return invoke("set_backup_password", { userPassword, newPassword });
+}

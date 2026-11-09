@@ -211,4 +211,6 @@ Cada uno con su fila en la matriz de autorización (`Agents.md` §3).
 - **D-14 — Disponible de toda la factura:** con un producto repetido (S-16) cada línea cabe sola pero la suma no; al crear y editar Venta o Servicio se comprueba además lo pendiente de toda la factura por producto.
 - **D-15 — Servicios sin fila en el registro de actividad:** el `CHECK` de `activityLog` no admite el tipo `service` (igual que D-12).
 - **D-16 — El precio del servicio en el dashboard:** cuenta en ingresos, clientes y cuentas por cobrar, sin costo, y no entra en el ranking de productos ni en lento movimiento.
+- **D-17 — Validar antes de la contraseña:** restaurar comprueba primero que el archivo sea un respaldo válido y después su contraseña, porque la contraseña se lee de dentro del archivo (RP-02). El error es `wrongBackupPassword` sin más detalle y no se registra en el log, como `invalidCredentials`.
+- **D-18 — Riesgo aceptado al restaurar (2026-11-09):** como RP-02 valida contra la contraseña guardada en el archivo, quien prepare un archivo elige esa contraseña: alguien con sesión abierta podría restaurar una base hecha a propósito. Se propuso exigir además la contraseña del sistema (o la del usuario) y el dueño decidió mantener RP-02 tal cual.
 

@@ -277,8 +277,8 @@ describe("CSV y respaldo (HTML de producción)", () => {
     await start("page-configuracion");
     openDialog.mockResolvedValue("D:/copias/goyma.sqlite3");
     invokeMock.mockRejectedValue({
-      code: "invalidCredentials",
-      message: "La contraseña no es correcta",
+      code: "wrongBackupPassword",
+      message: "La contraseña de respaldo no es correcta",
     });
 
     void view.restoreFromFile();
@@ -286,7 +286,7 @@ describe("CSV y respaldo (HTML de producción)", () => {
 
     await vi.waitFor(() =>
       expect(document.body.textContent).toContain(
-        "La contraseña no es correcta",
+        "La contraseña de respaldo no es correcta",
       ),
     );
     expect(calls("restore_backup")[0][1].sourcePath).toBe(
@@ -294,5 +294,64 @@ describe("CSV y respaldo (HTML de producción)", () => {
     );
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     document.querySelector('[role="dialog"] .btn-secondary').click();
+  });
+
+  describe("contraseña de respaldo (spec-06 RP-01)", () => {
+    it("sin contraseña avisa de que las copias no quedan protegidas", async () => {
+      await start("page-configuracion");
+      invokeMock.mockResolvedValue({
+        isSet: false,
+        updatedAt: null,
+        canChange: false,
+      });
+      await view.loadBackupPasswordStatus();
+      expect(
+        document.getElementById("config-respaldo-clave-estado").textContent,
+      ).toContain("no quedan protegidas");
+      // Un Contador no ve el botón.
+      expect(document.getElementById("config-respaldo-clave").hidden).toBe(
+        true,
+      );
+    });
+
+    it("pide la contraseña de usuario, la nueva y su confirmación", async () => {
+      await start("page-configuracion");
+      invokeMock.mockResolvedValue({
+        isSet: true,
+        updatedAt: "2026-11-09T12:00:00Z",
+      });
+      void view.changeBackupPassword();
+      const dialog = await vi.waitFor(() => {
+        const opened = document.querySelector('[role="dialog"]');
+        expect(opened).not.toBeNull();
+        return opened;
+      });
+      const fill = (name, value) => {
+        dialog.querySelector(`[name="${name}"]`).value = value;
+      };
+      const send = () =>
+        dialog
+          .querySelector("form")
+          .dispatchEvent(
+            new Event("submit", { bubbles: true, cancelable: true }),
+          );
+      fill("userPassword", "ValidPass1!");
+      fill("newPassword", "Respaldo123");
+      fill("confirmation", "Respaldo124");
+      send();
+      await vi.waitFor(() =>
+        expect(document.body.textContent).toContain("no coinciden"),
+      );
+      expect(calls("set_backup_password")).toHaveLength(0);
+
+      fill("confirmation", "Respaldo123");
+      send();
+      await vi.waitFor(() =>
+        expect(calls("set_backup_password")[0]?.[1]).toEqual({
+          userPassword: "ValidPass1!",
+          newPassword: "Respaldo123",
+        }),
+      );
+    });
   });
 });

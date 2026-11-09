@@ -21,6 +21,7 @@ pub const MIGRATIONS: &[(i64, Migration)] = &[
     (9, cost_base_and_threshold_v9),
     (10, invoices_and_contacts_v10),
     (11, deliveries_v11),
+    (12, backup_password_v12),
 ];
 
 /// Migraciones que reconstruyen tablas (`plan-06` §2.1): SQLite no puede
@@ -566,6 +567,20 @@ fn invoices_and_contacts_v10(tx: &Transaction) -> rusqlite::Result<()> {
 /// entregadas reciben una entrega con su costo FIFO y la fecha de la factura;
 /// Insumos, Garantía y Pérdida guardan su costo FIFO. Así el costo de lo
 /// vendido tiene una sola fuente (D-07). Avisos N-14 y N-15 (EN-05).
+/// spec-06 RP-01: contraseña de respaldo. Vive en la base para que cada
+/// respaldo la lleve dentro y se valide contra ella al restaurar (RP-02).
+fn backup_password_v12(tx: &Transaction) -> rusqlite::Result<()> {
+    let updated_at = CREATED_AT_CHECK.replace("createdAt", "updatedAt");
+    tx.execute_batch(&format!(
+        "CREATE TABLE backupPassword (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            passwordHash TEXT NOT NULL CHECK (length(passwordHash) > 0),
+            updatedAt TEXT NOT NULL CHECK ({updated_at}),
+            updatedByUserId INTEGER REFERENCES users(id) ON DELETE SET NULL
+        );"
+    ))
+}
+
 fn deliveries_v11(tx: &Transaction) -> rusqlite::Result<()> {
     let delivered_at = CREATED_AT_CHECK.replace("createdAt", "deliveredAt");
     // Costo FIFO de una línea: Σ consumos / cantidad, a la mitad hacia arriba.

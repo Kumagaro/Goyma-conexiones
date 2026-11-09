@@ -103,6 +103,8 @@ pub fn run() {
             backup::create_backup,
             backup::list_automatic_backups,
             backup::restore_backup,
+            backup::get_backup_password_status,
+            backup::set_backup_password,
             csv_io::export_csv,
             csv_io::import_csv,
             commands::drafts::save_draft,

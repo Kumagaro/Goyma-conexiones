@@ -5,8 +5,10 @@ import { confirmDialog } from "../components/confirmDialog.js";
 import { openFormDialog } from "../components/formDialog.js";
 import {
   createBackup,
+  getBackupPasswordStatus,
   listAutomaticBackups,
   restoreBackup,
+  setBackupPassword,
 } from "../services/backupService.js";
 import { exportCsv, importCsv } from "../services/csvService.js";
 import { el, messageRow } from "../utils/dom.js";
@@ -173,7 +175,8 @@ export async function saveBackup() {
   }
 }
 
-// RP-03: confirma, pide la contraseña y vuelve al login.
+// RP-03, spec-06 RP-02: confirma, pide la contraseña de respaldo y vuelve
+// al login.
 async function restore(source, label) {
   const confirmed = await confirmDialog({
     title: "Restaurar copia",
@@ -182,13 +185,13 @@ async function restore(source, label) {
   });
   if (!confirmed) return;
   const result = await openFormDialog({
-    title: "Confirma tu contraseña",
+    title: "Contraseña de respaldo",
     submitText: "Restaurar",
-    missingMessage: "Escribe tu contraseña.",
+    missingMessage: "Escribe la contraseña de respaldo.",
     fields: [
       {
         name: "password",
-        label: "Contraseña",
+        label: "Contraseña de respaldo",
         type: "password",
         required: true,
       },
@@ -243,6 +246,66 @@ export async function loadBackups() {
   }
 }
 
+/* ---------- Contraseña de respaldo (spec-06 RP-01) ---------- */
+
+export async function loadBackupPasswordStatus() {
+  const text = byId("config-respaldo-clave-estado");
+  const button = byId("config-respaldo-clave");
+  if (!text) return;
+  try {
+    const status = await getBackupPasswordStatus();
+    text.textContent = status?.isSet
+      ? `Restaurar una copia pide la contraseña de respaldo. Se definió el ${formatLocalTimestamp(status.updatedAt)}.`
+      : "Aún no hay contraseña de respaldo: las copias que se hagan mientras tanto no quedan protegidas y se podrán restaurar con la contraseña de usuario.";
+    if (button) {
+      button.textContent = status?.isSet
+        ? "Cambiar contraseña de respaldo"
+        : "Definir contraseña de respaldo";
+      // Solo el Administrador la define o la cambia.
+      button.hidden = !status?.canChange;
+    }
+  } catch {
+    text.textContent = "No se pudo comprobar la contraseña de respaldo.";
+  }
+}
+
+export async function changeBackupPassword() {
+  const result = await openFormDialog({
+    title: "Contraseña de respaldo",
+    submitText: "Guardar contraseña",
+    missingMessage: "Completa los tres campos.",
+    fields: [
+      {
+        name: "userPassword",
+        label: "Tu contraseña de usuario",
+        type: "password",
+        required: true,
+      },
+      {
+        name: "newPassword",
+        label: "Nueva contraseña de respaldo (mínimo 8 caracteres)",
+        type: "password",
+        required: true,
+      },
+      {
+        name: "confirmation",
+        label: "Repite la contraseña de respaldo",
+        type: "password",
+        required: true,
+      },
+    ],
+    onSubmit: ({ userPassword, newPassword, confirmation }) => {
+      if (newPassword !== confirmation) {
+        throw { message: "Las contraseñas de respaldo no coinciden." };
+      }
+      return setBackupPassword(userPassword, newPassword);
+    },
+  });
+  if (!result) return;
+  notifySuccess("Contraseña de respaldo guardada.");
+  await loadBackupPasswordStatus();
+}
+
 export function initDatosView() {
   document.addEventListener("click", (event) => {
     const button = event.target.closest?.("[data-csv-export]");
@@ -256,13 +319,19 @@ export function initDatosView() {
     "click",
     () => void restoreFromFile(),
   );
+  byId("config-respaldo-clave")?.addEventListener(
+    "click",
+    () => void changeBackupPassword(),
+  );
   byId("config-csv-importar")?.addEventListener(
     "click",
     () => void importFile(),
   );
   if (!window.__datosPageChangeBound) {
     window.addEventListener("page:change", (event) => {
-      if (event.detail?.pageId === PAGE_ID) void loadBackups();
+      if (event.detail?.pageId !== PAGE_ID) return;
+      void loadBackups();
+      void loadBackupPasswordStatus();
     });
     window.__datosPageChangeBound = true;
   }
