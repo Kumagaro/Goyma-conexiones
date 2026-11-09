@@ -20,7 +20,7 @@ use crate::models::invoice::{
     CreateServiceInvoiceInput, InvoiceActionResult, InvoiceDetail, InvoiceFilters, InvoiceListItem,
     RecordDeliveriesInput, UpdateEntryInvoiceInput, UpdateGuaranteeInvoiceInput,
     UpdateInstallationInvoiceInput, UpdateOutgoingInvoiceLineInput, UpdateSaleInvoiceInput,
-    UpdateServiceInvoiceInput,
+    UpdateServiceBlockInput, UpdateServiceInvoiceInput,
 };
 use crate::models::invoice_line::{EnteredUnit, InvoiceLineDetail};
 use crate::models::product::format_quantity_milli;
@@ -265,6 +265,15 @@ struct OutgoingLineInput {
     unit_price: Option<String>,
     discount_kind: Option<String>,
     discount_value: Option<String>,
+}
+
+/// Servicio pedido en una factura de servicio nueva (spec-06 SV-02).
+struct OutgoingServiceBlock {
+    service_id: i64,
+    price: Option<String>,
+    discount_kind: Option<String>,
+    discount_value: Option<String>,
+    products: Vec<OutgoingLineInput>,
 }
 
 /// Bruto de una línea con un precio por unidad del producto; con otra unidad,
@@ -785,7 +794,8 @@ pub fn get_invoice_inner(
         .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
     let total_cents: i64 = connection
         .query_row(
-            "SELECT COALESCE(SUM(subtotalCents), 0) FROM invoiceLines WHERE invoiceId = ?1",
+            "SELECT COALESCE((SELECT SUM(subtotalCents) FROM invoiceLines WHERE invoiceId = ?1), 0)
+                + COALESCE((SELECT SUM(totalCents) FROM invoiceServiceLines WHERE invoiceId = ?1), 0)",
             [invoice_id],
             |row| row.get(0),
         )
@@ -816,7 +826,8 @@ pub fn get_invoice_inner(
                         ) END AS consumedMilli,
                         il.enteredUnitId, il.enteredUnitName, il.enteredUnitAbbreviation,
                         il.enteredQuantityMilli, il.listPriceCents, il.grossCents, il.discountKind,
-                        il.discountValue, il.discountCents, il.deliveredMilli
+                        il.discountValue, il.discountCents, il.deliveredMilli,
+                        (SELECT s.position FROM invoiceServiceLines s WHERE s.id = il.serviceLineId)
                  FROM invoiceLines il
                  LEFT JOIN products p ON p.id = il.productId
                  LEFT JOIN lots l ON l.invoiceLineId = il.id
@@ -864,12 +875,37 @@ pub fn get_invoice_inner(
                     discount_value: row.get(20)?,
                     discount_cents: Some(row.get::<_, i64>(21)?).filter(|cents| *cents > 0),
                     delivered_quantity: format_quantity_milli(row.get(22)?),
+                    service_position: row.get(23)?,
                 })
             })
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| map_db_error(error, "getInvoice", &[]))?
     };
+
+    let services = connection
+        .prepare(
+            "SELECT position, serviceId, serviceName, priceCents, discountKind, discountValue,
+                    discountCents, totalCents
+             FROM invoiceServiceLines WHERE invoiceId = ?1 ORDER BY position",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([invoice_id], |row| {
+                    Ok(crate::models::invoice::InvoiceServiceDetail {
+                        position: row.get(0)?,
+                        service_id: row.get(1)?,
+                        name: row.get(2)?,
+                        price_cents: row.get(3)?,
+                        discount_kind: row.get(4)?,
+                        discount_value: row.get(5)?,
+                        discount_cents: row.get(6)?,
+                        total_cents: row.get(7)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(|error| map_db_error(error, "getInvoice", &[]))?;
 
     Ok(InvoiceDetail {
         id: invoice_id,
@@ -904,6 +940,7 @@ pub fn get_invoice_inner(
         updated_at,
         reserved_until,
         lines,
+        services,
     })
 }
 
@@ -1616,6 +1653,7 @@ fn create_client_outgoing_invoice_inner(
     notes: Option<&str>,
     payment_method: Option<&str>,
     lines: &[OutgoingLineInput],
+    services: &[OutgoingServiceBlock],
     reserved_until: Option<&str>,
 ) -> Result<InvoiceActionResult, AppError> {
     let _actor = require_session(connection, now)?;
@@ -1626,7 +1664,12 @@ fn create_client_outgoing_invoice_inner(
     let expired_cleanup_warning = purge_best_effort(&transaction, now)?;
     let connection = &transaction;
 
-    if lines.is_empty() || lines.len() > 100 {
+    let product_count = lines.len()
+        + services
+            .iter()
+            .map(|block| block.products.len())
+            .sum::<usize>();
+    if (lines.is_empty() && services.is_empty()) || product_count > 100 || services.len() > 100 {
         return Err(validation_failed(
             "Una factura admite entre 1 y 100 productos",
             &format!("{kind} line count out of range"),
@@ -1675,10 +1718,18 @@ fn create_client_outgoing_invoice_inner(
     let mut line_rows = Vec::new();
     let mut total_cents = 0_i64;
 
-    for (position, line) in lines.iter().enumerate() {
+    // Productos sueltos y, detrás, los de cada servicio (S-15, S-16).
+    let all_lines: Vec<(Option<usize>, &OutgoingLineInput)> = lines
+        .iter()
+        .map(|line| (None, line))
+        .chain(services.iter().enumerate().flat_map(|(block, service)| {
+            service.products.iter().map(move |line| (Some(block), line))
+        }))
+        .collect();
+    for (position, (block, line)) in all_lines.iter().enumerate() {
         let (product_id, quantity, line_unit_id) =
             (&line.product_id, &line.quantity, &line.unit_id);
-        if !seen_products.insert(*product_id) {
+        if block.is_none() && !seen_products.insert(*product_id) {
             return Err(validation_failed(
                 "El producto ya está en la factura",
                 &format!("duplicate product in {kind}"),
@@ -1815,7 +1866,44 @@ fn create_client_outgoing_invoice_inner(
             line_unit,
             list_price_cents,
             price,
+            *block,
         ));
+    }
+
+    let mut service_rows = Vec::with_capacity(services.len());
+    for block in services {
+        let service: Option<(String, Option<i64>)> = connection
+            .query_row(
+                "SELECT name, suggestedPriceCents FROM services WHERE id = ?1",
+                [block.service_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|error| map_db_error(error, op, &[]))?;
+        let Some((service_name, suggested_price_cents)) = service else {
+            return Err(AppError::new(
+                "notFound",
+                "El servicio ya no existe",
+                &format!("service missing during {kind} creation"),
+            ));
+        };
+        let price = crate::pricing::price_service(
+            &service_name,
+            suggested_price_cents.unwrap_or(0),
+            block.price.as_deref(),
+            block.discount_kind.as_deref(),
+            block.discount_value.as_deref(),
+        )?;
+        total_cents = total_cents
+            .checked_add(price.subtotal_cents)
+            .filter(|total| *total <= 99_999_999_999)
+            .ok_or_else(|| {
+                validation_failed(
+                    "El total de la factura no puede superar $999.999.999,99",
+                    &format!("{kind} total exceeds legal bound"),
+                )
+            })?;
+        service_rows.push((block.service_id, service_name, price));
     }
 
     let number = next_invoice_number(connection, invoice_type)?;
@@ -1874,6 +1962,19 @@ fn create_client_outgoing_invoice_inner(
     ).map_err(|error| map_db_error(error, op, &[]))?;
 
     let invoice_id = connection.last_insert_rowid();
+    let mut service_line_ids = Vec::with_capacity(service_rows.len());
+    for (index, (service_id, service_name, price)) in service_rows.iter().enumerate() {
+        service_line_ids.push(insert_invoice_service_line(
+            connection,
+            op,
+            invoice_id,
+            index as i64 + 1,
+            *service_id,
+            service_name,
+            price,
+            &timestamp,
+        )?);
+    }
     for (
         position,
         product_id,
@@ -1891,6 +1992,7 @@ fn create_client_outgoing_invoice_inner(
         line_unit,
         list_price_cents,
         price,
+        block,
     ) in line_rows
     {
         // Regla interina (plan-06 §2.3): mientras la venta descuente al
@@ -1899,9 +2001,10 @@ fn create_client_outgoing_invoice_inner(
             "INSERT INTO invoiceLines (invoiceId, position, productId, productIdOriginal, productName, productNameNormalized,
                 unitId, unitName, unitAbbreviation, quantityMilli, unitPriceCents, subtotalCents,
                 categoryId, categoryName, costAtSaleCents, createdAt, updatedAt,
-                listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli)
+                listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli,
+                serviceLineId)
              VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15,
-                ?16, ?17, ?18, ?19, ?20, 0)",
+                ?16, ?17, ?18, ?19, ?20, 0, ?21)",
             params![
                 invoice_id,
                 position,
@@ -1923,6 +2026,7 @@ fn create_client_outgoing_invoice_inner(
                 price.discount_kind,
                 price.discount_value,
                 price.discount_cents,
+                block.map(|index| service_line_ids[index]),
             ],
         ).map_err(|error| map_db_error(error, op, &[]))?;
 
@@ -1930,6 +2034,8 @@ fn create_client_outgoing_invoice_inner(
         let line_id = connection.last_insert_rowid();
         store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
     }
+
+    ensure_invoice_within_available(connection, invoice_id)?;
 
     // NT-02/NT-03: avisos de situación con el estado final (best-effort).
     crate::automation::evaluate_watches_best_effort(&transaction, now);
@@ -1973,6 +2079,7 @@ pub fn create_sale_invoice_inner(
         input.notes.as_deref(),
         input.payment_method.as_deref(),
         &lines,
+        &[],
         input.reserved_until.as_deref(),
     );
     crate::automation::after_rejected_outgoing(connection, now, result)
@@ -1995,6 +2102,28 @@ pub fn create_service_invoice_inner(
             discount_value: line.discount_value.clone(),
         })
         .collect();
+    let services: Vec<OutgoingServiceBlock> = input
+        .services
+        .iter()
+        .map(|block| OutgoingServiceBlock {
+            service_id: block.service_id,
+            price: block.price.clone(),
+            discount_kind: block.discount_kind.clone(),
+            discount_value: block.discount_value.clone(),
+            products: block
+                .products
+                .iter()
+                .map(|line| OutgoingLineInput {
+                    product_id: line.product_id,
+                    quantity: line.quantity.clone(),
+                    unit_id: line.unit_id,
+                    unit_price: line.unit_price.clone(),
+                    discount_kind: line.discount_kind.clone(),
+                    discount_value: line.discount_value.clone(),
+                })
+                .collect(),
+        })
+        .collect();
     let result = create_client_outgoing_invoice_inner(
         connection,
         now,
@@ -2007,6 +2136,7 @@ pub fn create_service_invoice_inner(
         input.notes.as_deref(),
         input.payment_method.as_deref(),
         &lines,
+        &services,
         input.reserved_until.as_deref(),
     );
     crate::automation::after_rejected_outgoing(connection, now, result)
@@ -2574,11 +2704,568 @@ type PricedProductRow = (
     String,
 );
 
+/// Guarda un servicio de la factura (spec-06 SV-02) y devuelve su id.
+#[allow(clippy::too_many_arguments)]
+fn insert_invoice_service_line(
+    connection: &Connection,
+    op: &str,
+    invoice_id: i64,
+    position: i64,
+    service_id: i64,
+    service_name: &str,
+    price: &crate::pricing::LinePrice,
+    timestamp: &str,
+) -> Result<i64, AppError> {
+    connection
+        .execute(
+            "INSERT INTO invoiceServiceLines (invoiceId, position, serviceId, serviceName, priceCents,
+                discountKind, discountValue, discountCents, totalCents, createdAt, updatedAt)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+            params![
+                invoice_id,
+                position,
+                service_id,
+                service_name,
+                price.unit_price_cents,
+                price.discount_kind,
+                price.discount_value,
+                price.discount_cents,
+                price.subtotal_cents,
+                timestamp,
+            ],
+        )
+        .map_err(|error| map_db_error(error, op, &[]))?;
+    Ok(connection.last_insert_rowid())
+}
+
+/// Con un producto repetido en la factura (S-16) cada línea cabe sola, pero
+/// lo pendiente de todas juntas también debe caber en lo disponible.
+fn ensure_invoice_within_available(
+    connection: &Connection,
+    invoice_id: i64,
+) -> Result<(), AppError> {
+    let pending: Vec<(i64, i64)> = connection
+        .prepare(
+            "SELECT productId, SUM(quantityMilli - deliveredMilli) FROM invoiceLines
+             WHERE invoiceId = ?1 AND productId IS NOT NULL
+             GROUP BY productId HAVING SUM(quantityMilli - deliveredMilli) > 0",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([invoice_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(|error| map_db_error(error, "invoiceAvailability", &[]))?;
+    for (product_id, pending_milli) in pending {
+        crate::inventory::ensure_available(
+            connection,
+            product_id,
+            pending_milli,
+            Some(invoice_id),
+        )?;
+    }
+    Ok(())
+}
+
+fn free_line_position(
+    occupied_positions: &std::collections::BTreeSet<i64>,
+    op: &str,
+) -> Result<i64, AppError> {
+    (1..=100)
+        .find(|position| !occupied_positions.contains(position))
+        .ok_or_else(|| {
+            validation_failed(
+                "Una factura admite entre 1 y 100 productos",
+                &format!("no free {op} line position"),
+            )
+        })
+}
+
+/// Producto nuevo de una Venta o Servicio que se edita.
+struct NewPricedLine<'a> {
+    product_id: i64,
+    quantity_milli: i64,
+    line_unit: Option<&'a LineUnit>,
+    unit_price: Option<&'a str>,
+    discount_kind: Option<&'a str>,
+    discount_value: Option<&'a str>,
+    service_line_id: Option<i64>,
+}
+
+/// Inserta una línea nueva al precio de venta vigente (o más, con su
+/// descuento) y devuelve su importe.
+fn insert_new_priced_line(
+    connection: &Connection,
+    op: &str,
+    invoice_id: i64,
+    position: i64,
+    line: NewPricedLine<'_>,
+    timestamp: &str,
+) -> Result<i64, AppError> {
+    let NewPricedLine {
+        product_id,
+        quantity_milli,
+        line_unit,
+        unit_price,
+        discount_kind,
+        discount_value,
+        service_line_id,
+    } = line;
+    let product: Option<PricedProductRow> = connection
+        .query_row(
+            "SELECT p.name, p.costCents, p.profitPercentHundredths, p.categoryId, c.name,
+                p.unitId, u.name, u.abbreviation, p.status
+             FROM products p
+             LEFT JOIN categories c ON c.id = p.categoryId
+             LEFT JOIN units u ON u.id = p.unitId
+             WHERE p.id = ?1",
+            [product_id],
+            |db_row| {
+                Ok((
+                    db_row.get(0)?,
+                    db_row.get(1)?,
+                    db_row.get(2)?,
+                    db_row.get(3)?,
+                    db_row.get(4)?,
+                    db_row.get(5)?,
+                    db_row.get(6)?,
+                    db_row.get(7)?,
+                    db_row.get(8)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| map_db_error(error, op, &[]))?;
+    let Some((
+        product_name,
+        cost_cents,
+        profit_percent_hundredths,
+        category_id,
+        category_name,
+        unit_id,
+        unit_name,
+        unit_abbreviation,
+        product_status,
+    )) = product
+    else {
+        return Err(AppError::new(
+            "notFound",
+            "El producto ya no existe",
+            &format!("new {op} line product missing"),
+        ));
+    };
+    if product_status == "discontinued" {
+        return Err(validation_failed(
+            &format!(
+                "El producto «{product_name}» está descontinuado. Actívalo para usarlo en facturas"
+            ),
+            &format!("discontinued product added to {op}"),
+        ));
+    }
+    if crate::inventory::available_milli(connection, product_id, None)? <= 0 {
+        return Err(validation_failed(
+            &format!("El producto «{product_name}» está agotado"),
+            &format!("out of stock product added to {op}"),
+        ));
+    }
+    let list_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
+    let price = crate::pricing::price_line(
+        &product_name,
+        list_price_cents,
+        list_price_cents,
+        unit_price,
+        discount_kind,
+        discount_value,
+        |unit_price| line_gross_cents(line_unit, quantity_milli, unit_price),
+    )?;
+    crate::inventory::ensure_available(connection, product_id, quantity_milli, Some(invoice_id))?;
+    let product_name_normalized = normalize_text(&product_name);
+    connection
+        .execute(
+            "INSERT INTO invoiceLines (invoiceId, position, productId, productIdOriginal, productName,
+                productNameNormalized, unitId, unitName, unitAbbreviation, quantityMilli, unitPriceCents,
+                subtotalCents, categoryId, categoryName, costAtSaleCents, createdAt, updatedAt,
+                listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli,
+                serviceLineId)
+             VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15,
+                ?16, ?17, ?18, ?19, ?20, 0, ?21)",
+            params![
+                invoice_id,
+                position,
+                product_id,
+                product_name,
+                product_name_normalized,
+                unit_id,
+                unit_name,
+                unit_abbreviation,
+                quantity_milli,
+                price.unit_price_cents,
+                price.subtotal_cents,
+                category_id,
+                category_name,
+                cost_cents,
+                timestamp,
+                list_price_cents,
+                price.gross_cents,
+                price.discount_kind,
+                price.discount_value,
+                price.discount_cents,
+                service_line_id,
+            ],
+        )
+        .map_err(|error| map_db_error(error, op, &[]))?;
+    let line_id = connection.last_insert_rowid();
+    store_line_unit(connection, line_id, line_unit, op)?;
+    Ok(price.subtotal_cents)
+}
+
+/// Producto guardado de un servicio de la factura.
+struct ServiceProductRow {
+    id: i64,
+    position: i64,
+    product_id: Option<i64>,
+    product_name: String,
+    quantity_milli: i64,
+    unit_price_cents: i64,
+    list_price_cents: Option<i64>,
+    subtotal_cents: i64,
+    delivered_milli: i64,
+}
+
+fn read_service_product_rows(
+    connection: &Connection,
+    service_line_id: i64,
+    op: &str,
+) -> Result<Vec<ServiceProductRow>, AppError> {
+    connection
+        .prepare(
+            "SELECT id, position, productId, productName, quantityMilli, unitPriceCents,
+                    listPriceCents, subtotalCents, deliveredMilli
+             FROM invoiceLines WHERE serviceLineId = ?1 ORDER BY position",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([service_line_id], |row| {
+                    Ok(ServiceProductRow {
+                        id: row.get(0)?,
+                        position: row.get(1)?,
+                        product_id: row.get(2)?,
+                        product_name: row.get(3)?,
+                        quantity_milli: row.get(4)?,
+                        unit_price_cents: row.get(5)?,
+                        list_price_cents: row.get(6)?,
+                        subtotal_cents: row.get(7)?,
+                        delivered_milli: row.get(8)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(|error| map_db_error(error, op, &[]))
+}
+
+/// Quita un producto de un servicio si no tiene nada entregado (EN-03).
+fn remove_service_product(
+    connection: &Connection,
+    op: &str,
+    row: &ServiceProductRow,
+    occupied_positions: &mut std::collections::BTreeSet<i64>,
+) -> Result<(), AppError> {
+    if row.delivered_milli > 0 {
+        return Err(below_delivered(&row.product_name, row.delivered_milli));
+    }
+    connection
+        .execute("DELETE FROM invoiceLines WHERE id = ?1", [row.id])
+        .map_err(|error| map_db_error(error, op, &[]))?;
+    occupied_positions.remove(&row.position);
+    Ok(())
+}
+
+/// spec-06 SV-02: aplica los servicios editados de una factura de servicio
+/// (precio, descuento y productos) y devuelve su importe total.
+fn apply_service_blocks(
+    connection: &Connection,
+    op: &str,
+    invoice_id: i64,
+    blocks: &[UpdateServiceBlockInput],
+    occupied_positions: &mut std::collections::BTreeSet<i64>,
+    timestamp: &str,
+) -> Result<i64, AppError> {
+    let invalid = || {
+        validation_failed(
+            "Los servicios de la factura no son válidos",
+            &format!("{op} service reference is invalid"),
+        )
+    };
+    if blocks.len() > 100 {
+        return Err(validation_failed(
+            "Una factura admite hasta 100 servicios",
+            &format!("{op} service count out of range"),
+        ));
+    }
+    let existing: Vec<(i64, i64, String, i64)> = connection
+        .prepare(
+            "SELECT id, position, serviceName, priceCents FROM invoiceServiceLines
+             WHERE invoiceId = ?1",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_map([invoice_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(|error| map_db_error(error, op, &[]))?;
+    let mut block_positions = std::collections::BTreeSet::new();
+    for block in blocks {
+        match block.position {
+            Some(position) => {
+                if !block_positions.insert(position)
+                    || !existing.iter().any(|row| row.1 == position)
+                {
+                    return Err(invalid());
+                }
+            }
+            None if block.service_id.is_none() => return Err(invalid()),
+            None => {}
+        }
+    }
+    // Un servicio quitado se lleva sus productos, si ninguno se entregó.
+    for (service_line_id, position, _, _) in &existing {
+        if block_positions.contains(position) {
+            continue;
+        }
+        for row in read_service_product_rows(connection, *service_line_id, op)? {
+            remove_service_product(connection, op, &row, occupied_positions)?;
+        }
+        connection
+            .execute(
+                "DELETE FROM invoiceServiceLines WHERE id = ?1",
+                [service_line_id],
+            )
+            .map_err(|error| map_db_error(error, op, &[]))?;
+    }
+
+    let mut total_cents = 0_i64;
+    for block in blocks {
+        let (service_line_id, service_name, rows) = match block.position {
+            Some(position) => {
+                let (id, _, name, price_cents) = existing
+                    .iter()
+                    .find(|row| row.1 == position)
+                    .ok_or_else(invalid)?;
+                let price = crate::pricing::price_service(
+                    name,
+                    *price_cents,
+                    block.price.as_deref(),
+                    block.discount_kind.as_deref(),
+                    block.discount_value.as_deref(),
+                )?;
+                connection
+                    .execute(
+                        "UPDATE invoiceServiceLines SET priceCents = ?1, discountKind = ?2,
+                            discountValue = ?3, discountCents = ?4, totalCents = ?5, updatedAt = ?6
+                         WHERE id = ?7",
+                        params![
+                            price.unit_price_cents,
+                            price.discount_kind,
+                            price.discount_value,
+                            price.discount_cents,
+                            price.subtotal_cents,
+                            timestamp,
+                            id,
+                        ],
+                    )
+                    .map_err(|error| map_db_error(error, op, &[]))?;
+                total_cents += price.subtotal_cents;
+                (
+                    *id,
+                    name.clone(),
+                    read_service_product_rows(connection, *id, op)?,
+                )
+            }
+            None => {
+                let service_id = block.service_id.ok_or_else(invalid)?;
+                let service: Option<(String, Option<i64>)> = connection
+                    .query_row(
+                        "SELECT name, suggestedPriceCents FROM services WHERE id = ?1",
+                        [service_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(|error| map_db_error(error, op, &[]))?;
+                let Some((name, suggested_price_cents)) = service else {
+                    return Err(AppError::new(
+                        "notFound",
+                        "El servicio ya no existe",
+                        &format!("service missing during {op}"),
+                    ));
+                };
+                let price = crate::pricing::price_service(
+                    &name,
+                    suggested_price_cents.unwrap_or(0),
+                    block.price.as_deref(),
+                    block.discount_kind.as_deref(),
+                    block.discount_value.as_deref(),
+                )?;
+                let position = (1..=100)
+                    .find(|position| {
+                        !block_positions.contains(position)
+                            && !existing.iter().any(|row| row.1 == *position)
+                    })
+                    .ok_or_else(invalid)?;
+                block_positions.insert(position);
+                let id = insert_invoice_service_line(
+                    connection, op, invoice_id, position, service_id, &name, &price, timestamp,
+                )?;
+                total_cents += price.subtotal_cents;
+                (id, name, Vec::new())
+            }
+        };
+
+        let mut kept = std::collections::HashSet::new();
+        for product in &block.products {
+            match product.position {
+                Some(position) => {
+                    if !kept.insert(position) || !rows.iter().any(|row| row.position == position) {
+                        return Err(invalid());
+                    }
+                }
+                None if product.product_id.is_none() => {
+                    return Err(validation_failed(
+                        "Cada línea nueva debe indicar un producto",
+                        &format!("new {op} service line has no product"),
+                    ));
+                }
+                None => {}
+            }
+        }
+        for row in rows.iter().filter(|row| !kept.contains(&row.position)) {
+            remove_service_product(connection, op, row, occupied_positions)?;
+        }
+        for product in &block.products {
+            let quantity_milli = crate::validators::parse_quantity_milli(&product.quantity)
+                .map_err(|_| {
+                    validation_failed(
+                        &format!("La cantidad de un producto de «{service_name}» no es válida"),
+                        &format!("invalid {op} service product quantity"),
+                    )
+                })?;
+            let Some(row) = product
+                .position
+                .and_then(|position| rows.iter().find(|row| row.position == position))
+            else {
+                let product_id = product.product_id.ok_or_else(invalid)?;
+                let line_unit =
+                    resolve_line_unit(connection, product_id, product.unit_id, quantity_milli)?;
+                let quantity_milli = line_unit
+                    .as_ref()
+                    .map_or(quantity_milli, LineUnit::product_milli);
+                let position = free_line_position(occupied_positions, op)?;
+                total_cents += insert_new_priced_line(
+                    connection,
+                    op,
+                    invoice_id,
+                    position,
+                    NewPricedLine {
+                        product_id,
+                        quantity_milli,
+                        line_unit: line_unit.as_ref(),
+                        unit_price: product.unit_price.as_deref(),
+                        discount_kind: product.discount_kind.as_deref(),
+                        discount_value: product.discount_value.as_deref(),
+                        service_line_id: Some(service_line_id),
+                    },
+                    timestamp,
+                )?;
+                occupied_positions.insert(position);
+                continue;
+            };
+            let Some(product_id) = row.product_id else {
+                // Producto eliminado del catálogo: solo se conserva o se quita.
+                if quantity_milli != row.quantity_milli {
+                    return Err(AppError::new(
+                        "invalidState",
+                        &format!(
+                            "El producto eliminado «{}» solo se puede quitar",
+                            row.product_name
+                        ),
+                        &format!("deleted {op} service product line was modified"),
+                    ));
+                }
+                total_cents += row.subtotal_cents;
+                continue;
+            };
+            let line_unit =
+                resolve_line_unit(connection, product_id, product.unit_id, quantity_milli)?;
+            let quantity_milli = line_unit
+                .as_ref()
+                .map_or(quantity_milli, LineUnit::product_milli);
+            let product_status: String = connection
+                .query_row(
+                    "SELECT status FROM products WHERE id = ?1",
+                    [product_id],
+                    |db_row| db_row.get(0),
+                )
+                .map_err(|error| map_db_error(error, op, &[]))?;
+            if product_status == "discontinued" && quantity_milli != row.quantity_milli {
+                return Err(AppError::new(
+                    "invalidState",
+                    &format!(
+                        "El producto «{}» está descontinuado; solo se puede reducir la cantidad",
+                        row.product_name
+                    ),
+                    &format!("discontinued {op} service product was changed"),
+                ));
+            }
+            if quantity_milli < row.delivered_milli {
+                return Err(below_delivered(&row.product_name, row.delivered_milli));
+            }
+            crate::inventory::ensure_available(
+                connection,
+                product_id,
+                quantity_milli - row.delivered_milli,
+                Some(invoice_id),
+            )?;
+            let price = crate::pricing::price_line(
+                &row.product_name,
+                row.list_price_cents.unwrap_or(row.unit_price_cents),
+                row.unit_price_cents,
+                product.unit_price.as_deref(),
+                product.discount_kind.as_deref(),
+                product.discount_value.as_deref(),
+                |unit_price| line_gross_cents(line_unit.as_ref(), quantity_milli, unit_price),
+            )?;
+            connection
+                .execute(
+                    "UPDATE invoiceLines SET quantityMilli = ?1, unitPriceCents = ?2,
+                        subtotalCents = ?3, grossCents = ?4, discountKind = ?5,
+                        discountValue = ?6, discountCents = ?7, updatedAt = ?8,
+                        costAtSaleCents = (SELECT costCents FROM products WHERE id = ?9)
+                     WHERE id = ?10",
+                    params![
+                        quantity_milli,
+                        price.unit_price_cents,
+                        price.subtotal_cents,
+                        price.gross_cents,
+                        price.discount_kind,
+                        price.discount_value,
+                        price.discount_cents,
+                        timestamp,
+                        product_id,
+                        row.id,
+                    ],
+                )
+                .map_err(|error| map_db_error(error, op, &[]))?;
+            store_line_unit(connection, row.id, line_unit.as_ref(), op)?;
+            total_cents += price.subtotal_cents;
+        }
+    }
+    Ok(total_cents)
+}
+
 /// Núcleo de edición de ventas y servicios (FS-01): las líneas existentes
 /// conservan el precio con que se emitieron; las nuevas toman el vigente.
-/// Devuelve los consumos anteriores (LT-04), vuelve a descontar y registra
-/// Salida por línea nueva, Reversión por línea quitada y Ajuste solo si la
-/// cantidad cambió (H-A4).
+/// Editar no mueve stock (spec-06 EN-01): solo cambia lo apartado.
 #[allow(clippy::too_many_arguments)]
 fn update_priced_outgoing_invoice_inner(
     connection: &mut Connection,
@@ -2590,6 +3277,7 @@ fn update_priced_outgoing_invoice_inner(
     invoice_date: &str,
     notes: Option<&str>,
     lines: &[UpdateOutgoingInvoiceLineInput],
+    services: &[UpdateServiceBlockInput],
     reserved_until: Option<&str>,
 ) -> Result<InvoiceActionResult, AppError> {
     let type_code = invoice_type.as_str();
@@ -2618,7 +3306,7 @@ fn update_priced_outgoing_invoice_inner(
     };
     validate_edit_allowed(invoice_type, InvoiceStatus::from_str(&status)?)?;
 
-    if lines.is_empty() || lines.len() > 100 {
+    if (lines.is_empty() && services.is_empty()) || lines.len() > 100 {
         return Err(validation_failed(
             "Una factura admite entre 1 y 100 productos",
             &format!("{op} line count out of range"),
@@ -2655,7 +3343,8 @@ fn update_priced_outgoing_invoice_inner(
             .prepare(
                 "SELECT id, position, productId, productIdOriginal, productName,
                     quantityMilli, unitPriceCents, listPriceCents, subtotalCents, deliveredMilli
-                 FROM invoiceLines WHERE invoiceId = ?1 ORDER BY position",
+                 FROM invoiceLines WHERE invoiceId = ?1 AND serviceLineId IS NULL
+                 ORDER BY position",
             )
             .map_err(|error| map_db_error(error, op, &[]))?;
         let lines = statement
@@ -2741,8 +3430,15 @@ fn update_priced_outgoing_invoice_inner(
         parsed_lines.push((line, quantity_milli, line_unit));
     }
 
-    let mut occupied_positions: std::collections::BTreeSet<i64> =
-        current_lines.iter().map(|row| row.position).collect();
+    // Las posiciones son de toda la factura, servicios incluidos.
+    let mut occupied_positions: std::collections::BTreeSet<i64> = connection
+        .prepare("SELECT position FROM invoiceLines WHERE invoiceId = ?1")
+        .and_then(|mut statement| {
+            statement
+                .query_map([invoice_id], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()
+        })
+        .map_err(|error| map_db_error(error, op, &[]))?;
     // Quitar: lo ausente en la entrada, lo reducido a 0 y lo que cambia de
     // producto se devuelve (con Reversión) y se borra; se guarda la posición.
     let mut position_overrides: std::collections::HashMap<i64, i64> =
@@ -2947,155 +3643,57 @@ fn update_priced_outgoing_invoice_inner(
                 &format!("new {op} line quantity is zero"),
             ));
         }
-        let product: Option<PricedProductRow> = connection
-            .query_row(
-                "SELECT p.name, p.costCents, p.profitPercentHundredths, p.categoryId, c.name,
-                    p.unitId, u.name, u.abbreviation, p.status
-                 FROM products p
-                 LEFT JOIN categories c ON c.id = p.categoryId
-                 LEFT JOIN units u ON u.id = p.unitId
-                 WHERE p.id = ?1",
-                [product_id],
-                |db_row| {
-                    Ok((
-                        db_row.get(0)?,
-                        db_row.get(1)?,
-                        db_row.get(2)?,
-                        db_row.get(3)?,
-                        db_row.get(4)?,
-                        db_row.get(5)?,
-                        db_row.get(6)?,
-                        db_row.get(7)?,
-                        db_row.get(8)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|error| map_db_error(error, op, &[]))?;
-        let Some((
-            product_name,
-            cost_cents,
-            profit_percent_hundredths,
-            category_id,
-            category_name,
-            unit_id,
-            unit_name,
-            unit_abbreviation,
-            product_status,
-        )) = product
-        else {
-            return Err(AppError::new(
-                "notFound",
-                "El producto ya no existe",
-                &format!("new {op} line product missing"),
-            ));
-        };
-        if product_status == "discontinued" {
-            return Err(validation_failed(
-                &format!(
-                    "El producto «{product_name}» está descontinuado. Actívalo para usarlo en facturas"
-                ),
-                &format!("discontinued product added to {op}"),
-            ));
-        }
-        let available_milli: i64 = connection
-            .query_row(
-                "SELECT p.quantityMilli - COALESCE((SELECT SUM(il.quantityMilli - il.deliveredMilli)
-                    FROM invoiceLines il JOIN invoices i ON i.id = il.invoiceId
-                    WHERE il.productId = p.id AND i.type IN ('V', 'S') AND i.status <> 'cancelled'), 0)
-                 FROM products p WHERE p.id = ?1",
-                [product_id],
-                |row| row.get(0),
-            )
-            .map_err(|error| map_db_error(error, op, &[]))?;
-        if available_milli <= 0 {
-            return Err(validation_failed(
-                &format!("El producto «{product_name}» está agotado"),
-                &format!("out of stock product added to {op}"),
-            ));
-        }
-        let list_price_cents = selling_price_cents(cost_cents, profit_percent_hundredths);
-        let price = crate::pricing::price_line(
-            &product_name,
-            list_price_cents,
-            list_price_cents,
-            line.unit_price.as_deref(),
-            line.discount_kind.as_deref(),
-            line.discount_value.as_deref(),
-            |unit_price| line_gross_cents(line_unit.as_ref(), quantity_milli, unit_price),
-        )?;
-        let unit_price_cents = price.unit_price_cents;
-        let subtotal_cents = price.subtotal_cents;
-        crate::inventory::ensure_available(
-            connection,
-            product_id,
-            quantity_milli,
-            Some(invoice_id),
-        )?;
-        invoice_total_cents = invoice_total_cents
-            .checked_add(subtotal_cents)
-            .ok_or_else(|| {
-                validation_failed(
-                    "El total de la factura supera el rango permitido",
-                    &format!("{op} total overflow"),
-                )
-            })?;
-        if invoice_total_cents > 99_999_999_999 {
-            return Err(validation_failed(
-                "El total de la factura no puede superar $999.999.999,99",
-                &format!("{op} total exceeds legal bound"),
-            ));
-        }
         let position = if let Some(position) = position_overrides.get(&product_id) {
             *position
         } else {
-            (1..=100)
-                .find(|position| !occupied_positions.contains(position))
-                .ok_or_else(|| {
-                    validation_failed(
-                        "Una factura admite entre 1 y 100 productos",
-                        &format!("no free {op} line position"),
-                    )
-                })?
+            free_line_position(&occupied_positions, op)?
         };
-        let product_name_normalized = normalize_text(&product_name);
-        connection
-            .execute(
-                "INSERT INTO invoiceLines (invoiceId, position, productId, productIdOriginal, productName,
-                    productNameNormalized, unitId, unitName, unitAbbreviation, quantityMilli, unitPriceCents,
-                    subtotalCents, categoryId, categoryName, costAtSaleCents, createdAt, updatedAt,
-                    listPriceCents, grossCents, discountKind, discountValue, discountCents, deliveredMilli)
-                 VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15,
-                    ?16, ?17, ?18, ?19, ?20, 0)",
-                params![
-                    invoice_id,
-                    position,
-                    product_id,
-                    product_name,
-                    product_name_normalized,
-                    unit_id,
-                    unit_name,
-                    unit_abbreviation,
-                    quantity_milli,
-                    unit_price_cents,
-                    subtotal_cents,
-                    category_id,
-                    category_name,
-                    cost_cents,
-                    timestamp,
-                    list_price_cents,
-                    price.gross_cents,
-                    price.discount_kind,
-                    price.discount_value,
-                    price.discount_cents,
-                ],
-            )
-            .map_err(|error| map_db_error(error, op, &[]))?;
-        let line_id = connection.last_insert_rowid();
-        store_line_unit(connection, line_id, line_unit.as_ref(), op)?;
-        let _ = unit_price_cents;
+        let subtotal_cents = insert_new_priced_line(
+            connection,
+            op,
+            invoice_id,
+            position,
+            NewPricedLine {
+                product_id,
+                quantity_milli,
+                line_unit: line_unit.as_ref(),
+                unit_price: line.unit_price.as_deref(),
+                discount_kind: line.discount_kind.as_deref(),
+                discount_value: line.discount_value.as_deref(),
+                service_line_id: None,
+            },
+            &timestamp,
+        )?;
+        invoice_total_cents = invoice_total_cents
+            .checked_add(subtotal_cents)
+            .filter(|total| *total <= 99_999_999_999)
+            .ok_or_else(|| {
+                validation_failed(
+                    "El total de la factura no puede superar $999.999.999,99",
+                    &format!("{op} total exceeds legal bound"),
+                )
+            })?;
         occupied_positions.insert(position);
     }
+
+    let services_total_cents = apply_service_blocks(
+        connection,
+        op,
+        invoice_id,
+        services,
+        &mut occupied_positions,
+        &timestamp,
+    )?;
+    if invoice_total_cents
+        .checked_add(services_total_cents)
+        .is_none_or(|total| total > 99_999_999_999)
+    {
+        return Err(validation_failed(
+            "El total de la factura no puede superar $999.999.999,99",
+            &format!("{op} total exceeds legal bound"),
+        ));
+    }
+    ensure_invoice_within_available(connection, invoice_id)?;
 
     let full_name = crate::text::full_name(&client_first_name, client_last_name.as_deref());
     connection
@@ -3764,6 +4362,7 @@ pub fn update_sale_invoice_inner(
                 discount_value: line.discount_value.clone(),
             })
             .collect::<Vec<_>>(),
+        &[],
         input.reserved_until.as_deref(),
     );
     crate::automation::after_rejected_outgoing(connection, now, result)
@@ -3796,6 +4395,7 @@ pub fn update_service_invoice_inner(
                 discount_value: line.discount_value.clone(),
             })
             .collect::<Vec<_>>(),
+        &input.services,
         input.reserved_until.as_deref(),
     );
     crate::automation::after_rejected_outgoing(connection, now, result)
@@ -8256,6 +8856,7 @@ mod tests {
         status: Option<&str>,
     ) -> crate::models::invoice::CreateServiceInvoiceInput {
         crate::models::invoice::CreateServiceInvoiceInput {
+            services: Vec::new(),
             reserved_until: None,
             client_id,
             invoice_date: "2026-10-04".to_owned(),
@@ -9683,6 +10284,402 @@ mod tests {
         assert_eq!(error.code, "stockInsuficiente");
     }
 
+    // ---------- spec-06 SV-02: servicios en la factura ----------
+
+    fn catalog_service(
+        connection: &mut rusqlite::Connection,
+        now: chrono::DateTime<Utc>,
+        name: &str,
+        price: Option<&str>,
+        products: &[(i64, &str)],
+    ) -> i64 {
+        crate::commands::services::create_service_inner(
+            connection,
+            now,
+            crate::models::service::ServiceInput {
+                name: name.to_owned(),
+                description: None,
+                suggested_price: price.map(str::to_owned),
+                products: products
+                    .iter()
+                    .map(
+                        |(product_id, quantity)| crate::models::service::ServiceProductInput {
+                            product_id: *product_id,
+                            quantity: (*quantity).to_owned(),
+                        },
+                    )
+                    .collect(),
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    fn service_block(
+        service_id: i64,
+        price: Option<&str>,
+        products: Vec<crate::models::invoice::ServiceInvoiceLineInput>,
+    ) -> crate::models::invoice::ServiceBlockInput {
+        crate::models::invoice::ServiceBlockInput {
+            service_id,
+            price: price.map(str::to_owned),
+            discount_kind: None,
+            discount_value: None,
+            products,
+        }
+    }
+
+    fn kept_service_product(
+        position: Option<i64>,
+        product_id: Option<i64>,
+        quantity: &str,
+    ) -> crate::models::invoice::UpdateServiceProductInput {
+        crate::models::invoice::UpdateServiceProductInput {
+            position,
+            product_id,
+            quantity: quantity.to_owned(),
+            unit_id: None,
+            unit_price: None,
+            discount_kind: None,
+            discount_value: None,
+        }
+    }
+
+    fn kept_block(
+        position: Option<i64>,
+        service_id: Option<i64>,
+        price: Option<&str>,
+        products: Vec<crate::models::invoice::UpdateServiceProductInput>,
+    ) -> crate::models::invoice::UpdateServiceBlockInput {
+        crate::models::invoice::UpdateServiceBlockInput {
+            position,
+            service_id,
+            price: price.map(str::to_owned),
+            discount_kind: None,
+            discount_value: None,
+            products,
+        }
+    }
+
+    fn services_fixture(
+        username: &str,
+        seed: u32,
+    ) -> (rusqlite::Connection, chrono::DateTime<Utc>, i64, i64, i64) {
+        let now = Utc.with_ymd_and_hms(2026, 10, 4, 12, 0, 0).unwrap();
+        let (mut connection, _, client_id, supplier_id) = setup_sale_fixture(
+            username,
+            &format!("1234567{seed:04}"),
+            &format!("+5355{seed:04}01"),
+            &format!("1234568{seed:04}"),
+            &format!("+5355{seed:04}02"),
+            now,
+        );
+        // Precio de venta 2,00 (costo 1,00 + 100 %).
+        let panel = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Panel",
+            100,
+            10_000,
+            "10",
+            "1,00",
+        );
+        let cable = insert_stocked_product(
+            &mut connection,
+            now,
+            supplier_id,
+            "Cable",
+            100,
+            10_000,
+            "10",
+            "1,00",
+        );
+        (connection, now, client_id, panel, cable)
+    }
+
+    #[test]
+    fn a_service_invoice_mixes_services_and_loose_products() {
+        // spec-06 SV-02, S-15, S-16.
+        let (mut connection, now, client_id, panel, cable) = services_fixture("svcmix", 4101);
+        let installation = catalog_service(
+            &mut connection,
+            now,
+            "Instalación",
+            Some("50"),
+            &[(panel, "2"), (cable, "3")],
+        );
+        let maintenance = catalog_service(&mut connection, now, "Mantenimiento", None, &[]);
+
+        let mut input = service_input(client_id, vec![service_line(panel, "1")], None);
+        let mut block = service_block(
+            installation,
+            None,
+            // Cantidad cambiada, Cable quitado y un extra solo para esta factura.
+            vec![service_line(panel, "3")],
+        );
+        block.discount_kind = Some("percent".to_owned());
+        block.discount_value = Some("10".to_owned());
+        input.services = vec![
+            block,
+            service_block(maintenance, Some("20,00"), vec![service_line(cable, "1")]),
+        ];
+        let result = super::create_service_invoice_inner(&mut connection, now, input).unwrap();
+
+        // Suelto 1 × 2 + Instalación (50 − 10 %) + 3 × 2 + Mantenimiento 20 + 1 × 2.
+        let detail = super::get_invoice_inner(&mut connection, now, result.invoice_id).unwrap();
+        assert_eq!(detail.total_cents, 200 + 4_500 + 600 + 2_000 + 200);
+        assert_eq!(
+            detail
+                .services
+                .iter()
+                .map(|service| (
+                    service.position,
+                    service.name.as_str(),
+                    service.price_cents,
+                    service.total_cents
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, "Instalación", 5_000, 4_500),
+                (2, "Mantenimiento", 2_000, 2_000)
+            ]
+        );
+        assert_eq!(
+            detail
+                .lines
+                .iter()
+                .map(|line| (
+                    line.position,
+                    line.product_name.as_str(),
+                    line.service_position
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, "Panel", None),
+                (2, "Panel", Some(1)),
+                (3, "Cable", Some(2))
+            ]
+        );
+        let listed = super::list_invoices_inner(&mut connection, now, InvoiceFilters::default())
+            .unwrap()
+            .into_iter()
+            .find(|item| item.id == result.invoice_id)
+            .unwrap();
+        assert_eq!(listed.total_cents, detail.total_cents);
+
+        // Los productos de los servicios se apartan y se entregan como los demás.
+        assert_eq!(
+            crate::inventory::available_milli(&connection, panel, None).unwrap(),
+            6_000
+        );
+        super::record_deliveries_inner(
+            &mut connection,
+            now,
+            crate::models::invoice::RecordDeliveriesInput {
+                invoice_id: result.invoice_id,
+                deliveries: vec![crate::models::invoice::DeliveryInput {
+                    position: 2,
+                    quantity: "3".to_owned(),
+                }],
+            },
+        )
+        .unwrap();
+        assert_eq!(stock_of(&connection, panel), 7_000);
+        assert_eq!(
+            listed_status(&mut connection, now, result.invoice_id).as_deref(),
+            Some("partial")
+        );
+    }
+
+    #[test]
+    fn a_repeated_product_must_fit_in_total_and_discontinued_ones_are_rejected() {
+        let (mut connection, now, client_id, panel, cable) = services_fixture("svcrepeat", 4102);
+        let installation =
+            catalog_service(&mut connection, now, "Instalación", None, &[(panel, "6")]);
+
+        // 6 en el servicio + 6 sueltos > 10 disponibles.
+        let mut input = service_input(client_id, vec![service_line(panel, "6")], None);
+        input.services = vec![service_block(
+            installation,
+            None,
+            vec![service_line(panel, "6")],
+        )];
+        let error = super::create_service_invoice_inner(&mut connection, now, input).unwrap_err();
+        assert_eq!(error.code, "stockInsuficiente");
+
+        connection
+            .execute(
+                "UPDATE products SET status = 'discontinued', discontinuedAt = '2026-10-03T00:00:00Z' WHERE id = ?1",
+                [cable],
+            )
+            .unwrap();
+        let mut input = service_input(client_id, Vec::new(), None);
+        input.services = vec![service_block(
+            installation,
+            None,
+            vec![service_line(cable, "1")],
+        )];
+        let error = super::create_service_invoice_inner(&mut connection, now, input).unwrap_err();
+        assert!(error.message.contains("descontinuado"), "{}", error.message);
+    }
+
+    #[test]
+    fn editing_services_keeps_what_was_delivered() {
+        // spec-06 SV-02, EN-03.
+        let (mut connection, now, client_id, panel, cable) = services_fixture("svcedit", 4103);
+        let installation = catalog_service(&mut connection, now, "Instalación", Some("50"), &[]);
+        let maintenance = catalog_service(&mut connection, now, "Mantenimiento", Some("10"), &[]);
+        let mut input = service_input(client_id, Vec::new(), None);
+        input.services = vec![
+            service_block(
+                installation,
+                None,
+                vec![service_line(panel, "2"), service_line(cable, "1")],
+            ),
+            service_block(maintenance, None, vec![service_line(cable, "2")]),
+        ];
+        let invoice = super::create_service_invoice_inner(&mut connection, now, input)
+            .unwrap()
+            .invoice_id;
+        // Entrega el Panel del primer servicio (posición 1) y el Cable del segundo (3).
+        super::record_deliveries_inner(
+            &mut connection,
+            now,
+            crate::models::invoice::RecordDeliveriesInput {
+                invoice_id: invoice,
+                deliveries: vec![
+                    crate::models::invoice::DeliveryInput {
+                        position: 1,
+                        quantity: "1".to_owned(),
+                    },
+                    crate::models::invoice::DeliveryInput {
+                        position: 3,
+                        quantity: "1".to_owned(),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        let update = |services| {
+            let mut input = update_service_input(invoice, client_id, Vec::new());
+            input.services = services;
+            input
+        };
+
+        // Quitar un servicio con productos entregados no se permite.
+        let error = super::update_service_invoice_inner(
+            &mut connection,
+            now,
+            update(vec![kept_block(
+                Some(1),
+                None,
+                None,
+                vec![
+                    kept_service_product(Some(1), None, "2"),
+                    kept_service_product(Some(2), None, "1"),
+                ],
+            )]),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "belowDelivered");
+
+        // Precio nuevo, Cable sin entregar quitado, Panel a 4, un extra y un
+        // servicio nuevo; el segundo servicio se conserva.
+        super::update_service_invoice_inner(
+            &mut connection,
+            now,
+            update(vec![
+                kept_block(
+                    Some(1),
+                    None,
+                    Some("60"),
+                    vec![
+                        kept_service_product(Some(1), None, "4"),
+                        kept_service_product(None, Some(cable), "1"),
+                    ],
+                ),
+                kept_block(
+                    Some(2),
+                    None,
+                    None,
+                    vec![kept_service_product(Some(3), None, "2")],
+                ),
+                kept_block(None, Some(maintenance), Some("0"), Vec::new()),
+            ]),
+        )
+        .unwrap();
+        let detail = super::get_invoice_inner(&mut connection, now, invoice).unwrap();
+        assert_eq!(
+            detail
+                .services
+                .iter()
+                .map(|service| (service.position, service.price_cents))
+                .collect::<Vec<_>>(),
+            vec![(1, 6_000), (2, 1_000), (3, 0)]
+        );
+        // 60 + 4 × 2 + 1 × 2 + 10 + 2 × 2 + 0.
+        assert_eq!(detail.total_cents, 6_000 + 800 + 200 + 1_000 + 400);
+
+        // Bajar por debajo de lo entregado tampoco.
+        let error = super::update_service_invoice_inner(
+            &mut connection,
+            now,
+            update(vec![
+                kept_block(
+                    Some(1),
+                    None,
+                    None,
+                    vec![kept_service_product(Some(1), None, "0,5")],
+                ),
+                kept_block(
+                    Some(2),
+                    None,
+                    None,
+                    vec![kept_service_product(Some(3), None, "2")],
+                ),
+            ]),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "belowDelivered");
+    }
+
+    #[test]
+    fn every_invoice_total_includes_the_service_price() {
+        // spec-06 §3.3: listados y CSV, clientes, cuentas por cobrar e ingresos.
+        let (mut connection, now, client_id, panel, _) = services_fixture("svctotals", 4104);
+        let installation = catalog_service(&mut connection, now, "Instalación", Some("50"), &[]);
+        let mut pending = service_input(client_id, vec![service_line(panel, "1")], None);
+        pending.services = vec![service_block(installation, None, Vec::new())];
+        super::create_service_invoice_inner(&mut connection, now, pending).unwrap();
+        let mut paid = service_input(client_id, Vec::new(), Some("completed"));
+        paid.services = vec![service_block(installation, Some("30"), Vec::new())];
+        super::create_service_invoice_inner(&mut connection, now, paid).unwrap();
+
+        let client =
+            crate::commands::clients::get_client_detail_inner(&mut connection, now, client_id)
+                .unwrap();
+        assert_eq!(client.indicators.total_invoiced_cents, 5_200 + 3_000);
+        assert_eq!(client.indicators.pending_balance_cents, 5_200);
+
+        let kpis = crate::commands::dashboard::get_dashboard_kpis_inner(
+            &mut connection,
+            now,
+            crate::models::dashboard::DashboardPeriod {
+                preset: "custom".to_owned(),
+                from_date: Some("2026-10-01".to_owned()),
+                to_date: Some("2026-10-04".to_owned()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (kpis.reservations.count, kpis.reservations.amount_cents),
+            (1, 5_200)
+        );
+        assert_eq!(kpis.income.value, 3_000);
+        assert!(kpis.best_sellers.is_empty());
+    }
+
     #[test]
     fn a_sale_reserves_and_each_delivery_lowers_the_stock() {
         // spec-06 EN-01, EN-02, EN-03.
@@ -10079,6 +11076,7 @@ mod tests {
         lines: Vec<crate::models::invoice::UpdateOutgoingInvoiceLineInput>,
     ) -> crate::models::invoice::UpdateServiceInvoiceInput {
         crate::models::invoice::UpdateServiceInvoiceInput {
+            services: Vec::new(),
             reserved_until: None,
             invoice_id,
             client_id,

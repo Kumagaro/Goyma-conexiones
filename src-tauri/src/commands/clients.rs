@@ -507,9 +507,11 @@ fn client_indicators(
             "SELECT
                 COALESCE(SUM(CASE WHEN i.status <> 'cancelled'
                     THEN (SELECT COALESCE(SUM(il.subtotalCents), 0) FROM invoiceLines il WHERE il.invoiceId = i.id)
+                        + (SELECT COALESCE(SUM(s.totalCents), 0) FROM invoiceServiceLines s WHERE s.invoiceId = i.id)
                     ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN i.status = 'pending'
                     THEN (SELECT COALESCE(SUM(il.subtotalCents), 0) FROM invoiceLines il WHERE il.invoiceId = i.id)
+                        + (SELECT COALESCE(SUM(s.totalCents), 0) FROM invoiceServiceLines s WHERE s.invoiceId = i.id)
                     ELSE 0 END), 0),
                 COUNT(CASE WHEN i.status <> 'cancelled' THEN 1 END),
                 MAX(CASE WHEN i.status <> 'cancelled' THEN i.invoiceDate END)
@@ -537,7 +539,8 @@ fn client_invoice_history(
     let mut statement = connection
         .prepare(
             "SELECT i.id, i.number, i.type, i.contactFullName, i.invoiceDate,
-                COALESCE((SELECT SUM(il.subtotalCents) FROM invoiceLines il WHERE il.invoiceId = i.id), 0),
+                COALESCE((SELECT SUM(il.subtotalCents) FROM invoiceLines il WHERE il.invoiceId = i.id), 0)
+                    + (SELECT COALESCE(SUM(s.totalCents), 0) FROM invoiceServiceLines s WHERE s.invoiceId = i.id),
                 i.status, i.associatedNumber, i.associatedType,
                 (SELECT COUNT(*) FROM invoiceLines il WHERE il.invoiceId = i.id), i.createdByName
              FROM invoices i

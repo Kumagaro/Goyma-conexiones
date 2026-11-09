@@ -207,3 +207,8 @@ Cada uno con su fila en la matriz de autorización (`Agents.md` §3).
 - **D-10 — Entrega por posición de línea:** `record_deliveries` recibe `{ position, quantity }`, porque desde D-02 un producto puede repetirse en la factura.
 - **D-11 — Insumos, Garantía y Pérdida al costo vigente:** salen de los lotes al crearse (FIFO) pero su costo guardado es el `costCents` actual del producto (S-02), igual que el de las entregas.
 - **D-12 — Entregas sin fila en el registro de actividad:** el `CHECK` de `activityLog` no admite una acción de entrega; queda el movimiento del producto (con usuario y fecha) y la tabla `deliveries`. Si hace falta, se añade en una migración posterior.
+- **D-13 — Servicios de la factura por posición:** al editar, cada servicio y cada producto de un servicio se identifican por su `position` (como las entregas, D-10); los productos sueltos siguen por `productIdOriginal`. Una factura nueva solo agrega servicios del catálogo (`serviceId`), y uno guardado conserva su nombre aunque el servicio se elimine.
+- **D-14 — Disponible de toda la factura:** con un producto repetido (S-16) cada línea cabe sola pero la suma no; al crear y editar Venta o Servicio se comprueba además lo pendiente de toda la factura por producto.
+- **D-15 — Servicios sin fila en el registro de actividad:** el `CHECK` de `activityLog` no admite el tipo `service` (igual que D-12).
+- **D-16 — El precio del servicio en el dashboard:** cuenta en ingresos, clientes y cuentas por cobrar, sin costo, y no entra en el ranking de productos ni en lento movimiento.
+

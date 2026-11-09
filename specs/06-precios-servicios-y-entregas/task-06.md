@@ -119,15 +119,18 @@
 
 ## 4. Fase 4 — Servicios
 
-- [ ] Test: CRUD de servicios (nombre único, sin productos, productos sin repetir, cantidad > 0, eliminar con facturas que lo usan).
-- [ ] Test: factura de servicio con varios servicios y productos sueltos; precio libre y descuento del servicio; cantidades cambiadas, productos quitados y extras solo en la factura; total servicio + productos.
-- [ ] Test: los productos de un servicio se apartan y se entregan; el mismo producto en dos servicios.
-- [ ] Test: un producto descontinuado aparece marcado en la ficha del servicio, se omite con aviso al agregar el servicio a una factura, y el backend rechaza una factura que lo incluya.
-- [ ] Test: cada consulta que suma importes por factura (dashboard, clientes, cuentas por cobrar, CSV) incluye el precio de los servicios.
-- [ ] Implementación backend; filas de los cinco comandos en la matriz de autorización.
-- [ ] Interfaz: página Servicios debajo de Productos en el menú, formulario con buscador de productos, bloque de servicio en la factura y alta de servicio desde la factura.
+- [x] Test: CRUD de servicios (nombre único, sin productos, productos sin repetir, cantidad > 0, eliminar con facturas que lo usan).
+- [x] Test: factura de servicio con varios servicios y productos sueltos; precio libre y descuento del servicio; cantidades cambiadas, productos quitados y extras solo en la factura; total servicio + productos.
+- [x] Test: los productos de un servicio se apartan y se entregan; el mismo producto en dos servicios.
+- [x] Test: un producto descontinuado aparece marcado en la ficha del servicio, se omite con aviso al agregar el servicio a una factura, y el backend rechaza una factura que lo incluya.
+  - Ficha y omisión con aviso probadas en Vitest; el rechazo del backend, en Rust.
+- [x] Test: cada consulta que suma importes por factura (dashboard, clientes, cuentas por cobrar, CSV) incluye el precio de los servicios.
+  - Un test cubre listado (y por tanto el CSV de facturas, que usa el mismo total), cliente, cuentas por cobrar e ingresos del dashboard. El precio del servicio cuenta como ingreso sin costo y no entra en el ranking de productos.
+- [x] Implementación backend; filas de los cinco comandos en la matriz de autorización.
+- [x] Interfaz: página Servicios debajo de Productos en el menú, formulario con buscador de productos, bloque de servicio en la factura y alta de servicio desde la factura.
 
 - [ ] Cierre de fase 4.
+  - 2026-11-09: `cargo test` 503/503 y `npm test` 433/433 en verde; clippy, fmt y prettier limpios. Revisado en la vista previa con datos simulados (lista, ficha, formulario y bloque de servicio en la factura). Falta la verificación en la app real (`tauri:dev`) y el commit.
 
 ## 5. Fase 5 — Contraseña de respaldo
 

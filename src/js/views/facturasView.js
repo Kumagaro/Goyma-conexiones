@@ -1,4 +1,9 @@
-import { emptyState } from "../utils/dom.js";
+import { emptyState, setOptions } from "../utils/dom.js";
+import {
+  createService,
+  getService,
+  listServices,
+} from "../services/servicesService.js";
 import { createCombobox } from "../components/combobox.js";
 import { confirmDialog } from "../components/confirmDialog.js";
 import { openQuickContactDialog } from "../components/quickContactDialog.js";
@@ -350,6 +355,10 @@ function createInvoiceSubmodule(cfg) {
   let removeAttachment = false;
   let lastItems = [];
   let draft = null;
+  // spec-06 SV-02: servicios de una factura de servicio con sus productos.
+  const hasServices = cfg.invoiceType === "S";
+  let services = [];
+  let serviceCombobox = null;
 
   const field = (suffix) => document.getElementById(`${cfg.field}-${suffix}`);
   const button = (suffix) =>
@@ -376,6 +385,7 @@ function createInvoiceSubmodule(cfg) {
     bindListFilters(cfg.view, loadInvoices, claim);
     mountContactCombobox();
     mountProductCombobox();
+    if (hasServices) mountServiceCombobox();
     bindForm();
     bindTableActions();
     bindDetailActions();
@@ -567,29 +577,13 @@ function createInvoiceSubmodule(cfg) {
 
   // ---------- Líneas ----------
 
-  function addProductLine(item) {
-    const productId = Number(item?.id);
-    if (!Number.isSafeInteger(productId)) return;
-    const name = item?.name ?? "";
-    if (
-      lines.some(
-        (line) =>
-          line.productId === productId || line.productIdOriginal === productId,
-      )
-    ) {
-      notifyError(null, `«${name}» ya está en la factura.`);
-      return;
-    }
-    if (!isEntry && item?.isOutOfStock) {
-      notifyError(null, `«${name}» está agotado y no se puede agregar.`);
-      return;
-    }
-    lines.push({
-      productId,
+  function newLine(item, quantity) {
+    return {
+      productId: Number(item.id),
       productIdOriginal: null,
-      productName: name,
+      productName: item?.name ?? "",
       unitAbbreviation: item?.unitAbbreviation ?? null,
-      quantity: "1",
+      quantity,
       originalQuantity: null,
       unitPrice: "",
       priceCents: Number.isSafeInteger(item?.sellingPriceCents)
@@ -602,9 +596,39 @@ function createInvoiceSubmodule(cfg) {
       productStatus: item?.isDiscontinued ? "discontinued" : "active",
       unitId: null,
       factor: 1,
-    });
+    };
+  }
+
+  function addProductLine(item) {
+    const productId = Number(item?.id);
+    if (!Number.isSafeInteger(productId)) return;
+    const name = item?.name ?? "";
+    // S-16: en una factura de servicio el destino puede ser un servicio.
+    const target = hasServices ? field("destino")?.value : "";
+    const block = target ? services[Number(target)] : null;
+    const targetLines = block ? block.products : lines;
+    if (
+      targetLines.some(
+        (line) =>
+          line.productId === productId || line.productIdOriginal === productId,
+      )
+    ) {
+      notifyError(
+        null,
+        block
+          ? `«${name}» ya está en el servicio «${block.name}».`
+          : `«${name}» ya está en la factura.`,
+      );
+      return;
+    }
+    if (!isEntry && item?.isOutOfStock) {
+      notifyError(null, `«${name}» está agotado y no se puede agregar.`);
+      return;
+    }
+    targetLines.push(newLine(item, "1"));
     renderLines();
     draft?.schedule();
+    if (block) return;
     field("lineas-body")
       ?.querySelector(`[data-line-index="${lines.length - 1}"] input`)
       ?.focus();
@@ -721,7 +745,7 @@ function createInvoiceSubmodule(cfg) {
       const price = lineInput(line, index, "salePrice", "Precio", disabled);
       price.placeholder = centsToText(line.priceCents);
       price.addEventListener("blur", () => {
-        if (priceBelowList(lines[index])) {
+        if (priceBelowList(line)) {
           setFieldError(
             price,
             `El precio no puede ser menor que ${formatMoney(line.priceCents)}`,
@@ -764,8 +788,8 @@ function createInvoiceSubmodule(cfg) {
     );
     value.placeholder = "0";
     kind.addEventListener("change", () => {
-      lines[index].discountKind = kind.value;
-      if (!kind.value) lines[index].discountValue = "";
+      line.discountKind = kind.value;
+      if (!kind.value) line.discountValue = "";
       renderLines();
       draft?.schedule();
     });
@@ -789,8 +813,8 @@ function createInvoiceSubmodule(cfg) {
       productCombobox?.getInput().focus();
     });
     input.addEventListener("input", () => {
-      lines[index][key] = input.value;
-      const subtotal = lineSubtotalCents(lines[index]);
+      line[key] = input.value;
+      const subtotal = lineSubtotalCents(line);
       const cell = input
         .closest(".li-row")
         ?.querySelector("[data-line-subtotal]");
@@ -812,68 +836,314 @@ function createInvoiceSubmodule(cfg) {
       container.append(empty);
     }
     lines.forEach((line, index) => {
-      const deleted = isDeletedLine(line);
-      const discontinued = isDiscontinuedLine(line);
-      const row = document.createElement("div");
-      row.className = "li-row li-body";
-      row.dataset.lineIndex = String(index);
+      container.append(
+        lineRow(line, index, String(index + 1), () => {
+          lines.splice(index, 1);
+          renderLines();
+          draft?.schedule();
+        }),
+      );
+    });
+    if (hasServices) renderServices();
+    updateTotals();
+    [...lines, ...serviceProducts()].forEach(
+      (line) => void loadUnitOptions(line),
+    );
+  }
 
-      const position = document.createElement("div");
-      position.textContent = String(index + 1);
-      const name = document.createElement("div");
-      name.textContent = deleted
-        ? `${line.productName} (eliminado)`
-        : discontinued
-          ? `${line.productName} (descontinuado)`
-          : line.newProduct
-            ? `${line.productName} (nuevo)`
-            : line.productName;
-      const quantity = document.createElement("div");
-      quantity.append(lineInput(line, index, "quantity", "Cantidad", deleted));
-      const unit = document.createElement("div");
-      unit.append(unitControl(line, index, deleted));
-      const price = document.createElement("div");
-      if (isEntry) {
-        price.append(
-          lineInput(
-            line,
-            index,
-            "unitPrice",
-            "Costo unitario",
-            deleted || discontinued,
+  function lineRow(line, index, label, onRemove) {
+    const deleted = isDeletedLine(line);
+    const discontinued = isDiscontinuedLine(line);
+    const row = document.createElement("div");
+    row.className = "li-row li-body";
+    row.dataset.lineIndex = String(index);
+
+    const position = document.createElement("div");
+    position.textContent = label;
+    const name = document.createElement("div");
+    name.textContent = deleted
+      ? `${line.productName} (eliminado)`
+      : discontinued
+        ? `${line.productName} (descontinuado)`
+        : line.newProduct
+          ? `${line.productName} (nuevo)`
+          : line.productName;
+    const quantity = document.createElement("div");
+    quantity.append(lineInput(line, index, "quantity", "Cantidad", deleted));
+    const unit = document.createElement("div");
+    unit.append(unitControl(line, index, deleted));
+    const price = document.createElement("div");
+    if (isEntry) {
+      price.append(
+        lineInput(
+          line,
+          index,
+          "unitPrice",
+          "Costo unitario",
+          deleted || discontinued,
+        ),
+      );
+    } else if (showsSalePrice) {
+      price.append(salePriceControls(line, index, deleted));
+    } else {
+      price.className = "li-costo";
+      price.textContent = "Al guardar";
+    }
+    const subtotal = document.createElement("div");
+    subtotal.className = "li-subtotal";
+    subtotal.dataset.lineSubtotal = "";
+    const subtotalCents = lineSubtotalCents(line);
+    subtotal.textContent =
+      subtotalCents == null ? "—" : formatMoney(subtotalCents);
+    const actions = document.createElement("div");
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "li-remove-btn";
+    remove.setAttribute("aria-label", `Quitar ${line.productName}`);
+    remove.title = "Quitar línea";
+    remove.append(trashIcon());
+    remove.addEventListener("click", onRemove);
+    actions.append(remove);
+
+    row.append(position, name, quantity, unit, price, subtotal, actions);
+    return row;
+  }
+
+  // ---------- Servicios de la factura (spec-06 SV-02) ----------
+
+  function serviceProducts() {
+    return services.flatMap((block) => block.products);
+  }
+
+  function servicePriceCents(block) {
+    const typed = String(block.price ?? "").trim();
+    return typed ? parseDecimal(typed, 2) : block.priceCents;
+  }
+
+  // Precio del servicio menos su descuento (sin sus productos).
+  function serviceNetCents(block) {
+    const price = servicePriceCents(block) ?? 0;
+    const value = parseDecimal(block.discountValue, 2);
+    if (!block.discountKind || value == null) return price;
+    const discount =
+      block.discountKind === "percent"
+        ? Math.round((price * value) / 10000)
+        : value;
+    return Math.max(price - discount, 0);
+  }
+
+  // Servicio + productos (decisión del dueño).
+  function serviceTotalCents(block) {
+    return block.products.reduce(
+      (sum, line) => sum + (lineSubtotalCents(line) ?? 0),
+      serviceNetCents(block),
+    );
+  }
+
+  function mountServiceCombobox() {
+    if (serviceCombobox?.getInput().isConnected) return;
+    serviceCombobox = mountCombobox(field("buscar-servicio"), {
+      label: "Buscar servicio",
+      placeholder: "Escribe para buscar un servicio...",
+      search: async (query) => {
+        if (!query) return [];
+        const result = await listServices(query);
+        return Array.isArray(result) ? result : [];
+      },
+      formatOption: (item) =>
+        [
+          item?.name ?? "",
+          item?.suggestedPriceCents == null
+            ? null
+            : formatMoney(item.suggestedPriceCents),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      addOnlyWhenEmpty: true,
+      addOptionLabel: (query) =>
+        `Servicio no encontrado · Crear servicio «${query}»`,
+      onAddNew: (query) => createServiceFromInvoice(query),
+      onSelect: (item) => {
+        if (!item) return;
+        serviceCombobox?.setSelected(null);
+        void addService(item.id);
+      },
+    });
+  }
+
+  // Aparece con su precio sugerido y sus productos; los descontinuados se
+  // omiten con aviso (SV-01).
+  async function addService(serviceId) {
+    try {
+      const service = await getService(serviceId);
+      const products = [];
+      for (const product of service.products ?? []) {
+        if (product.status === "discontinued") {
+          notifyWarning(`Se omitió ${product.name}: está descontinuado`);
+          continue;
+        }
+        products.push(
+          newLine(
+            {
+              id: product.productId,
+              name: product.name,
+              unitAbbreviation: product.unitAbbreviation,
+              sellingPriceCents: product.sellingPriceCents,
+            },
+            product.suggestedQuantity,
           ),
         );
-      } else if (showsSalePrice) {
-        price.append(salePriceControls(line, index, deleted));
-      } else {
-        price.className = "li-costo";
-        price.textContent = "Al guardar";
       }
-      const subtotal = document.createElement("div");
-      subtotal.className = "li-subtotal";
-      subtotal.dataset.lineSubtotal = "";
-      const subtotalCents = lineSubtotalCents(line);
-      subtotal.textContent =
-        subtotalCents == null ? "—" : formatMoney(subtotalCents);
-      const actions = document.createElement("div");
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "li-remove-btn";
-      remove.setAttribute("aria-label", `Quitar ${line.productName}`);
-      remove.title = "Quitar línea";
-      remove.append(trashIcon());
-      remove.addEventListener("click", () => {
-        lines.splice(index, 1);
+      services.push({
+        position: null,
+        serviceId: service.id,
+        name: service.name,
+        priceCents: service.suggestedPriceCents ?? 0,
+        price: "",
+        originalPrice: "",
+        discountKind: "",
+        discountValue: "",
+        products,
+      });
+      renderLines();
+      draft?.schedule();
+    } catch (error) {
+      notifyError(error, "No se pudo agregar el servicio.");
+    }
+  }
+
+  // Alta rápida desde la factura, como la de productos (SV-02).
+  async function createServiceFromInvoice(query) {
+    const created = await openFormDialog({
+      title: "Nuevo servicio",
+      submitText: "Crear servicio",
+      missingMessage: "Escribe el nombre del servicio.",
+      fields: [
+        { name: "name", label: "Nombre", value: query, required: true },
+        { name: "price", label: "Precio sugerido (USD)", inputMode: "decimal" },
+      ],
+      onSubmit: (values) =>
+        createService({
+          name: String(values.name ?? "").trim(),
+          suggestedPrice: String(values.price ?? "").trim() || null,
+          products: [],
+        }),
+    });
+    serviceCombobox?.setSelected(null);
+    if (!created) return null;
+    notifySuccess(`Servicio «${created.name}» creado.`);
+    await addService(created.id);
+    return null;
+  }
+
+  function serviceInput(block, key, label) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.value = block[key] ?? "";
+    input.setAttribute("aria-label", `${label} de ${block.name}`);
+    input.addEventListener("input", () => {
+      block[key] = input.value;
+      updateTotals();
+      draft?.schedule();
+    });
+    return input;
+  }
+
+  function renderServices() {
+    const container = field("servicios-body");
+    if (!container) return;
+    container.replaceChildren();
+    services.forEach((block, blockIndex) => {
+      const label = `S${blockIndex + 1}`;
+      const wrapper = document.createElement("div");
+      wrapper.className = "line-items";
+      const head = document.createElement("div");
+      head.className = "li-row li-body li-service-head";
+      const cell = (text) => {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div;
+      };
+      const price = document.createElement("div");
+      price.className = "li-price";
+      const priceInput = serviceInput(block, "price", "Precio");
+      priceInput.placeholder = centsToText(block.priceCents);
+      const discount = document.createElement("div");
+      discount.className = "li-discount";
+      const kind = document.createElement("select");
+      kind.setAttribute("aria-label", `Tipo de descuento de ${block.name}`);
+      setOptions(kind, [
+        ["", "Sin desc."],
+        ["percent", "% desc."],
+        ["amount", "USD desc."],
+      ]);
+      kind.value = block.discountKind ?? "";
+      const value = serviceInput(block, "discountValue", "Descuento");
+      value.placeholder = "0";
+      value.disabled = !kind.value;
+      kind.addEventListener("change", () => {
+        block.discountKind = kind.value;
+        if (!kind.value) block.discountValue = "";
         renderLines();
         draft?.schedule();
       });
+      discount.append(kind, value);
+      price.append(priceInput, discount);
+      const net = cell("");
+      net.dataset.serviceNet = String(blockIndex);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "li-remove-btn";
+      remove.title = "Quitar servicio";
+      remove.setAttribute("aria-label", `Quitar ${block.name}`);
+      remove.append(trashIcon());
+      remove.addEventListener("click", () => {
+        services.splice(blockIndex, 1);
+        renderLines();
+        draft?.schedule();
+      });
+      const actions = document.createElement("div");
       actions.append(remove);
-
-      row.append(position, name, quantity, unit, price, subtotal, actions);
-      container.append(row);
+      head.append(
+        cell(label),
+        cell(`Servicio: ${block.name}`),
+        cell("1"),
+        cell("—"),
+        price,
+        net,
+        actions,
+      );
+      wrapper.append(head);
+      block.products.forEach((line, index) => {
+        wrapper.append(
+          lineRow(line, index, `${label}.${index + 1}`, () => {
+            block.products.splice(index, 1);
+            renderLines();
+            draft?.schedule();
+          }),
+        );
+      });
+      const total = document.createElement("div");
+      total.className = "li-service-total";
+      total.dataset.serviceTotal = String(blockIndex);
+      wrapper.append(total);
+      container.append(wrapper);
     });
-    updateTotals();
-    lines.forEach((line) => void loadUnitOptions(line));
+    // Destino de los productos que se agregan: sueltos o un servicio.
+    const destination = field("destino");
+    if (destination) {
+      const selected = destination.value;
+      setOptions(destination, [
+        ["", "Productos sueltos"],
+        ...services.map((block, index) => [
+          String(index),
+          `Servicio: ${block.name}`,
+        ]),
+      ]);
+      destination.value =
+        selected && Number(selected) < services.length ? selected : "";
+    }
   }
 
   // ---------- Unidad por línea (spec-04 CV-01) ----------
@@ -892,7 +1162,7 @@ function createInvoiceSubmodule(cfg) {
       (option) => option.unitId === line.unitId,
     );
     if (chosen) line.factor = parseFactor(chosen.factor);
-    if (lines.includes(line)) renderLines();
+    if (lines.includes(line) || serviceProducts().includes(line)) renderLines();
   }
 
   /** Selector si el producto tiene conversiones; si no, su unidad en texto. */
@@ -918,10 +1188,9 @@ function createInvoiceSubmodule(cfg) {
         (item) => String(item.unitId) === select.value,
       );
       // La primera es la del producto: elegirla es no convertir.
-      lines[index].unitId =
-        option && option !== options[0] ? option.unitId : null;
-      lines[index].unitAbbreviation = option?.abbreviation ?? null;
-      lines[index].factor = parseFactor(option?.factor);
+      line.unitId = option && option !== options[0] ? option.unitId : null;
+      line.unitAbbreviation = option?.abbreviation ?? null;
+      line.factor = parseFactor(option?.factor);
       renderLines();
     });
     return select;
@@ -932,9 +1201,18 @@ function createInvoiceSubmodule(cfg) {
     if (isEntry || showsSalePrice) {
       const total = lines.reduce(
         (sum, line) => sum + (lineSubtotalCents(line) ?? 0),
-        0,
+        services.reduce((sum, block) => sum + serviceTotalCents(block), 0),
       );
       text = formatMoney(total);
+      const blocks = field("servicios-body");
+      services.forEach((block, index) => {
+        const net = blocks?.querySelector(`[data-service-net="${index}"]`);
+        if (net) net.textContent = formatMoney(serviceNetCents(block));
+        const sum = blocks?.querySelector(`[data-service-total="${index}"]`);
+        if (sum) {
+          sum.textContent = `Total del servicio: ${formatMoney(serviceTotalCents(block))}`;
+        }
+      });
     } else {
       // Garantía e insumos van a costo real (FIFO): solo se conoce al guardar.
       text = "Se calcula al guardar";
@@ -1078,6 +1356,7 @@ function createInvoiceSubmodule(cfg) {
     // Formulario recién cargado en el DOM: nada de un borrador anterior.
     editing = null;
     lines = [];
+    services = [];
     selectedContact = null;
     pendingAttachmentPath = null;
     removeAttachment = false;
@@ -1094,6 +1373,7 @@ function createInvoiceSubmodule(cfg) {
         ...serializeForm(formEl),
         contact: selectedContact,
         lines,
+        services,
       }),
       restore: restoreDraft,
     });
@@ -1118,6 +1398,7 @@ function createInvoiceSubmodule(cfg) {
       }
     }
     lines = kept;
+    services = Array.isArray(values.services) ? values.services : [];
     renderLines();
     if (associated) {
       const id = Number(values[associated.selectId]);
@@ -1149,6 +1430,7 @@ function createInvoiceSubmodule(cfg) {
   function resetForm() {
     editing = null;
     lines = [];
+    services = [];
     pendingAttachmentPath = null;
     removeAttachment = false;
     form()?.reset();
@@ -1185,7 +1467,7 @@ function createInvoiceSubmodule(cfg) {
     if (notes) notes.value = detail.notes ?? "";
     const reservedUntil = field("reservar-hasta");
     if (reservedUntil) reservedUntil.value = detail.reservedUntil ?? "";
-    lines = (detail.lines ?? []).map((line) => {
+    const editLine = (line) => {
       const productId = line.productStatus ? line.productIdOriginal : null;
       // CV-01: se edita lo escrito ("2 Caja"); un producto eliminado o una
       // unidad que ya no existe se editan en la unidad del producto.
@@ -1217,7 +1499,26 @@ function createInvoiceSubmodule(cfg) {
         unitId: entered?.unitId ?? null,
         factor: enteredMilli ? baseMilli / enteredMilli : 1,
       };
-    });
+    };
+    const detailLines = detail.lines ?? [];
+    lines = detailLines
+      .filter((line) => line.servicePosition == null)
+      .map(editLine);
+    // SV-02: cada servicio con su precio emitido y sus productos.
+    services = (detail.services ?? []).map((service) => ({
+      position: service.position,
+      serviceId: service.serviceId ?? null,
+      name: service.name,
+      priceCents: service.priceCents,
+      price: centsToText(service.priceCents),
+      originalPrice: centsToText(service.priceCents),
+      discountKind: service.discountKind ?? "",
+      discountValue:
+        service.discountValue == null ? "" : centsToText(service.discountValue),
+      products: detailLines
+        .filter((line) => line.servicePosition === service.position)
+        .map((line) => ({ ...editLine(line), position: line.position })),
+    }));
     if (isEntry) setAttachmentLabel(detail.attachmentOriginalName ?? "");
     renderLines();
     showTab("create", createTab());
@@ -1232,7 +1533,13 @@ function createInvoiceSubmodule(cfg) {
   }
 
   function validateLines() {
-    const missing = lines.find(
+    const allLines = [...lines, ...serviceProducts()];
+    const badService = services.find(
+      (block) =>
+        String(block.price ?? "").trim() && servicePriceCents(block) == null,
+    );
+    if (badService) return `El precio de «${badService.name}» no es válido.`;
+    const missing = allLines.find(
       (line) =>
         !String(line.quantity ?? "").trim() ||
         (isEntry && !String(line.unitPrice ?? "").trim()),
@@ -1242,11 +1549,11 @@ function createInvoiceSubmodule(cfg) {
         ? `Escribe la cantidad y el costo unitario de «${missing.productName}».`
         : `Escribe la cantidad de «${missing.productName}».`;
     }
-    const cheaper = lines.find(priceBelowList);
+    const cheaper = allLines.find(priceBelowList);
     if (cheaper) {
       return `El precio de «${cheaper.productName}» no puede ser menor que ${formatMoney(cheaper.priceCents)}.`;
     }
-    const raised = lines.find((line) => {
+    const raised = allLines.find((line) => {
       if (!isDiscontinuedLine(line)) return false;
       const next = parseDecimal(line.quantity, 3);
       const before = parseDecimal(line.originalQuantity, 3);
@@ -1315,6 +1622,39 @@ function createInvoiceSubmodule(cfg) {
       }
       return item;
     });
+    if (hasServices) {
+      input.services = services.map((block) => {
+        const item = {};
+        if (editing && block.position != null) item.position = block.position;
+        else item.serviceId = block.serviceId;
+        const price = String(block.price ?? "").trim();
+        if (price && price !== block.originalPrice) item.price = price;
+        const discountValue = String(block.discountValue ?? "").trim();
+        if (block.discountKind && discountValue) {
+          item.discountKind = block.discountKind;
+          item.discountValue = discountValue;
+        }
+        item.products = block.products.map((line) => {
+          const product = {};
+          if (editing && line.position != null)
+            product.position = line.position;
+          else product.productId = line.productId;
+          if (line.productId != null && line.unitId != null)
+            product.unitId = line.unitId;
+          product.quantity = String(line.quantity).trim();
+          const salePrice = String(line.salePrice ?? "").trim();
+          if (salePrice && salePrice !== line.originalSalePrice)
+            product.unitPrice = salePrice;
+          const value = String(line.discountValue ?? "").trim();
+          if (line.discountKind && value) {
+            product.discountKind = line.discountKind;
+            product.discountValue = value;
+          }
+          return product;
+        });
+        return item;
+      });
+    }
     return input;
   }
 
@@ -1329,7 +1669,7 @@ function createInvoiceSubmodule(cfg) {
     if (
       contactId == null ||
       !invoiceDate ||
-      !lines.length ||
+      (!lines.length && !services.length) ||
       (associated && !associatedId)
     ) {
       if (contactId == null) {
@@ -1585,14 +1925,14 @@ function createInvoiceSubmodule(cfg) {
     const products = document.getElementById(`${cfg.field}-ver-productos`);
     if (products) {
       products.replaceChildren();
-      for (const [index, line] of (detail?.lines ?? []).entries()) {
+      const detailRow = (line, label) => {
         const row = document.createElement("div");
         row.className = "li-row li-body li-body-readonly";
         // En garantía e insumos el precio de la línea es el costo real.
         // CV-01: se muestra lo escrito ("2 Caja"), no lo que se movió.
         const entered = line?.entered ?? null;
         for (const text of [
-          String(index + 1),
+          label,
           line?.productName ?? "",
           String(entered?.quantity ?? line?.quantity ?? ""),
           entered?.abbreviation ??
@@ -1612,7 +1952,40 @@ function createInvoiceSubmodule(cfg) {
           delivered.textContent = `Entregado: ${line.deliveredQuantity} de ${line.quantity}`;
           row.children[2]?.append(delivered);
         }
-        products.append(row);
+        return row;
+      };
+      const detailLines = detail?.lines ?? [];
+      detailLines
+        .filter((line) => line?.servicePosition == null)
+        .forEach((line, index) =>
+          products.append(detailRow(line, String(index + 1))),
+        );
+      // SV-02: cada servicio con su precio y, debajo, sus productos.
+      for (const [blockIndex, service] of (detail?.services ?? []).entries()) {
+        const label = `S${blockIndex + 1}`;
+        const head = document.createElement("div");
+        head.className = "li-row li-body li-body-readonly li-service-head";
+        const discount = service.discountCents
+          ? ` (−${formatMoney(service.discountCents)})`
+          : "";
+        for (const text of [
+          label,
+          `Servicio: ${service.name}`,
+          "1",
+          "—",
+          `${formatMoney(service.priceCents)}${discount}`,
+          formatMoney(service.totalCents),
+        ]) {
+          const cell = document.createElement("div");
+          cell.textContent = text;
+          head.append(cell);
+        }
+        products.append(head);
+        detailLines
+          .filter((line) => line?.servicePosition === service.position)
+          .forEach((line, index) =>
+            products.append(detailRow(line, `${label}.${index + 1}`)),
+          );
       }
     }
 

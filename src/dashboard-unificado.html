@@ -1020,6 +1020,12 @@
           </a>
         </li>
         <li>
+          <a href="#" data-page="servicios">
+            <svg class="icon"><use href="#icon-tools"></use></svg>
+            <span class="text">Servicios</span>
+          </a>
+        </li>
+        <li>
           <a href="#" data-page="clientes">
             <svg class="icon"><use href="#icon-users-two"></use></svg>
             <span class="text">Clientes</span>
@@ -2533,6 +2539,190 @@
                 <svg class="icon icon-16">
                   <use href="#icon-edit"></use>
                 </svg>
+                Editar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== SERVICIOS (spec-06 SV-01) ===================== -->
+        <div id="page-servicios" class="page">
+          <h1 class="page-title">Servicios</h1>
+          <div class="section-toolbar">
+            <div class="view-tabs">
+              <button class="tab active" id="tab-servicio-list">
+                Servicios
+              </button>
+              <button class="tab" id="tab-servicio-create">
+                Crear Nuevo Servicio
+              </button>
+            </div>
+            <div class="search-bar" id="servicio-search-bar">
+              <input
+                type="text"
+                id="servicio-search"
+                placeholder="Buscar servicio..."
+                aria-label="Buscar servicio"
+              />
+              <button type="button" aria-label="Buscar">
+                <svg class="icon text-on-dark">
+                  <use href="#icon-search"></use>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Vista: listado -->
+          <div id="servicio-list" class="config-subview active">
+            <table class="list-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Descripción</th>
+                  <th class="text-right">Precio sugerido</th>
+                  <th class="text-center">Productos</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="servicios-body"></tbody>
+            </table>
+          </div>
+
+          <!-- Vista: crear / editar servicio -->
+          <div id="servicio-create" class="config-subview">
+            <form class="form-card" id="servicio-form" novalidate>
+              <div>
+                <h3 id="servicio-form-title">Datos del Servicio</h3>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="servicio-nombre"
+                    >Nombre <span class="required">*</span></label
+                  >
+                  <input
+                    type="text"
+                    id="servicio-nombre"
+                    placeholder="Ej. Instalación de paneles solares"
+                    required
+                  />
+                </div>
+                <div class="field">
+                  <label for="servicio-precio">Precio sugerido (USD)</label>
+                  <input
+                    type="text"
+                    id="servicio-precio"
+                    inputmode="decimal"
+                    placeholder="Ej. 50,00"
+                  />
+                </div>
+                <div class="field">
+                  <label for="servicio-descripcion">Descripción</label>
+                  <input
+                    type="text"
+                    id="servicio-descripcion"
+                    placeholder="Ej. Montaje y conexión"
+                  />
+                </div>
+              </div>
+              <h3 class="stack-sm">Productos del servicio</h3>
+              <div class="autocomplete-row stack-sm">
+                <input
+                  type="text"
+                  id="servicio-buscar-producto"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded="false"
+                  autocomplete="off"
+                  placeholder="Buscar producto para agregar..."
+                />
+              </div>
+              <div class="line-items">
+                <div class="li-row li-head li-row-service">
+                  <div>No</div>
+                  <div>Producto</div>
+                  <div>Cantidad sugerida</div>
+                  <div>Unidad</div>
+                  <div>Acciones</div>
+                </div>
+                <div id="servicio-productos-body"></div>
+              </div>
+              <div class="form-actions">
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  data-servicio-action="cancel"
+                >
+                  Cancelar
+                </button>
+                <button type="submit" class="btn-primary">
+                  Guardar Servicio
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Vista: ver servicio -->
+          <div id="servicio-ver" class="config-subview">
+            <div class="cat-view-crumb">
+              <button
+                type="button"
+                class="cat-view-back"
+                data-servicio-detail-action="back"
+              >
+                <svg class="icon"><use href="#icon-chevron-left"></use></svg>
+                Servicios
+              </button>
+            </div>
+            <div class="pv-header">
+              <div>
+                <span class="pv-id" id="servicio-ver-id"></span>
+                <h2 class="pv-nombre" id="servicio-ver-nombre"></h2>
+                <div class="pv-tags">
+                  <span class="kpi-tag"
+                    ><span id="servicio-ver-descripcion"></span
+                  ></span>
+                </div>
+              </div>
+            </div>
+            <div class="kpi-hero-grid pv-hero-grid">
+              <div class="kpi-hero tone-blue">
+                <div class="kpi-hero-top">
+                  <span class="kpi-hero-label">Precio sugerido</span>
+                  <div class="kpi-icon">
+                    <svg class="icon">
+                      <use href="#icon-dollar-circle"></use>
+                    </svg>
+                  </div>
+                </div>
+                <div class="kpi-hero-value" id="servicio-ver-precio"></div>
+              </div>
+              <div class="kpi-hero tone-green">
+                <div class="kpi-hero-top">
+                  <span class="kpi-hero-label">Productos</span>
+                  <div class="kpi-icon">
+                    <svg class="icon"><use href="#icon-cube-scan"></use></svg>
+                  </div>
+                </div>
+                <div class="kpi-hero-value" id="servicio-ver-cantidad"></div>
+              </div>
+            </div>
+            <h3 class="cat-view-section-title stack-sm">Productos sugeridos</h3>
+            <div id="servicio-ver-productos" class="pv-invoice-grid"></div>
+            <div class="form-actions">
+              <button
+                type="button"
+                class="btn-danger"
+                data-servicio-detail-action="delete"
+              >
+                <svg class="icon icon-16"><use href="#icon-trash"></use></svg>
+                Eliminar Servicio
+              </button>
+              <button
+                type="button"
+                class="btn-primary"
+                data-servicio-detail-action="edit"
+              >
+                <svg class="icon icon-16"><use href="#icon-edit"></use></svg>
                 Editar
               </button>
             </div>
@@ -4601,13 +4791,32 @@
                   <div class="autocomplete-row flex-320">
                     <input
                       type="text"
+                      id="factura-servicio-buscar-servicio"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      autocomplete="off"
+                      placeholder="Buscar servicio para agregar a la factura..."
+                    />
+                  </div>
+                  <div class="autocomplete-row flex-320">
+                    <input
+                      type="text"
                       id="factura-servicio-buscar"
                       role="combobox"
                       aria-autocomplete="list"
                       aria-expanded="false"
                       autocomplete="off"
-                      placeholder="Buscar insumo para agregar a la factura..."
+                      placeholder="Buscar producto para agregar a la factura..."
                     />
+                  </div>
+                  <div class="field field-select-item">
+                    <label for="factura-servicio-destino"
+                      >Agregar el producto a</label
+                    >
+                    <select id="factura-servicio-destino">
+                      <option value="">Productos sueltos</option>
+                    </select>
                   </div>
                 </div>
 
@@ -4623,6 +4832,10 @@
                   </div>
                   <div id="factura-servicio-lineas-body"></div>
                 </div>
+                <div
+                  id="factura-servicio-servicios-body"
+                  class="service-blocks"
+                ></div>
               </div>
 
               <div class="factura-form-row items-start">
@@ -7195,6 +7408,7 @@
     <script type="module" src="./js/views/usuarios.js"></script>
     <script type="module" src="./js/views/perfil.js"></script>
     <script type="module" src="./js/views/categoriasView.js"></script>
+    <script type="module" src="./js/views/serviciosView.js"></script>
     <script type="module" src="./js/views/unidadesView.js"></script>
     <script type="module" src="./js/views/productosView.js"></script>
     <script type="module" src="./js/views/dashboardView.js"></script>

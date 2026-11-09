@@ -111,33 +111,56 @@ pub fn build_invoice_document(
             .clone()
             .filter(|value| !value.is_empty()),
     });
-    let lines = detail
+    // CV-01: se imprime lo escrito ("2 Caja"), no lo que se movió.
+    let print_line = |line: &crate::models::invoice_line::InvoiceLineDetail| match &line.entered {
+        Some(entered) => PrintLine {
+            name: line.product_name.clone(),
+            quantity: entered.quantity.clone(),
+            unit: entered.abbreviation.clone(),
+            unit_price_cents: entered.unit_price_cents,
+            subtotal_cents: line.gross_cents.unwrap_or(line.subtotal_cents),
+            discount_cents: line.discount_cents,
+        },
+        None => PrintLine {
+            name: line.product_name.clone(),
+            quantity: line.quantity.clone(),
+            unit: line
+                .unit_abbreviation
+                .clone()
+                .or_else(|| line.unit_name.clone())
+                .unwrap_or_default(),
+            unit_price_cents: line.unit_price_cents,
+            subtotal_cents: line.gross_cents.unwrap_or(line.subtotal_cents),
+            discount_cents: line.discount_cents,
+        },
+    };
+    // spec-06 SV-02: productos sueltos y, después, cada servicio con los suyos.
+    let mut lines: Vec<PrintLine> = detail
         .lines
         .iter()
-        // CV-01: se imprime lo escrito ("2 Caja"), no lo que se movió.
-        .map(|line| match &line.entered {
-            Some(entered) => PrintLine {
-                name: line.product_name.clone(),
-                quantity: entered.quantity.clone(),
-                unit: entered.abbreviation.clone(),
-                unit_price_cents: entered.unit_price_cents,
-                subtotal_cents: line.gross_cents.unwrap_or(line.subtotal_cents),
-                discount_cents: line.discount_cents,
-            },
-            None => PrintLine {
-                name: line.product_name.clone(),
-                quantity: line.quantity.clone(),
-                unit: line
-                    .unit_abbreviation
-                    .clone()
-                    .or_else(|| line.unit_name.clone())
-                    .unwrap_or_default(),
-                unit_price_cents: line.unit_price_cents,
-                subtotal_cents: line.gross_cents.unwrap_or(line.subtotal_cents),
-                discount_cents: line.discount_cents,
-            },
-        })
+        .filter(|line| line.service_position.is_none())
+        .map(print_line)
         .collect();
+    for service in &detail.services {
+        lines.push(PrintLine {
+            name: format!("Servicio: {}", service.name),
+            quantity: "1".to_owned(),
+            unit: String::new(),
+            unit_price_cents: service.price_cents,
+            subtotal_cents: service.price_cents,
+            discount_cents: Some(service.discount_cents).filter(|cents| *cents > 0),
+        });
+        lines.extend(
+            detail
+                .lines
+                .iter()
+                .filter(|line| line.service_position == Some(service.position))
+                .map(|line| PrintLine {
+                    name: format!("  {}", line.product_name),
+                    ..print_line(line)
+                }),
+        );
+    }
     InvoicePrintModel {
         title: title_for(invoice_type).to_owned(),
         number: detail.number.clone(),
@@ -485,6 +508,7 @@ mod tests {
     fn detail(invoice_type: &str) -> InvoiceDetail {
         let has_contact = invoice_type != "P";
         InvoiceDetail {
+            services: Vec::new(),
             id: 7,
             number: format!("{invoice_type}-00007"),
             invoice_type: invoice_type.into(),
@@ -521,6 +545,7 @@ mod tests {
                 discount_value: None,
                 discount_cents: None,
                 delivered_quantity: "0".into(),
+                service_position: None,
                 position: 1,
                 product_id_original: 3,
                 product_name: "Cable UTP".into(),

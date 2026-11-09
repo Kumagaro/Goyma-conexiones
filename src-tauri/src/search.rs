@@ -374,7 +374,7 @@ pub fn invoice_list_stats(
     invoice_id: i64,
 ) -> rusqlite::Result<(i64, i64, String)> {
     connection.query_row(
-        "SELECT COALESCE(SUM(il.subtotalCents), 0), COUNT(il.id), i.createdByName
+        "SELECT COALESCE(SUM(il.subtotalCents), 0) + (SELECT COALESCE(SUM(s.totalCents), 0) FROM invoiceServiceLines s WHERE s.invoiceId = i.id), COUNT(il.id), i.createdByName
          FROM invoices i LEFT JOIN invoiceLines il ON il.invoiceId = i.id
          WHERE i.id = ?1 GROUP BY i.id",
         [invoice_id],

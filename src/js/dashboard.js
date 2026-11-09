@@ -77,6 +77,7 @@ function toggleSubMenu(button) {
 const knownPages = [
   "dashboard",
   "productos",
+  "servicios",
   "categorias",
   "clientes",
   "proveedores",
@@ -340,6 +341,7 @@ const PAGINABLES = [
   { id: "productos-body" },
   { id: "productos-condiciones-body" },
   { id: "categorias-body" },
+  { id: "servicios-body" },
   { id: "clientes-body" },
   { id: "proveedores-body" },
   { id: "usuarios-body" },

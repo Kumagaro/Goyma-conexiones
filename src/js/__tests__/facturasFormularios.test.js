@@ -76,9 +76,16 @@ vi.mock("../components/confirmDialog.js", () => ({
   confirmDialog: vi.fn(() => Promise.resolve(true)),
 }));
 
+vi.mock("../services/servicesService.js", () => ({
+  listServices: vi.fn(),
+  getService: vi.fn(),
+  createService: vi.fn(),
+}));
+
 // Con isolate:false los módulos se comparten entre archivos de test: se
 // recarga la vista para que use los mocks de este archivo.
 let invoices, clients, suppliers, history, products, confirmDialog, view;
+let catalog;
 let pagesHtml = "";
 
 beforeAll(async () => {
@@ -88,6 +95,7 @@ beforeAll(async () => {
   suppliers = await import("../services/suppliersService.js");
   history = await import("../services/historyService.js");
   products = await import("../services/productsService.js");
+  catalog = await import("../services/servicesService.js");
   ({ confirmDialog } = await import("../components/confirmDialog.js"));
   view = await import("../views/facturasView.js");
   pagesHtml = await loadInvoicePagesHtml();
@@ -1705,5 +1713,140 @@ describe("unidad por línea: detalle, edición y pérdida (spec-04 CV-01)", () =
       quantity: "0,25",
       unitId: 9,
     });
+  });
+});
+
+describe("servicios en la factura de servicio (spec-06 SV-02)", () => {
+  const INSTALACION = {
+    id: 11,
+    name: "Instalación",
+    description: null,
+    suggestedPriceCents: 5000,
+    products: [
+      {
+        productId: 7,
+        name: "Cable UTP",
+        unitAbbreviation: "m",
+        suggestedQuantity: "3",
+        status: "active",
+        sellingPriceCents: 250,
+      },
+      {
+        productId: 9,
+        name: "Router",
+        unitAbbreviation: "u",
+        suggestedQuantity: "1",
+        status: "discontinued",
+        sellingPriceCents: 900,
+      },
+    ],
+  };
+
+  it("agrega un servicio con sus productos, omite el descontinuado y envía el bloque", async () => {
+    catalog.listServices.mockResolvedValue([
+      { id: 11, name: "Instalación", suggestedPriceCents: 5000 },
+    ]);
+    catalog.getService.mockResolvedValue(INSTALACION);
+    invoices.createServiceInvoice.mockResolvedValue({
+      invoiceId: 3,
+      number: "S-00003",
+    });
+    await chooseFromCombobox("factura-servicio-cliente", "ana", "Ana Pérez");
+    await chooseFromCombobox(
+      "factura-servicio-buscar-servicio",
+      "insta",
+      "Instalación",
+    );
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("factura-servicio-servicios-body").textContent,
+      ).toContain("Servicio: Instalación"),
+    );
+    expect(feedback()).toContain("Se omitió Router: está descontinuado");
+    // 50,00 + 3 × 2,50.
+    expect(
+      document.getElementById("factura-servicio-total").textContent,
+    ).toContain("57,50");
+
+    // Un extra solo para este servicio y un producto suelto.
+    setValue("factura-servicio-destino", "0", "change");
+    history.searchProductsForInvoice.mockResolvedValue([
+      CABLE,
+      { ...CABLE, id: 12, name: "Canaleta" },
+    ]);
+    await chooseFromCombobox("factura-servicio-buscar", "ca", "Canaleta");
+    setValue("factura-servicio-destino", "", "change");
+    await chooseFromCombobox("factura-servicio-buscar", "ca", "Cable UTP");
+    const block = document.getElementById("factura-servicio-servicios-body");
+    const servicePrice = block.querySelector(
+      'input[aria-label="Precio de Instalación"]',
+    );
+    servicePrice.value = "40";
+    servicePrice.dispatchEvent(new Event("input", { bubbles: true }));
+    setValue("factura-servicio-fecha-emision", "2026-02-10");
+    submitForm("factura-servicios-form");
+    await vi.waitFor(() =>
+      expect(invoices.createServiceInvoice).toHaveBeenCalledTimes(1),
+    );
+    const input = invoices.createServiceInvoice.mock.calls[0][0];
+    expect(input.lines).toEqual([{ productId: 7, quantity: "1" }]);
+    expect(input.services).toEqual([
+      {
+        serviceId: 11,
+        price: "40",
+        products: [
+          { productId: 7, quantity: "3" },
+          { productId: 12, quantity: "1" },
+        ],
+      },
+    ]);
+  });
+
+  it("al editar carga cada servicio con sus productos y envía sus posiciones", async () => {
+    invoices.getInvoice.mockResolvedValue({
+      ...PENDING_SALE,
+      number: "S-00004",
+      invoiceType: "S",
+      lines: [{ ...PENDING_SALE.lines[0], position: 1, servicePosition: 1 }],
+      services: [
+        {
+          position: 1,
+          serviceId: 11,
+          name: "Instalación",
+          priceCents: 5000,
+          discountKind: null,
+          discountValue: null,
+          discountCents: 0,
+          totalCents: 5000,
+        },
+      ],
+    });
+    invoices.updateServiceInvoice.mockResolvedValue({
+      invoiceId: 1,
+      number: "S-00004",
+    });
+    await view.__testHooks.openServiceDetail(1);
+    expect(
+      document.getElementById("factura-servicio-ver-productos").textContent,
+    ).toContain("Servicio: Instalación");
+    document.getElementById("factura-servicio-editar").click();
+    await vi.waitFor(() =>
+      expect(
+        document.getElementById("factura-servicio-servicios-body").textContent,
+      ).toContain("Cable UTP"),
+    );
+    // No es un producto suelto.
+    expect(
+      document.getElementById("factura-servicio-lineas-body").textContent,
+    ).not.toContain("Cable UTP");
+    submitForm("factura-servicios-form");
+    await vi.waitFor(() =>
+      expect(invoices.updateServiceInvoice).toHaveBeenCalledTimes(1),
+    );
+    const input = invoices.updateServiceInvoice.mock.calls[0][0];
+    expect(input.lines).toEqual([]);
+    expect(input.services).toEqual([
+      { position: 1, products: [{ position: 1, quantity: "2" }] },
+    ]);
   });
 });

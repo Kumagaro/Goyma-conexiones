@@ -13,6 +13,7 @@ pub mod lot;
 pub mod notification;
 pub mod product;
 pub mod product_movement;
+pub mod service;
 pub mod session;
 pub mod settings;
 pub mod supplier;

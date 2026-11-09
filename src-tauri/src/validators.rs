@@ -469,6 +469,12 @@ pub fn parse_cost_cents(raw: &str) -> Result<i64, AppError> {
     Ok(value as i64)
 }
 
+/// Precio de un servicio (`spec-06` S-04): admite 0, sin precio mínimo.
+pub fn parse_service_price_cents(raw: &str) -> Result<i64, AppError> {
+    let value = parse_scaled(raw, 8, 2, 0, 9_999_999_999)?;
+    Ok(value as i64)
+}
+
 pub fn parse_percent_hundredths(raw: &str) -> Result<i64, AppError> {
     let value = parse_scaled(raw, 6, 2, 0, 100_000)?;
     Ok(value as i64)

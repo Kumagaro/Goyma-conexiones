@@ -60,6 +60,50 @@ pub fn price_line(
         ));
     }
     let gross_cents = gross_of(unit_price_cents);
+    discounted(
+        product_name,
+        unit_price_cents,
+        gross_cents,
+        discount_kind,
+        discount_value,
+    )
+}
+
+/// Precio de un servicio en la factura (`spec-06` SV-02, S-04): libre, sin
+/// mínimo (puede ser 0), con descuento como cualquier línea.
+pub fn price_service(
+    service_name: &str,
+    default_price_cents: i64,
+    requested_price: Option<&str>,
+    discount_kind: Option<&str>,
+    discount_value: Option<&str>,
+) -> Result<LinePrice, AppError> {
+    let price_cents = match requested_price.map(str::trim).filter(|raw| !raw.is_empty()) {
+        Some(raw) => crate::validators::parse_service_price_cents(raw).map_err(|_| {
+            validation_failed(
+                &format!("El precio de «{service_name}» no es válido"),
+                "invalid service price",
+            )
+        })?,
+        None => default_price_cents,
+    };
+    discounted(
+        service_name,
+        price_cents,
+        price_cents,
+        discount_kind,
+        discount_value,
+    )
+}
+
+/// Aplica el descuento (en centésimas de % o en céntimos) sobre el bruto.
+fn discounted(
+    product_name: &str,
+    unit_price_cents: i64,
+    gross_cents: i64,
+    discount_kind: Option<&str>,
+    discount_value: Option<&str>,
+) -> Result<LinePrice, AppError> {
     let discount_value = discount_value.map(str::trim).filter(|raw| !raw.is_empty());
     let invalid_discount = || {
         validation_failed(
@@ -109,7 +153,26 @@ fn validation_failed(message: &str, cause: &str) -> AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::{calculated_price_cents, price_line, selling_price_cents};
+    use super::{calculated_price_cents, price_line, price_service, selling_price_cents};
+
+    #[test]
+    fn a_service_price_is_free_and_takes_a_discount() {
+        let free = price_service("Instalación", 5_000, Some("0"), None, None).unwrap();
+        assert_eq!((free.unit_price_cents, free.subtotal_cents), (0, 0));
+        let suggested =
+            price_service("Instalación", 5_000, None, Some("percent"), Some("10")).unwrap();
+        assert_eq!(
+            (
+                suggested.gross_cents,
+                suggested.discount_cents,
+                suggested.subtotal_cents
+            ),
+            (Some(5_000), 500, 4_500)
+        );
+        let error = price_service("Instalación", 5_000, Some("10"), Some("amount"), Some("11"))
+            .unwrap_err();
+        assert_eq!(error.code, "discountTooLarge");
+    }
 
     fn gross(quantity_milli: i64) -> impl Fn(i64) -> i64 {
         move |price| (quantity_milli * price + 500) / 1_000

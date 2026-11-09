@@ -42,6 +42,9 @@ pub struct InvoiceLineDetail {
     pub discount_cents: Option<i64>,
     /// `spec-06` EN-02: lo ya entregado de la línea (Venta y Servicio).
     pub delivered_quantity: String,
+    /// spec-06 SV-02: posición del servicio al que pertenece la línea.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_position: Option<i64>,
 }
 
 /// Unidad y cantidad escritas en la línea, y el precio por esa unidad.

@@ -114,6 +114,8 @@ struct IncomeLine {
     quantity_milli: i64,
     subtotal_cents: i64,
     cost_cents: i64,
+    /// spec-06 SV-02: precio de un servicio (no es un producto).
+    is_service: bool,
 }
 
 /// Garantía, insumos o pérdida, ubicados por su fecha de emisión (S-05).
@@ -261,8 +263,15 @@ fn read_income_lines(connection: &Connection) -> rusqlite::Result<Vec<IncomeLine
                               WHERE d.invoiceLineId = il.id), 0)
                         + (il.quantityMilli - il.deliveredMilli)
                           * COALESCE((SELECT costCents FROM products WHERE id = il.productId), 0)
+                    , 0
              FROM invoices i JOIN invoiceLines il ON il.invoiceId = i.id
-             WHERE i.type IN ('V', 'S') AND i.status = 'completed'",
+             WHERE i.type IN ('V', 'S') AND i.status = 'completed'
+             UNION ALL
+             SELECT i.id, i.type, i.paidAt,
+                    COALESCE(i.contactNationalId, 'nombre:' || i.contactFullNameNormalized), i.contactFullName,
+                    0, s.serviceName, 0, s.totalCents, 0, 1
+             FROM invoices i JOIN invoiceServiceLines s ON s.invoiceId = i.id
+             WHERE i.type = 'S' AND i.status = 'completed'",
         )?
         .query_map([], |row| {
             let Some(paid_at) = parse_utc_timestamp(&row.get::<_, String>(2)?) else {
@@ -280,6 +289,7 @@ fn read_income_lines(connection: &Connection) -> rusqlite::Result<Vec<IncomeLine
                 subtotal_cents: row.get(8)?,
                 // Costo real FIFO, con un único redondeo por línea (DB-02).
                 cost_cents: round_half_up(i128::from(row.get::<_, i64>(9)?), 1_000) as i64,
+                is_service: row.get(10)?,
             }))
         })?
         .filter_map(Result::transpose)
@@ -411,8 +421,10 @@ fn reservations_summary(
     today: NaiveDate,
 ) -> rusqlite::Result<ReservationsSummary> {
     let (count, amount_cents): (i64, i64) = connection.query_row(
-        "SELECT COUNT(DISTINCT i.id), COALESCE(SUM(il.subtotalCents), 0)
-         FROM invoices i JOIN invoiceLines il ON il.invoiceId = i.id
+        "SELECT COUNT(*), COALESCE(SUM(
+                COALESCE((SELECT SUM(il.subtotalCents) FROM invoiceLines il WHERE il.invoiceId = i.id), 0)
+                + (SELECT COALESCE(SUM(s.totalCents), 0) FROM invoiceServiceLines s WHERE s.invoiceId = i.id)), 0)
+         FROM invoices i
          WHERE i.status = 'pending' AND i.type IN ('V', 'S')",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
@@ -473,7 +485,7 @@ fn build_dashboard_kpis(
         .collect();
     let products: Vec<(i64, ProductStats)> = {
         let mut groups: HashMap<i64, ProductStats> = HashMap::new();
-        for line in &in_period {
+        for line in in_period.iter().filter(|line| !line.is_service) {
             let stats = groups.entry(line.product_key).or_default();
             stats.name.clone_from(&line.product_name);
             stats.quantity_milli += line.quantity_milli;

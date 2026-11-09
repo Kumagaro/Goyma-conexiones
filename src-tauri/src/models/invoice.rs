@@ -88,6 +88,8 @@ pub struct InvoiceDetail {
     /// RS-03: "Reservada hasta"; se conserva tras cobrar o cancelar.
     pub reserved_until: Option<String>,
     pub lines: Vec<crate::models::invoice_line::InvoiceLineDetail>,
+    /// spec-06 SV-02: servicios de una factura de servicio.
+    pub services: Vec<InvoiceServiceDetail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -223,6 +225,74 @@ pub struct ServiceInvoiceLineInput {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ServiceBlockInput {
+    pub service_id: i64,
+    /// Precio pedido; vacío = el sugerido del servicio (o 0).
+    #[serde(default)]
+    pub price: Option<String>,
+    #[serde(default)]
+    pub discount_kind: Option<String>,
+    #[serde(default)]
+    pub discount_value: Option<String>,
+    #[serde(default)]
+    pub products: Vec<ServiceInvoiceLineInput>,
+}
+
+/// `spec-06` SV-02: servicio de una factura que se edita. Con `position` es
+/// uno ya guardado (conserva nombre y servicio); sin ella, uno nuevo.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UpdateServiceBlockInput {
+    #[serde(default)]
+    pub position: Option<i64>,
+    #[serde(default)]
+    pub service_id: Option<i64>,
+    #[serde(default)]
+    pub price: Option<String>,
+    #[serde(default)]
+    pub discount_kind: Option<String>,
+    #[serde(default)]
+    pub discount_value: Option<String>,
+    #[serde(default)]
+    pub products: Vec<UpdateServiceProductInput>,
+}
+
+/// Producto de un servicio al editar: con `position`, la línea guardada; sin
+/// ella, un producto nuevo (`productId` obligatorio).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UpdateServiceProductInput {
+    #[serde(default)]
+    pub position: Option<i64>,
+    #[serde(default)]
+    pub product_id: Option<i64>,
+    pub quantity: String,
+    #[serde(default)]
+    pub unit_id: Option<i64>,
+    #[serde(default)]
+    pub unit_price: Option<String>,
+    #[serde(default)]
+    pub discount_kind: Option<String>,
+    #[serde(default)]
+    pub discount_value: Option<String>,
+}
+
+/// Servicio guardado en una factura (`spec-06` SV-02).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvoiceServiceDetail {
+    pub position: i64,
+    pub service_id: Option<i64>,
+    pub name: String,
+    pub price_cents: i64,
+    pub discount_kind: Option<String>,
+    pub discount_value: Option<i64>,
+    pub discount_cents: i64,
+    pub total_cents: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CreateServiceInvoiceInput {
     pub client_id: i64,
     pub invoice_date: String,
@@ -232,7 +302,11 @@ pub struct CreateServiceInvoiceInput {
     pub notes: Option<String>,
     #[serde(default)]
     pub payment_method: Option<String>,
+    #[serde(default)]
     pub lines: Vec<ServiceInvoiceLineInput>,
+    /// spec-06 SV-02: servicios del catálogo con sus productos.
+    #[serde(default)]
+    pub services: Vec<ServiceBlockInput>,
     /// RS-01: fecha límite de la reserva (`AAAA-MM-DD`); sin ella, venta normal.
     #[serde(default)]
     pub reserved_until: Option<String>,
@@ -340,7 +414,11 @@ pub struct UpdateServiceInvoiceInput {
     pub invoice_date: String,
     #[serde(default)]
     pub notes: Option<String>,
+    #[serde(default)]
     pub lines: Vec<UpdateOutgoingInvoiceLineInput>,
+    /// spec-06 SV-02: servicios de la factura con sus productos.
+    #[serde(default)]
+    pub services: Vec<UpdateServiceBlockInput>,
     /// RS-01: fecha límite de la reserva (`AAAA-MM-DD`); sin ella, venta normal.
     #[serde(default)]
     pub reserved_until: Option<String>,
