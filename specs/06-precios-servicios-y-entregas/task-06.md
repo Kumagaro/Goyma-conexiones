@@ -13,7 +13,8 @@
 - [x] Confirmar con el dueño los supuestos S-01 a S-17 de `spec-06` §8 y anotar las respuestas.
   - Confirmados tal como están (2026-11-08).
 - [x] Línea base: `cargo test` (478), `npm test` (419), clippy, fmt y prettier en verde.
-- [ ] Preparar una base de prueba 0.2.0 con datos en todas las tablas (fixture de Rust) para los tests de migración.
+- [x] Preparar una base de prueba 0.2.0 con datos en todas las tablas (fixture de Rust) para los tests de migración.
+  - Fixture `version_9_with_data` en `db/migrations.rs` (datos de 0.2.0 tras la migración 9 de la fase 1); lo usan los tests de la migración 10.
 
 ## 1. Fase 1 — Costo, precio, umbral y cuentas por cobrar
 
@@ -147,5 +148,7 @@
 ## 6. Cierre de la spec
 
 - [ ] Verificación manual en la app real con una copia de una base 0.2.0 con datos.
-- [ ] Actualizar `Agents.md` §1 (estado) y `pendientes.md`.
-- [ ] Subir la versión a 0.3.0 y compilar el instalador.
+- [x] Actualizar `Agents.md` §1 (estado) y `pendientes.md`.
+  - 2026-11-09: spec-06 no deja pendientes nuevos (nota en `pendientes.md`). De paso se corrigió `pendientes.md`: las filas resueltas de PEN-06, PEN-07, PEN-19 y PEN-20 habían quedado sueltas al principio del archivo y la tabla las mostraba como pendientes.
+- [x] Subir la versión a 0.3.0 y compilar el instalador.
+  - 2026-11-09: versión 0.3.0 en `package.json`, `Cargo.toml` y `tauri.conf.json`; instalador `Goyma Conexiones_0.3.0_x64-setup.exe` (227 MB) en `src-tauri/target/release/bundle/nsis/`.
