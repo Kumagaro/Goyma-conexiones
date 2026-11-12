@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Goyma Conexiones</title>
+    <meta
+      name="description"
+      content="Aplicación de escritorio para la gestión de un negocio en Cuba: inventario, ventas, servicios y facturas."
+    />
+    <style>
+      :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --line: #e2e8f0;
+        --accent: #2563eb;
+        --bg: #f8fafc;
+        --card: #ffffff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        line-height: 1.6;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 48px 16px 64px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 2rem;
+      }
+      .lead {
+        margin: 0 0 32px;
+        color: var(--muted);
+        font-size: 1.125rem;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 1.125rem;
+      }
+      ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      a {
+        color: var(--accent);
+      }
+      footer {
+        margin-top: 32px;
+        color: var(--muted);
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Goyma Conexiones</h1>
+      <p class="lead">
+        Aplicación de escritorio para la gestión de un negocio en Cuba.
+      </p>
+
+      <section>
+        <h2>Qué hace</h2>
+        <ul>
+          <li>Inventario de productos, con costo, precio y existencias.</li>
+          <li>Ventas, servicios, compras y entregas, con sus facturas.</li>
+          <li>Clientes, proveedores y cuentas por cobrar.</li>
+          <li>Tasas de cambio de las monedas que usa el negocio.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Cómo funciona</h2>
+        <p>
+          Es una aplicación de escritorio para Windows que guarda todos los
+          datos en el propio equipo y funciona sin conexión a internet. No tiene
+          servidor ni comparte los datos del negocio con nadie.
+        </p>
+      </section>
+
+      <section>
+        <h2>Tasas de cambio</h2>
+        <p>
+          Cuando hay conexión, la aplicación puede consultar la tasa
+          representativa del mercado informal en la
+          <a href="https://tasas.eltoque.com/docs/">API de tasas de elTOQUE</a>,
+          desde su propio programa y como mucho unas pocas veces al día. Las
+          tasas obtenidas se muestran citando a elTOQUE como fuente.
+        </p>
+      </section>
+
+      <footer>Goyma Conexiones · Cuba</footer>
+    </main>
+  </body>
+</html>

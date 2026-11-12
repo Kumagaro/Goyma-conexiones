@@ -26,6 +26,7 @@ Registro de lo que cada spec deja explícitamente fuera y debe retomarse en una 
 | PEN-20 | ~~Impresión de facturas y exportación formal a PDF.~~ **Resuelto** por `cierre-del-mvp` fase 3 (IM-01, IM-02: vista previa A4 con `window.print()` y PDF del backend con el mismo modelo, en los seis tipos y sin estado; jsPDF retirado). | Documento de requisitos (revisión 2026-10-28) | — |
 | PEN-21 | ~~Guardado automático y borradores~~ **Resuelto** por `cierre-del-mvp` fase 5 (BR-01 a BR-03: guardado automático en todos los formularios salvo los de sesión, recuperación y sección Borradores; falta solo la verificación manual en la app real). | Documento de requisitos (revisión 2026-10-28) | Borradores |
 | PEN-22 | ~~Importación y exportación con Excel en CSV~~ **Resuelto** por `cierre-del-mvp` fase 5 (CSV-01, CSV-02: exportar los listados con sus filtros e importar con resumen de filas omitidas; falta solo la verificación manual en la app real). | Documento de requisitos (revisión 2026-10-28) | Por decidir (Respaldo o Exportación) |
+| PEN-23 | **Tasas de cambio automáticas desde la API de elTOQUE.** Traer desde el backend la tasa del mercado informal para las monedas de CF-02, con la clave de API que introduce el Administrador, citando a elTOQUE como fuente y manteniendo la tasa manual sin conexión. Autorizado por `Constitution.md` 2.0.0 (§2.IV); datos de la API en `docs/api-eltoque.md`. | Decisión del dueño (2026-11-11) | Tasas automáticas (`spec-07`) |
 
 ---
 
@@ -38,11 +39,11 @@ Registro de lo que cada spec deja explícitamente fuera y debe retomarse en una 
 
 ---
 
-**Estado actual de la tabla:** PEN-01 a PEN-22, de los cuales:
+**Estado actual de la tabla:** PEN-01 a PEN-23, de los cuales:
 
 - **Resueltos:** PEN-01, PEN-02, PEN-03, PEN-04, PEN-05, PEN-06, PEN-07, PEN-08, PEN-09, PEN-10, PEN-12, PEN-13, PEN-14, PEN-15, PEN-16, PEN-18, PEN-19, PEN-20, PEN-21, PEN-22.
 - **Movidos:** PEN-11 (→ PEN-15).
-- **Pendientes:** PEN-17.
+- **Pendientes:** PEN-17, PEN-23.
 
 **Cobertura del documento de requisitos (revisión 2026-10-28):** RF-001 a RF-097 están en `autenticacion-y-usuarios`, `inventario-productos` y `contactos-facturacion-historial` (con las sustituciones decididas allí, p. ej. RF-097 → PEN-15 y RF-051 → FE-08). De RF-098 a RF-135, cada requisito tiene su pendiente: RF-098–RF-114 → PEN-16; RF-115–RF-118 y RF-121–RF-124 → PEN-01/PEN-02; RF-119–RF-120 → PEN-18; RF-125–RF-127 → PEN-07; RF-128 → PEN-19; RF-129–RF-132 → PEN-20; RF-133–RF-135 → PEN-21.
 

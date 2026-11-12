@@ -1,8 +1,8 @@
 # Constitution — Goyma Conexiones
 
-**Versión:** 1.3.0
+**Versión:** 2.0.0
 **Ratificada:** 2026-09-20
-**Última modificación:** 2026-10-28
+**Última modificación:** 2026-11-11
 
 Este documento define los principios no negociables del proyecto Goyma Conexiones. Toda especificación (`spec.md`), plan técnico (`plan.md`) y lista de tareas (`tasks.md`) dentro de `specs/` debe cumplir estos principios. Cualquier violación debe justificarse explícitamente en el plan correspondiente (sección "Complexity Tracking") o la spec debe rediseñarse.
 
@@ -10,7 +10,7 @@ Este documento define los principios no negociables del proyecto Goyma Conexione
 
 ## 1. Naturaleza del proyecto
 
-Goyma Conexiones es una aplicación de **escritorio, 100% local y offline**, construida con **Tauri (backend en Rust + frontend en HTML/CSS/JS vanilla, sin frameworks como React o Vue)**. No existe servidor remoto. La persistencia se realiza en una única base de datos **SQLite local**.
+Goyma Conexiones es una aplicación de **escritorio, local y offline-first**, construida con **Tauri (backend en Rust + frontend en HTML/CSS/JS vanilla, sin frameworks como React o Vue)**. No existe servidor propio. La persistencia se realiza en una única base de datos **SQLite local**. Solo consulta los servicios externos que autoriza §2.IV, y funciona completa sin ellos.
 
 La aplicación gestiona: inventario, ventas, clientes, proveedores, facturas, categorías, unidades y usuarios, con autenticación local y dos roles: **Administrador** y **Contador**.
 
@@ -44,9 +44,24 @@ Se sigue una disciplina de test-first: los tests se escriben antes o junto con e
 
 Sin embargo, el objetivo del código **nunca** es "pasar el test". El código debe resolver el problema real de forma completa y correcta; el test existe únicamente para **validar** que ese comportamiento correcto se mantiene, no para definir el mínimo aceptable. Está prohibido escribir implementaciones que hagan trampa para satisfacer un test (valores hardcodeados, casos especiales artificiales, lógica incompleta que "coincidentemente" pasa).
 
-### IV. Offline-first absoluto
+### IV. Offline-first (NO NEGOCIABLE)
 
-El proyecto no depende de ningún servicio de red, API externa, servidor propio o de terceros para funcionar. Toda funcionalidad —incluida la recuperación de contraseña, que verifica identidad (usuario + teléfono + carnet) contra la base de datos local— debe operar sin conexión a internet.
+El proyecto no depende de ningún servicio de red ni de un servidor propio para funcionar. Toda funcionalidad —incluida la recuperación de contraseña, que verifica identidad (usuario + teléfono + carnet) contra la base de datos local— debe operar sin conexión a internet.
+
+**Servicios externos autorizados.** La aplicación puede consultar un servicio externo solo si figura en esta lista:
+
+| Servicio | Para qué | Desde |
+|---|---|---|
+| API de tasas de elTOQUE (`tasas.eltoque.com`) | Actualizar las tasas de cambio (`spec-04` CF-02) con la tasa del mercado informal | 2.0.0 |
+
+Todo servicio de la lista cumple estas reglas:
+- **Complemento, nunca dependencia:** sin conexión, o si el servicio falla, la aplicación funciona igual. La función se omite con un aviso claro en español, y lo que se hacía a mano (por ejemplo, fijar la tasa) sigue disponible.
+- **Solo desde el backend:** la llamada la hace Rust. El frontend nunca habla con un servicio externo y la CSP no se abre a dominios externos.
+- **Solo lectura y sin datos del negocio:** se piden datos públicos. No se envía nada de productos, facturas, clientes, proveedores ni usuarios.
+- **Credenciales fuera del código:** ninguna clave de API se escribe en el código, en el repositorio ni en el instalador. La introduce el Administrador en la aplicación y vive solo en la base local. Nunca se muestra completa ni se registra en el log.
+- **Condiciones del proveedor:** se respetan sus términos de uso (atribución, límites de peticiones, no compartir la clave). La interfaz cita al proveedor como fuente de los datos que trae.
+
+Añadir un servicio a la lista es una enmienda de esta constitución (§6) y requiere su propia spec.
 
 ### V. Consistencia visual e integración estricta
 
@@ -111,6 +126,7 @@ Las modificaciones a este documento requieren actualizar el número de versión 
 
 ## 7. Historial de versiones
 
+- **2.0.0 (2026-11-11):** §2.IV deja de ser "Offline-first absoluto": autoriza, en una lista cerrada, servicios externos que complementan la aplicación sin ser necesarios. El primero es la API de tasas de elTOQUE, para actualizar las tasas de cambio. Fija las reglas que debe cumplir todo servicio de la lista y que añadir uno es una enmienda. §1 se ajusta ("local y offline-first", sin servidor propio). Motivo: decisión del dueño de traer la tasa del mercado informal sin escribirla a mano. Es MAYOR porque cambia un principio: antes ninguna funcionalidad podía usar la red.
 - **1.3.0 (2026-10-28):** §4 sustituye "no se requieren migraciones versionadas" por el versionado del esquema con migraciones numeradas. Motivo: `cierre-del-mvp` introduce el respaldo y la restauración de toda la información (PEN-15), que deben sobrevivir a una actualización de la aplicación; sin migraciones, una copia de una versión anterior no se podría usar. Cambia una regla de §4, no un principio de fondo.
 - **1.2.0 (2026-09-30):** §2.VI acota el registro de errores a los inesperados o de sistema y fija la excepción de los rechazos esperados de una acción del usuario (credenciales incorrectas y datos que no pasan la validación); añade que ningún registro contiene contraseñas, hashes, datos personales ni valores ingresados. También aclara que el mensaje al usuario es específico cuando debe corregir algo y genérico ante errores internos o de autenticación (antes decía "siempre genérico"). Motivo: la regla anterior ("todo error se registra") no coincidía con la política real de las specs `autenticacion-y-usuarios` e `inventario-productos` y obligaba a documentar la misma desviación en cada `plan.md`; la redacción de los mensajes tampoco reflejaba que las specs muestran mensajes específicos de validación. Cambia el alcance de una regla, no un principio de fondo.
 - **1.1.1 (2026-09-30):** se aclara en §4 que `COLLATE NOCASE` solo pliega ASCII y que, para texto con acentos, la unicidad se declara con `UNIQUE` (o índice parcial) sobre una columna normalizada. Motivo: la regla de §4 podía leerse como suficiente para cualquier texto, pero no detecta duplicados como `Café` y `cafe`. No cambia ningún principio ni la regla de `username`.

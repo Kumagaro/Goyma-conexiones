@@ -1,13 +1,13 @@
 # Agents.md — Goyma Conexiones
 
-Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en este repositorio. Este documento complementa a `Constitution.md`: la constitución define los **principios**, este archivo define **cómo ejecutarlos en la práctica**. Ante cualquier conflicto, `Constitution.md` tiene prioridad. *(Alineado con `Constitution.md` v1.3.0.)*
+Guía operativa para cualquier agente de IA (Claude Code u otro) que trabaje en este repositorio. Este documento complementa a `Constitution.md`: la constitución define los **principios**, este archivo define **cómo ejecutarlos en la práctica**. Ante cualquier conflicto, `Constitution.md` tiene prioridad. *(Alineado con `Constitution.md` v2.0.0.)*
 
 ---
 
 ## 1. Resumen del proyecto
 
 - **Nombre:** Goyma Conexiones — sistema de gestión empresarial (inventario, ventas, clientes, proveedores, facturas, categorías, unidades, usuarios).
-- **Tipo:** Aplicación de escritorio 100% offline, sin servidor.
+- **Tipo:** Aplicación de escritorio offline-first, sin servidor propio. Funciona completa sin internet; el único servicio externo autorizado es la API de tasas de elTOQUE (`Constitution.md` §2.IV, referencia en `docs/api-eltoque.md`).
 - **Stack:**
   - Backend: **Rust** vía **Tauri** (comandos Tauri, sin framework web adicional).
   - Frontend: **HTML + CSS + JavaScript vanilla** (sin React, Vue ni similares).
@@ -120,5 +120,5 @@ No marques una tarea como completa sin haber verificado que el código funciona 
 - No mezclar inglés en comentarios/UI ni español en nombres de variables/funciones.
 - No implementar una feature sin su `spec.md` / `plan.md` / `tasks.md` correspondiente (salvo cambios triviales explícitamente autorizados por el usuario).
 - No mostrar mensajes de error técnicos al usuario final.
-- No asumir servicios externos o conexión a internet en ninguna funcionalidad.
+- No usar servicios externos fuera de la lista de `Constitution.md` §2.IV, ni hacer que una funcionalidad dependa de tener internet. Los autorizados se llaman solo desde Rust, sin datos del negocio y con la clave guardada en la base local, nunca en el código.
 - No escribir una mutación de `users` o `sessions` fuera de una función que exija `&Actor`/`&AdminActor` en su firma, ni fabricar esos tipos por fuera de `require_session`/`require_admin`. No añadir un comando protegido sin su fila en la matriz de tests de autorización.
